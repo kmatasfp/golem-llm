@@ -109,27 +109,67 @@ mod lib_tests {
             provider_config: vec![],
         }
     }
+    
+    fn setup_test_env() {
+        // Set environment variables for test, force overriding any existing values
+        if let Ok(val) = env::var("ARANGO_HOST") {
+            env::set_var("ARANGODB_HOST", val);
+        }
+        if let Ok(val) = env::var("ARANGO_PORT") {
+            env::set_var("ARANGODB_PORT", val);
+        }
+        if let Ok(val) = env::var("ARANGO_USERNAME") {
+            env::set_var("ARANGODB_USER", val);
+        }
+        if let Ok(val) = env::var("ARANGO_PASSWORD") {
+            env::set_var("ARANGODB_PASS", val);
+        }
+        if let Ok(val) = env::var("ARANGO_DATABASE") {
+            env::set_var("ARANGODB_DB", val);
+        }
+        
+        // Set defaults if neither old nor new variables are set
+        if env::var("ARANGODB_HOST").is_err() {
+            env::set_var("ARANGODB_HOST", "localhost");
+        }
+        if env::var("ARANGODB_PORT").is_err() {
+            env::set_var("ARANGODB_PORT", "8529");
+        }
+        if env::var("ARANGODB_USER").is_err() {
+            env::set_var("ARANGODB_USER", "root");
+        }
+        if env::var("ARANGODB_PASS").is_err() {
+            env::set_var("ARANGODB_PASS", "password");
+        }
+        if env::var("ARANGODB_DB").is_err() {
+            env::set_var("ARANGODB_DB", "test");
+        }
+    }
+    
     fn create_test_transaction() -> crate::Transaction {
+        setup_test_env();
         let host = env::var("ARANGODB_HOST").unwrap_or_else(|_| "localhost".to_string());
         let port: u16 = env::var("ARANGODB_PORT")
             .unwrap_or_else(|_| "8529".to_string())
             .parse()
             .expect("Invalid ARANGODB_PORT");
         let user = env::var("ARANGODB_USER").unwrap_or_else(|_| "root".to_string());
-        let pass = env::var("ARANGODB_PASS").unwrap_or_else(|_| "".to_string());
-        let db = env::var("ARANGODB_DB").unwrap_or_else(|_| "_system".to_string());
+        let pass = env::var("ARANGODB_PASS").unwrap_or_else(|_| "".to_string());        let db = env::var("ARANGODB_DB").unwrap_or_else(|_| "_system".to_string());
 
         let api = ArangoDbApi::new(&host, port, &user, &pass, &db);
-        let tx_id = api.begin_transaction(false).unwrap();
+        
+        // Ensure test collection exists
+        let _ = api.ensure_collection_exists("DurTest", golem_graph::golem::graph::schema::ContainerType::VertexContainer);
+        
+        // Begin transaction with collections declared
+        let collections = vec!["DurTest".to_string()];
+        let tx_id = api.begin_transaction_with_collections(false, collections).unwrap();
         crate::Transaction::new(std::sync::Arc::new(api), tx_id)
     }
 
     #[test]
     fn test_successful_connection() {
-        if env::var("ARANGODB_HOST").is_err() {
-            println!("Skipping test_successful_connection: ARANGODB_HOST not set");
-            return;
-        }
+        setup_test_env();
         let cfg = get_test_config();
         let graph = GraphArangoDbComponent::connect_internal(&cfg);
         assert!(graph.is_ok(), "connect_internal should succeed");
@@ -137,10 +177,15 @@ mod lib_tests {
 
     #[test]
     fn test_failed_connection_bad_credentials() {
-        if env::var("ARANGODB_HOST").is_err() {
-            println!("Skipping test_successful_connection: ARANGODB_HOST not set");
+        setup_test_env();
+        
+        // Skip this test if running without authentication (empty password)
+        if env::var("ARANGO_PASSWORD").unwrap_or_default().is_empty() && 
+           env::var("ARANGODB_PASSWORD").unwrap_or_default().is_empty() {
+            println!("Skipping test_failed_connection_bad_credentials: Running without authentication");
             return;
         }
+        
         let mut cfg = get_test_config();
         cfg.username = Some("bad_user".into());
         cfg.password = Some("bad_pass".into());
@@ -157,10 +202,7 @@ mod lib_tests {
 
     #[test]
     fn test_durability_of_committed_data() {
-        if env::var("ARANGODB_HOST").is_err() {
-            println!("Skipping test_successful_connection: ARANGODB_HOST not set");
-            return;
-        }
+        setup_test_env();
 
         let tx1 = create_test_transaction();
         let unique_id = "dur_test_123".to_string();

@@ -155,19 +155,27 @@ pub(crate) fn element_id_to_string(id: &ElementId) -> String {
 }
 
 pub(crate) fn config_from_env() -> Result<ConnectionConfig, GraphError> {
-    let host = env::var("ARANGODB_HOST")
-        .map_err(|_| GraphError::ConnectionFailed("Missing ARANGODB_HOST env var".to_string()))?;
-    let port = env::var("ARANGODB_PORT").map_or(Ok(None), |p| {
-        p.parse::<u16>()
-            .map(Some)
-            .map_err(|e| GraphError::ConnectionFailed(format!("Invalid ARANGODB_PORT: {}", e)))
-    })?;
-    let username = env::var("ARANGODB_USER")
-        .map_err(|_| GraphError::ConnectionFailed("Missing ARANGODB_USER env var".to_string()))?;
-    let password = env::var("ARANGODB_PASSWORD").map_err(|_| {
-        GraphError::ConnectionFailed("Missing ARANGODB_PASSWORD env var".to_string())
-    })?;
-    let database_name = env::var("ARANGODB_DATABASE").ok();
+    let host = env::var("ARANGO_HOST")
+        .or_else(|_| env::var("ARANGODB_HOST"))
+        .map_err(|_| GraphError::ConnectionFailed("Missing ARANGO_HOST or ARANGODB_HOST env var".to_string()))?;
+    let port = env::var("ARANGO_PORT")
+        .or_else(|_| env::var("ARANGODB_PORT"))
+        .map_or(Ok(None), |p| {
+            p.parse::<u16>()
+                .map(Some)
+                .map_err(|e| GraphError::ConnectionFailed(format!("Invalid ARANGO_PORT/ARANGODB_PORT: {}", e)))
+        })?;
+    let username = env::var("ARANGO_USER")
+        .or_else(|_| env::var("ARANGODB_USER"))
+        .map_err(|_| GraphError::ConnectionFailed("Missing ARANGO_USER or ARANGODB_USER env var".to_string()))?;
+    let password = env::var("ARANGO_PASSWORD")
+        .or_else(|_| env::var("ARANGODB_PASSWORD"))
+        .map_err(|_| {
+            GraphError::ConnectionFailed("Missing ARANGO_PASSWORD or ARANGODB_PASSWORD env var".to_string())
+        })?;
+    let database_name = env::var("ARANGO_DATABASE")
+        .or_else(|_| env::var("ARANGODB_DATABASE"))
+        .ok();
 
     Ok(ConnectionConfig {
         hosts: vec![host],
@@ -292,12 +300,28 @@ mod tests {
         let orig_user = env::var_os("ARANGODB_USER");
         let orig_pass = env::var_os("ARANGODB_PASSWORD");
         let orig_port = env::var_os("ARANGODB_PORT");
+        let orig_db = env::var_os("ARANGODB_DATABASE");
+        let orig_arango_host = env::var_os("ARANGO_HOST");
+        let orig_arango_user = env::var_os("ARANGO_USER");
+        let orig_arango_pass = env::var_os("ARANGO_PASSWORD");
+        let orig_arango_port = env::var_os("ARANGO_PORT");
+        let orig_arango_db = env::var_os("ARANGO_DATABASE");
 
-        // Test missing host scenario
+        // Test missing host scenario - remove both variants
         env::remove_var("ARANGODB_HOST");
+        env::remove_var("ARANGO_HOST");
+        env::remove_var("ARANGODB_USER");
+        env::remove_var("ARANGO_USER");
+        env::remove_var("ARANGODB_PASSWORD");
+        env::remove_var("ARANGO_PASSWORD");
+        env::remove_var("ARANGODB_PORT");
+        env::remove_var("ARANGO_PORT");
+        env::remove_var("ARANGODB_DATABASE");
+        env::remove_var("ARANGO_DATABASE");
+        
         let err = config_from_env().unwrap_err();
         match err {
-            GraphError::ConnectionFailed(msg) => assert!(msg.contains("Missing ARANGODB_HOST")),
+            GraphError::ConnectionFailed(msg) => assert!(msg.contains("Missing ARANGO_HOST")),
             _ => panic!("Expected ConnectionFailed error"),
         }
 
@@ -305,6 +329,7 @@ mod tests {
         env::set_var("ARANGODB_USER", "user1");
         env::set_var("ARANGODB_PASSWORD", "pass1");
         env::set_var("ARANGODB_PORT", "8529");
+        // Don't set database - should remain None
         let cfg = config_from_env().unwrap();
         assert_eq!(cfg.hosts, vec!["localhost".to_string()]);
         assert_eq!(cfg.port, Some(8529));
@@ -312,6 +337,7 @@ mod tests {
         assert_eq!(cfg.password, Some("pass1".to_string()));
         assert!(cfg.database_name.is_none());
 
+        // Restore original environment variables
         if let Some(val) = orig_host {
             env::set_var("ARANGODB_HOST", val);
         } else {
@@ -331,6 +357,38 @@ mod tests {
             env::set_var("ARANGODB_PORT", val);
         } else {
             env::remove_var("ARANGODB_PORT");
+        }
+        if let Some(val) = orig_db {
+            env::set_var("ARANGODB_DATABASE", val);
+        } else {
+            env::remove_var("ARANGODB_DATABASE");
+        }
+        
+        // Restore ARANGO_* variants
+        if let Some(val) = orig_arango_host {
+            env::set_var("ARANGO_HOST", val);
+        } else {
+            env::remove_var("ARANGO_HOST");
+        }
+        if let Some(val) = orig_arango_user {
+            env::set_var("ARANGO_USER", val);
+        } else {
+            env::remove_var("ARANGO_USER");
+        }
+        if let Some(val) = orig_arango_pass {
+            env::set_var("ARANGO_PASSWORD", val);
+        } else {
+            env::remove_var("ARANGO_PASSWORD");
+        }
+        if let Some(val) = orig_arango_port {
+            env::set_var("ARANGO_PORT", val);
+        } else {
+            env::remove_var("ARANGO_PORT");
+        }
+        if let Some(val) = orig_arango_db {
+            env::set_var("ARANGO_DATABASE", val);
+        } else {
+            env::remove_var("ARANGO_DATABASE");
         }
     }
 }

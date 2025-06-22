@@ -77,6 +77,7 @@ impl GuestSchemaManager for SchemaManager {
             index.properties,
             index.unique,
             index.index_type,
+            Some(index.name),
         )
     }
 
@@ -124,6 +125,15 @@ mod tests {
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    fn setup_test_env() {
+        // Set environment variables for test if not already set
+        env::set_var("ARANGODB_HOST", env::var("ARANGODB_HOST").unwrap_or_else(|_| env::var("ARANGO_HOST").unwrap_or_else(|_| "localhost".to_string())));
+        env::set_var("ARANGODB_PORT", env::var("ARANGODB_PORT").unwrap_or_else(|_| env::var("ARANGO_PORT").unwrap_or_else(|_| "8529".to_string())));
+        env::set_var("ARANGODB_USER", env::var("ARANGODB_USER").unwrap_or_else(|_| env::var("ARANGO_USER").unwrap_or_else(|_| "root".to_string())));
+        env::set_var("ARANGODB_PASS", env::var("ARANGODB_PASS").unwrap_or_else(|_| env::var("ARANGO_PASSWORD").unwrap_or_else(|_| "test".to_string())));
+        env::set_var("ARANGODB_DB", env::var("ARANGODB_DB").unwrap_or_else(|_| env::var("ARANGO_DATABASE").unwrap_or_else(|_| "test".to_string())));    
+    }
+
     fn create_test_schema_manager() -> SchemaManager {
         let config = helpers::config_from_env().expect("config_from_env failed");
         let graph =
@@ -144,10 +154,7 @@ mod tests {
 
     #[test]
     fn test_define_and_list_vertex_label() {
-        if env::var("ARANGO_HOST").is_err() {
-            println!("Skipping test_define_and_list_vertex_label");
-            return;
-        }
+        setup_test_env();
         let mgr = create_test_schema_manager();
         let label = format!("vlabel_{}", unique_suffix());
         // define—with container=None
@@ -164,10 +171,7 @@ mod tests {
 
     #[test]
     fn test_define_and_list_edge_label() {
-        if env::var("ARANGO_HOST").is_err() {
-            println!("Skipping test_define_and_list_edge_label");
-            return;
-        }
+        setup_test_env();
         let mgr = create_test_schema_manager();
         let label = format!("elabel_{}", unique_suffix());
         mgr.define_edge_label(EdgeLabelSchema {
@@ -184,10 +188,7 @@ mod tests {
 
     #[test]
     fn test_container_roundtrip() {
-        if env::var("ARANGO_HOST").is_err() {
-            println!("Skipping test_container_roundtrip");
-            return;
-        }
+        setup_test_env();
         let mgr = create_test_schema_manager();
         let name = format!("col_{}", unique_suffix());
         mgr.create_container(name.clone(), ContainerType::VertexContainer)
@@ -200,10 +201,7 @@ mod tests {
 
     #[test]
     fn test_index_lifecycle() {
-        if env::var("ARANGO_HOST").is_err() {
-            println!("Skipping test_index_lifecycle");
-            return;
-        }
+        setup_test_env();
         let mgr = create_test_schema_manager();
         let col = format!("idxcol_{}", unique_suffix());
         mgr.create_container(col.clone(), ContainerType::VertexContainer)
@@ -235,10 +233,7 @@ mod tests {
 
     #[test]
     fn test_edge_type_and_list() {
-        if env::var("ARANGO_HOST").is_err() {
-            println!("Skipping test_edge_type_and_list");
-            return;
-        }
+        setup_test_env();
         let mgr = create_test_schema_manager();
         let v1 = format!("V1_{}", unique_suffix());
         let v2 = format!("V2_{}", unique_suffix());
