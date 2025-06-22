@@ -1,5 +1,5 @@
 [package]
-name = "test_llm"
+name = "test_graph"
 version = "0.0.0"
 edition = "2021"
 
@@ -9,12 +9,10 @@ crate-type = ["cdylib"]
 required-features = []
 
 [features]
-default = ["openai"]
-anthropic = []
-grok = []
-openai = []
-openrouter = []
-ollama = []
+default = ["neo4j"]
+janusgraph = []
+arangodb = []
+neo4j = []
 
 [dependencies]
 # To use common shared libs, use the following:
@@ -37,12 +35,12 @@ path = "wit-generated"
 "golem:rpc/types@0.2.0" = "golem_rust::wasm_rpc::golem_rpc_0_2_x::types"
 
 [package.metadata.component.target.dependencies]
-"golem:llm" = { path = "wit-generated/deps/golem-llm" }
+"golem:graph" = { path = "wit-generated/deps/golem-graph" }
 "wasi:io" = { path = "wit-generated/deps/io" }
 "wasi:clocks" = { path = "wit-generated/deps/clocks" }
 "golem:rpc" = { path = "wit-generated/deps/golem-rpc" }
 "test:helper-client" = { path = "wit-generated/deps/test_helper-client" }
-"test:llm-exports" = { path = "wit-generated/deps/test_llm-exports" }
+"test:graph-exports" = { path = "wit-generated/deps/test_graph-exports" }
 
 [package.metadata.component.bindings]
 # See https://github.com/bytecodealliance/cargo-component/blob/main/src/metadata.rs#L62

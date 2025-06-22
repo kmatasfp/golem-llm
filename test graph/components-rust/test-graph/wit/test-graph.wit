@@ -1,8 +1,8 @@
-package test:llm;
+package test:graph;
 
 // See https://component-model.bytecodealliance.org/design/wit.html for more details about the WIT syntax
 
-interface test-llm-api {
+interface test-graph-api {
   test1: func() -> string;
   test2: func() -> string;
   test3: func() -> string;
@@ -12,7 +12,7 @@ interface test-llm-api {
   test7: func() -> string;
 }
 
-world test-llm {
-  import golem:llm/llm@1.0.0;
-  export test-llm-api;
+world test-graph {
+  import golem:graph/graph@1.0.0;
+  export test-graph-api;
 }
