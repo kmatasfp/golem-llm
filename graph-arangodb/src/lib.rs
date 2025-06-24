@@ -77,4 +77,3 @@ impl Transaction {
 type DurableGraphArangoDbComponent = DurableGraph<GraphArangoDbComponent>;
 
 golem_graph::export_graph!(DurableGraphArangoDbComponent with_types_in golem_graph);
-

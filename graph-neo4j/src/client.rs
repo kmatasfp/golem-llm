@@ -1,7 +1,6 @@
-
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use golem_graph::golem::graph::errors::GraphError;
 use reqwest::{Client, Response};
-use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::Value;
 
 #[derive(Clone)]
@@ -99,7 +98,7 @@ impl Neo4jApi {
             .header("Authorization", &self.auth_header)
             .send()
             .map_err(|e| GraphError::ConnectionFailed(e.to_string()))?;
-        
+
         if resp.status().is_success() {
             Ok("running".to_string())
         } else {

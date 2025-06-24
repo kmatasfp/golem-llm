@@ -15,37 +15,10 @@ use serde_json::{json, Value};
 fn id_to_json(id: ElementId) -> Value {
     match id {
         ElementId::StringValue(s) => json!(s),
-        ElementId::Int64(i)        => json!(i),
-        ElementId::Uuid(u)         => json!(u.to_string()),
+        ElementId::Int64(i) => json!(i),
+        ElementId::Uuid(u) => json!(u.to_string()),
     }
 }
-
-/// Build the "edge‐and‐spill‐into‐vertex" step for Gremlin:
-///  - Outgoing:  `outE().otherV()`
-///  - Incoming:  `inE().otherV()`
-///  - Both:      `bothE().otherV()`
-/// And, if you passed a list of edge labels, it will bind them:
-///   outE(edge_labels_0).otherV()
-// fn build_edge_step(
-//     dir: &Direction,
-//     edge_types: &Option<Vec<String>>,
-//     bindings: &mut serde_json::Map<String, Value>,
-// ) -> String {
-//     let base = match dir {
-//         Direction::Outgoing => "outE",
-//         Direction::Incoming => "inE",
-//         Direction::Both     => "bothE",
-//     };
-//     if let Some(labels) = edge_types {
-//         if !labels.is_empty() {
-//             let key = format!("edge_labels_{}", bindings.len());
-//             bindings.insert(key.clone(), json!(labels));
-//             return format!("{}({}).otherV()", base, key);
-//         }
-//     }
-//     format!("{}().otherV()", base)
-// }
-
 
 fn build_traversal_step(
     dir: &Direction,
@@ -55,7 +28,7 @@ fn build_traversal_step(
     let base = match dir {
         Direction::Outgoing => "outE",
         Direction::Incoming => "inE",
-        Direction::Both     => "bothE",
+        Direction::Both => "bothE",
     };
     if let Some(labels) = edge_types {
         if !labels.is_empty() {
@@ -67,7 +40,6 @@ fn build_traversal_step(
     format!("{}().otherV()", base)
 }
 
-
 impl Transaction {
     pub fn find_shortest_path(
         &self,
@@ -78,16 +50,20 @@ impl Transaction {
         let mut bindings = serde_json::Map::new();
         bindings.insert("from_id".to_string(), id_to_json(from_vertex));
         bindings.insert("to_id".to_string(), id_to_json(to_vertex));
-    
+
         // Use outE().inV() to include both vertices and edges in the path traversal
-        let gremlin = "g.V(from_id).repeat(outE().inV().simplePath()).until(hasId(to_id)).path().limit(1)";
-    
+        let gremlin =
+            "g.V(from_id).repeat(outE().inV().simplePath()).until(hasId(to_id)).path().limit(1)";
+
         println!("[DEBUG][find_shortest_path] Executing query: {}", gremlin);
         println!("[DEBUG][find_shortest_path] Bindings: {:?}", bindings);
-        
+
         let resp = self.api.execute(gremlin, Some(Value::Object(bindings)))?;
-        println!("[DEBUG][find_shortest_path] Raw response: {}", serde_json::to_string_pretty(&resp).unwrap_or_else(|_| format!("{:?}", resp)));
-        
+        println!(
+            "[DEBUG][find_shortest_path] Raw response: {}",
+            serde_json::to_string_pretty(&resp).unwrap_or_else(|_| format!("{:?}", resp))
+        );
+
         // Handle GraphSON g:List format
         let data_array = if let Some(data) = resp["result"]["data"].as_object() {
             if data.get("@type") == Some(&Value::String("g:List".to_string())) {
@@ -98,11 +74,17 @@ impl Transaction {
         } else {
             resp["result"]["data"].as_array()
         };
-        
+
         if let Some(arr) = data_array {
-            println!("[DEBUG][find_shortest_path] Data array length: {}", arr.len());
+            println!(
+                "[DEBUG][find_shortest_path] Data array length: {}",
+                arr.len()
+            );
             if let Some(val) = arr.first() {
-                println!("[DEBUG][find_shortest_path] First value: {}", serde_json::to_string_pretty(val).unwrap_or_else(|_| format!("{:?}", val)));
+                println!(
+                    "[DEBUG][find_shortest_path] First value: {}",
+                    serde_json::to_string_pretty(val).unwrap_or_else(|_| format!("{:?}", val))
+                );
                 return Ok(Some(parse_path_from_gremlin(val)?));
             } else {
                 println!("[DEBUG][find_shortest_path] Data array is empty");
@@ -110,12 +92,9 @@ impl Transaction {
         } else {
             println!("[DEBUG][find_shortest_path] No data array in response");
         }
-    
+
         Ok(None)
     }
-    
-    
-    
 
     pub fn find_all_paths(
         &self,
@@ -153,10 +132,13 @@ impl Transaction {
 
         println!("[DEBUG][find_all_paths] Executing query: {}", gremlin);
         println!("[DEBUG][find_all_paths] Bindings: {:?}", bindings);
-        
+
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
-        println!("[DEBUG][find_all_paths] Raw response: {}", serde_json::to_string_pretty(&response).unwrap_or_else(|_| format!("{:?}", response)));
-        
+        println!(
+            "[DEBUG][find_all_paths] Raw response: {}",
+            serde_json::to_string_pretty(&response).unwrap_or_else(|_| format!("{:?}", response))
+        );
+
         // Handle GraphSON g:List format (same as find_shortest_path)
         let data_array = if let Some(data) = response["result"]["data"].as_object() {
             if data.get("@type") == Some(&Value::String("g:List".to_string())) {
@@ -167,7 +149,7 @@ impl Transaction {
         } else {
             response["result"]["data"].as_array()
         };
-        
+
         if let Some(arr) = data_array {
             println!("[DEBUG][find_all_paths] Data array length: {}", arr.len());
             arr.iter().map(parse_path_from_gremlin).collect()
@@ -199,7 +181,10 @@ impl Transaction {
         }
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
-        println!("[DEBUG][get_neighborhood] Raw response: {}", serde_json::to_string_pretty(&response).unwrap_or_default());
+        println!(
+            "[DEBUG][get_neighborhood] Raw response: {}",
+            serde_json::to_string_pretty(&response).unwrap_or_default()
+        );
 
         // Handle GraphSON g:List format (same as find_shortest_path and find_all_paths)
         let data_array = if let Some(data) = response["result"]["data"].as_object() {
@@ -211,13 +196,16 @@ impl Transaction {
         } else {
             response["result"]["data"].as_array()
         };
-        
+
         if let Some(arr) = data_array {
             println!("[DEBUG][get_neighborhood] Data array length: {}", arr.len());
             let mut verts = std::collections::HashMap::new();
             let mut edges = std::collections::HashMap::new();
             for val in arr {
-                println!("[DEBUG][get_neighborhood] Processing path: {}", serde_json::to_string_pretty(val).unwrap_or_else(|_| format!("{:?}", val)));
+                println!(
+                    "[DEBUG][get_neighborhood] Processing path: {}",
+                    serde_json::to_string_pretty(val).unwrap_or_else(|_| format!("{:?}", val))
+                );
                 let path = parse_path_from_gremlin(val)?;
                 for v in path.vertices {
                     verts.insert(element_id_to_key(&v.id), v);
@@ -226,7 +214,7 @@ impl Transaction {
                     edges.insert(element_id_to_key(&e.id), e);
                 }
             }
-            
+
             Ok(Subgraph {
                 vertices: verts.into_values().collect(),
                 edges: edges.into_values().collect(),
@@ -281,12 +269,18 @@ impl Transaction {
             "g.V(source_id).repeat({}({})).times({}).dedup().elementMap()",
             step, label_key, distance
         );
-        
-        println!("[DEBUG][get_vertices_at_distance] Executing query: {}", gremlin);
+
+        println!(
+            "[DEBUG][get_vertices_at_distance] Executing query: {}",
+            gremlin
+        );
         println!("[DEBUG][get_vertices_at_distance] Bindings: {:?}", bindings);
-        
+
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
-        println!("[DEBUG][get_vertices_at_distance] Raw response: {}", serde_json::to_string_pretty(&response).unwrap_or_else(|_| format!("{:?}", response)));
+        println!(
+            "[DEBUG][get_vertices_at_distance] Raw response: {}",
+            serde_json::to_string_pretty(&response).unwrap_or_else(|_| format!("{:?}", response))
+        );
 
         // Handle GraphSON g:List format (same as other methods)
         let data_array = if let Some(data) = response["result"]["data"].as_object() {
@@ -300,7 +294,10 @@ impl Transaction {
         };
 
         if let Some(arr) = data_array {
-            println!("[DEBUG][get_vertices_at_distance] Data array length: {}", arr.len());
+            println!(
+                "[DEBUG][get_vertices_at_distance] Data array length: {}",
+                arr.len()
+            );
             arr.iter().map(parse_vertex_from_gremlin).collect()
         } else {
             println!("[DEBUG][get_vertices_at_distance] No data array in response");

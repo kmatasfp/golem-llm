@@ -17,8 +17,8 @@ impl Transaction {
     pub fn find_shortest_path(
         &self,
         from_vertex: ElementId,
-        to_vertex:   ElementId,
-        _options:    Option<PathOptions>,
+        to_vertex: ElementId,
+        _options: Option<PathOptions>,
     ) -> Result<Option<Path>, GraphError> {
         // from_vertex/to_vertex are ElementId::StringValue(s)
         let from_id = match from_vertex {
@@ -29,7 +29,7 @@ impl Transaction {
             ElementId::StringValue(s) => s,
             _ => return Err(GraphError::InvalidQuery("expected string elementId".into())),
         };
-    
+
         // Combine both matching strategies
         let statement = json!({
             "statement": r#"
@@ -44,19 +44,19 @@ impl Transaction {
             "resultDataContents": ["row","graph"],
             "parameters": { "from_id": from_id, "to_id": to_id }
         });
-        
-    
-        let response = self
-            .api
-            .execute_in_transaction(&self.transaction_url, json!({
+
+        let response = self.api.execute_in_transaction(
+            &self.transaction_url,
+            json!({
                 "statements": [statement]
-            }))?;
-    
+            }),
+        )?;
+
         let result = response["results"]
             .as_array()
             .and_then(|r| r.first())
             .ok_or_else(|| GraphError::InternalError("Missing 'results'".into()))?;
-    
+
         if let Some(errors) = result["errors"].as_array() {
             if !errors.is_empty() {
                 return Err(GraphError::InternalError(format!(
@@ -65,7 +65,7 @@ impl Transaction {
                 )));
             }
         }
-    
+
         // If no row, return Ok(None)
         let data_opt = result["data"].as_array().and_then(|d| d.first());
         if let Some(data) = data_opt {
@@ -75,8 +75,6 @@ impl Transaction {
             Ok(None)
         }
     }
-    
-    
 
     pub fn find_all_paths(
         &self,

@@ -42,7 +42,10 @@ impl GuestGraph for Graph {
             "statement": "MATCH (n) RETURN count(n) as nodeCount",
             "parameters": {}
         });
-        let node_count_resp = self.api.execute_in_transaction(&transaction_url, serde_json::json!({ "statements": [node_count_stmt] }))?;
+        let node_count_resp = self.api.execute_in_transaction(
+            &transaction_url,
+            serde_json::json!({ "statements": [node_count_stmt] }),
+        )?;
         let node_count = node_count_resp["results"]
             .as_array()
             .and_then(|r| r.first())
@@ -57,7 +60,10 @@ impl GuestGraph for Graph {
             "statement": "MATCH ()-[r]->() RETURN count(r) as relCount",
             "parameters": {}
         });
-        let rel_count_resp = self.api.execute_in_transaction(&transaction_url, serde_json::json!({ "statements": [rel_count_stmt] }))?;
+        let rel_count_resp = self.api.execute_in_transaction(
+            &transaction_url,
+            serde_json::json!({ "statements": [rel_count_stmt] }),
+        )?;
         let rel_count = rel_count_resp["results"]
             .as_array()
             .and_then(|r| r.first())

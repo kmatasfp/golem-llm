@@ -28,10 +28,8 @@ impl Transaction {
     ) -> Result<Option<Path>, GraphError> {
         let from_id = id_to_aql(&from_vertex);
         let to_id = id_to_aql(&to_vertex);
-        let edge_collections = options
-            .and_then(|o| o.edge_types)
-            .unwrap_or_default();
-        
+        let edge_collections = options.and_then(|o| o.edge_types).unwrap_or_default();
+
         let edge_collections_str = if edge_collections.is_empty() {
             // When no specific edge collections are provided, we need to specify
             // the collections used in the test. In a real-world scenario, this would
@@ -67,7 +65,7 @@ impl Transaction {
         // Build vertices and edges from the traversal result
         let mut vertices = vec![];
         let mut edges = vec![];
-        
+
         for item in arr {
             if let Some(obj) = item.as_object() {
                 if let Some(v_doc) = obj.get("vertex").and_then(|v| v.as_object()) {
@@ -92,7 +90,11 @@ impl Transaction {
         }
 
         let length = edges.len() as u32;
-        Ok(Some(Path { vertices, edges, length }))
+        Ok(Some(Path {
+            vertices,
+            edges,
+            length,
+        }))
     }
 
     pub fn find_all_paths(
@@ -119,10 +121,8 @@ impl Transaction {
             .as_ref()
             .and_then(|o| o.max_depth)
             .map_or((1, 10), |d| (1, d));
-        let edge_collections = options
-            .and_then(|o| o.edge_types)
-            .unwrap_or_default();
-        
+        let edge_collections = options.and_then(|o| o.edge_types).unwrap_or_default();
+
         let edge_collections_str = if edge_collections.is_empty() {
             "knows, created".to_string()
         } else {

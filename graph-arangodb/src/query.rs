@@ -112,4 +112,3 @@ impl QueryGuest for GraphArangoDbComponent {
         tx.execute_query(query, parameters, options)
     }
 }
-

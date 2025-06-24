@@ -43,9 +43,7 @@ impl ExtendedGuest for GraphJanusGraphComponent {
         // Create a new JanusGraphApi instance, propagating any errors.
         let api = JanusGraphApi::new(host, port, username, password)?;
         // Validate credentials by opening a transaction (will fail if creds are bad)
-        if let Err(e) = api.execute("g.tx().open()", None) {
-            return Err(e);
-        }
+        api.execute("g.tx().open()", None)?;
         Ok(Graph::new(api))
     }
 }
@@ -69,4 +67,3 @@ impl Transaction {
 type DurableGraphJanusGraphComponent = DurableGraph<GraphJanusGraphComponent>;
 
 golem_graph::export_graph!(DurableGraphJanusGraphComponent with_types_in golem_graph);
-

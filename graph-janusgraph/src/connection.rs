@@ -15,8 +15,8 @@ impl ProviderGraph for Graph {
 impl GuestGraph for Graph {
     fn begin_transaction(&self) -> Result<TransactionResource, GraphError> {
         self.api.execute("g.tx().open()", None)?;
-               let transaction = Transaction::new(self.api.clone());
-               Ok(TransactionResource::new(transaction))
+        let transaction = Transaction::new(self.api.clone());
+        Ok(TransactionResource::new(transaction))
     }
 
     fn begin_read_transaction(&self) -> Result<TransactionResource, GraphError> {

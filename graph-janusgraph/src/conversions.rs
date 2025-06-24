@@ -82,7 +82,9 @@ pub(crate) fn from_gremlin_value(value: &Value) -> Result<PropertyValue, GraphEr
         }
         Value::Object(obj) => {
             // Handle GraphSON wrapped values like {"@type": "g:Int64", "@value": 29}
-            if let (Some(Value::String(gtype)), Some(gvalue)) = (obj.get("@type"), obj.get("@value")) {
+            if let (Some(Value::String(gtype)), Some(gvalue)) =
+                (obj.get("@type"), obj.get("@value"))
+            {
                 match gtype.as_str() {
                     "g:Int64" | "g:Int32" | "g:Int16" | "g:Int8" => {
                         if let Some(i) = gvalue.as_i64() {
@@ -118,7 +120,6 @@ pub(crate) fn from_gremlin_value(value: &Value) -> Result<PropertyValue, GraphEr
         )),
     }
 }
-
 
 fn parse_wkt_point(s: &str) -> Result<Point, ()> {
     if !s.starts_with("POINT") {

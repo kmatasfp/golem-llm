@@ -102,14 +102,19 @@ impl GuestTransaction for Transaction {
     fn get_vertex(&self, id: ElementId) -> Result<Option<Vertex>, GraphError> {
         // Robust: If id is a string of the form 'prop:<property>:<value>', fetch by property
         if let ElementId::StringValue(s) = &id {
-            if let Some((prop, value)) = s.strip_prefix("prop:").and_then(|rest| rest.split_once(":")) {
+            if let Some((prop, value)) = s
+                .strip_prefix("prop:")
+                .and_then(|rest| rest.split_once(":"))
+            {
                 let statement = json!({
                     "statement": format!("MATCH (n) WHERE n.`{}` = $value RETURN n", prop),
                     "parameters": { "value": value },
                     "resultDataContents": ["row","graph"]
                 });
                 let statements = json!({ "statements": [statement] });
-                let response = self.api.execute_in_transaction(&self.transaction_url, statements)?;
+                let response = self
+                    .api
+                    .execute_in_transaction(&self.transaction_url, statements)?;
                 let result = response["results"].as_array().and_then(|r| r.first());
                 if result.is_none() {
                     return Ok(None);
@@ -156,7 +161,9 @@ impl GuestTransaction for Transaction {
             "resultDataContents": ["row","graph"]
         });
         let statements = json!({ "statements": [statement] });
-        let response = self.api.execute_in_transaction(&self.transaction_url, statements)?;
+        let response = self
+            .api
+            .execute_in_transaction(&self.transaction_url, statements)?;
         let result = response["results"].as_array().and_then(|r| r.first());
         if result.is_none() {
             return Ok(None);
@@ -391,10 +398,10 @@ impl GuestTransaction for Transaction {
             ElementId::Int64(i) => i.to_string(),
             ElementId::Uuid(u) => u,
         };
-    
+
         // Convert properties
         let props = conversions::to_cypher_properties(properties.clone())?;
-    
+
         // Use elementId() for vertex matching, return elementId for edge
         let stmt = json!({
             "statement": format!(
@@ -414,20 +421,26 @@ impl GuestTransaction for Transaction {
         let response = self
             .api
             .execute_in_transaction(&self.transaction_url, json!({ "statements": [stmt] }))?;
-    
+
         // Pull out the first row and hand off to your existing parser
-        let results = response["results"].as_array()
+        let results = response["results"]
+            .as_array()
             .and_then(|a| a.first())
-            .ok_or_else(|| GraphError::InternalError("Invalid response from Neo4j for create_edge".into()))?;
-        let data = results["data"].as_array()
+            .ok_or_else(|| {
+                GraphError::InternalError("Invalid response from Neo4j for create_edge".into())
+            })?;
+        let data = results["data"]
+            .as_array()
             .and_then(|d| d.first())
-            .ok_or_else(|| GraphError::InternalError("Invalid response from Neo4j for create_edge".into()))?;
-        let row = data["row"].as_array()
+            .ok_or_else(|| {
+                GraphError::InternalError("Invalid response from Neo4j for create_edge".into())
+            })?;
+        let row = data["row"]
+            .as_array()
             .ok_or_else(|| GraphError::InternalError("Missing row data for create_edge".into()))?;
-    
+
         parse_edge_from_row(row)
     }
-    
 
     fn get_edge(&self, id: ElementId) -> Result<Option<Edge>, GraphError> {
         let cypher_id = match id.clone() {
@@ -435,7 +448,7 @@ impl GuestTransaction for Transaction {
             ElementId::Int64(i) => i.to_string(),
             ElementId::Uuid(u) => u,
         };
-    
+
         // Use elementId() for edge matching
         let statement = json!({
             "statement": "\
@@ -452,7 +465,7 @@ impl GuestTransaction for Transaction {
         let resp = self
             .api
             .execute_in_transaction(&self.transaction_url, json!({ "statements": [statement] }))?;
-    
+
         // 3) Safely unwrap into slices
         let results = match resp["results"].as_array() {
             Some(arr) => arr.as_slice(),
@@ -461,7 +474,7 @@ impl GuestTransaction for Transaction {
         if results.is_empty() {
             return Ok(None);
         }
-    
+
         let data = match results[0]["data"].as_array() {
             Some(arr) => arr.as_slice(),
             None => return Ok(None),
@@ -469,18 +482,16 @@ impl GuestTransaction for Transaction {
         if data.is_empty() {
             return Ok(None);
         }
-    
+
         // 4) Extract the row array
         let row = data[0]["row"]
             .as_array()
             .ok_or_else(|| GraphError::InternalError("Missing row in get_edge".into()))?;
-    
+
         // 5) Delegate to your parser (which will see strings like "0", "71", "72")
         let edge = parse_edge_from_row(row)?;
         Ok(Some(edge))
     }
-    
-    
 
     fn update_edge(&self, id: ElementId, properties: PropertyMap) -> Result<Edge, GraphError> {
         let cypher_id = match id.clone() {
@@ -594,17 +605,17 @@ impl GuestTransaction for Transaction {
             ElementId::Int64(i) => i.to_string(),
             ElementId::Uuid(u) => u,
         };
-    
+
         // Use elementId() for edge matching
         let stmt = json!({
             "statement": "MATCH ()-[r]-() WHERE elementId(r) = $id DELETE r",
             "parameters": { "id": cypher_id }
         });
         let batch = json!({ "statements": [stmt] });
-        self.api.execute_in_transaction(&self.transaction_url, batch)?;
+        self.api
+            .execute_in_transaction(&self.transaction_url, batch)?;
         Ok(())
     }
-    
 
     fn find_edges(
         &self,

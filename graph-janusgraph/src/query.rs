@@ -54,22 +54,42 @@ fn parse_gremlin_response(response: Value) -> Result<QueryResult, GraphError> {
                                 // Process GraphSON Map: array contains alternating keys and values
                                 let mut i = 0;
                                 while i + 1 < map_array.len() {
-                                    if let (Some(key_val), Some(value_val)) = (map_array.get(i), map_array.get(i + 1)) {
+                                    if let (Some(key_val), Some(value_val)) =
+                                        (map_array.get(i), map_array.get(i + 1))
+                                    {
                                         if let Some(key_str) = key_val.as_str() {
                                             // Handle GraphSON List format for valueMap results
                                             if let Some(graphson_obj) = value_val.as_object() {
-                                                if graphson_obj.get("@type") == Some(&Value::String("g:List".to_string())) {
-                                                    if let Some(list_values) = graphson_obj.get("@value").and_then(|v| v.as_array()) {
-                                                        if let Some(first_value) = list_values.first() {
-                                                            row.push((key_str.to_string(), conversions::from_gremlin_value(first_value)?));
+                                                if graphson_obj.get("@type")
+                                                    == Some(&Value::String("g:List".to_string()))
+                                                {
+                                                    if let Some(list_values) = graphson_obj
+                                                        .get("@value")
+                                                        .and_then(|v| v.as_array())
+                                                    {
+                                                        if let Some(first_value) =
+                                                            list_values.first()
+                                                        {
+                                                            row.push((
+                                                                key_str.to_string(),
+                                                                conversions::from_gremlin_value(
+                                                                    first_value,
+                                                                )?,
+                                                            ));
                                                         }
                                                     }
                                                 } else {
                                                     // Regular GraphSON object
-                                                    row.push((key_str.to_string(), conversions::from_gremlin_value(value_val)?));
+                                                    row.push((
+                                                        key_str.to_string(),
+                                                        conversions::from_gremlin_value(value_val)?,
+                                                    ));
                                                 }
                                             } else {
-                                                row.push((key_str.to_string(), conversions::from_gremlin_value(value_val)?));
+                                                row.push((
+                                                    key_str.to_string(),
+                                                    conversions::from_gremlin_value(value_val)?,
+                                                ));
                                             }
                                         }
                                     }
@@ -96,22 +116,38 @@ fn parse_gremlin_response(response: Value) -> Result<QueryResult, GraphError> {
                             for (key, gremlin_value) in gremlin_map {
                                 // Handle GraphSON List format for valueMap results
                                 if let Some(graphson_obj) = gremlin_value.as_object() {
-                                    if graphson_obj.get("@type") == Some(&Value::String("g:List".to_string())) {
-                                        if let Some(list_values) = graphson_obj.get("@value").and_then(|v| v.as_array()) {
+                                    if graphson_obj.get("@type")
+                                        == Some(&Value::String("g:List".to_string()))
+                                    {
+                                        if let Some(list_values) =
+                                            graphson_obj.get("@value").and_then(|v| v.as_array())
+                                        {
                                             if let Some(first_value) = list_values.first() {
-                                                row.push((key.clone(), conversions::from_gremlin_value(first_value)?));
+                                                row.push((
+                                                    key.clone(),
+                                                    conversions::from_gremlin_value(first_value)?,
+                                                ));
                                             }
                                         }
                                     } else {
                                         // Regular GraphSON object
-                                        row.push((key.clone(), conversions::from_gremlin_value(gremlin_value)?));
+                                        row.push((
+                                            key.clone(),
+                                            conversions::from_gremlin_value(gremlin_value)?,
+                                        ));
                                     }
                                 } else if let Some(inner_array) = gremlin_value.as_array() {
                                     if let Some(actual_value) = inner_array.first() {
-                                        row.push((key.clone(), conversions::from_gremlin_value(actual_value)?));
+                                        row.push((
+                                            key.clone(),
+                                            conversions::from_gremlin_value(actual_value)?,
+                                        ));
                                     }
                                 } else {
-                                    row.push((key.clone(), conversions::from_gremlin_value(gremlin_value)?));
+                                    row.push((
+                                        key.clone(),
+                                        conversions::from_gremlin_value(gremlin_value)?,
+                                    ));
                                 }
                             }
                             maps.push(row);

@@ -113,4 +113,3 @@ impl GuestSchemaManager for SchemaManager {
         self.graph.api.list_collections()
     }
 }
-

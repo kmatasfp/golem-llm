@@ -17,7 +17,7 @@ impl SchemaGuest for GraphJanusGraphComponent {
     fn get_schema_manager() -> Result<SchemaManagerResource, GraphError> {
         // DEBUG: Add unique identifier to confirm this JanusGraph implementation is being called
         eprintln!("DEBUG: JanusGraph schema manager get_schema_manager() called!");
-        
+
         let config = helpers::config_from_env()?;
         let graph = crate::GraphJanusGraphComponent::connect_internal(&config)?;
         let manager = SchemaManager {
@@ -74,8 +74,8 @@ impl GuestSchemaManager for SchemaManager {
     ) -> Result<Option<VertexLabelSchema>, GraphError> {
         // Use a more robust approach: get all vertex labels and check if our label is in the list
         let script = "mgmt.getVertexLabels().collect{ it.name() }";
-        let result = self.execute_management_query(&script)?;
-        
+        let result = self.execute_management_query(script)?;
+
         let labels = self.parse_string_list_from_result(result)?;
         let exists = labels.contains(&label);
 
@@ -94,16 +94,19 @@ impl GuestSchemaManager for SchemaManager {
         // JanusGraph doesn't have getEdgeLabels() method, so we need to check directly
         let script = format!("mgmt.getEdgeLabel('{}') != null", label);
         let result = self.execute_management_query(&script)?;
-        
+
         // Debug: Print the result to understand what we're getting
         // eprintln!("[DEBUG] Edge label existence check result: {:?}", result);
-        
+
         // Handle GraphSON format: {"@type": "g:List", "@value": [true/false]}
         let exists = if let Some(graphson_obj) = result.as_object() {
             if let Some(value_array) = graphson_obj.get("@value").and_then(|v| v.as_array()) {
-                value_array.first().and_then(|v| v.as_bool()).unwrap_or(false)
+                value_array
+                    .first()
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
             } else {
-                false  
+                false
             }
         } else {
             // Fallback to old parsing logic for compatibility
@@ -178,7 +181,7 @@ impl GuestSchemaManager for SchemaManager {
         }
 
         index_builder.push_str(".indexOnly(label).buildCompositeIndex();");
-        
+
         // Wrap the index creation in a try-catch to handle duplicate index errors
         let wrapped_index_builder = format!("try {{ {} }} catch (Exception e) {{ if (!e.message.contains('already been defined')) throw e; }}", index_builder);
         script_parts.push(wrapped_index_builder);
@@ -299,7 +302,7 @@ impl SchemaManager {
             ",
             script
         );
-        
+
         let mut last_error = None;
         for _attempt in 0..3 {
             match self.graph.api.execute(&full_script, None) {
@@ -316,8 +319,12 @@ impl SchemaManager {
                 }
             }
         }
-        
-        Err(last_error.unwrap_or_else(|| GraphError::InternalError("Schema management transaction failed after retries".to_string())))
+
+        Err(last_error.unwrap_or_else(|| {
+            GraphError::InternalError(
+                "Schema management transaction failed after retries".to_string(),
+            )
+        }))
     }
 
     fn parse_string_list_from_result(&self, result: Value) -> Result<Vec<String>, GraphError> {
@@ -327,14 +334,14 @@ impl SchemaManager {
                 return value_array
                     .iter()
                     .map(|v| {
-                        v.as_str()
-                            .map(String::from)
-                            .ok_or_else(|| GraphError::InternalError("Expected string in list".to_string()))
+                        v.as_str().map(String::from).ok_or_else(|| {
+                            GraphError::InternalError("Expected string in list".to_string())
+                        })
                     })
                     .collect();
             }
         }
-        
+
         // Fallback to old parsing logic for compatibility
         result
             .as_array()
@@ -357,7 +364,7 @@ impl SchemaManager {
         result: Value,
     ) -> Result<Vec<IndexDefinition>, GraphError> {
         let mut indexes = Vec::new();
-        
+
         // Handle GraphSON format: {"@type": "g:List", "@value": [...]}
         let items = if let Some(graphson_obj) = result.as_object() {
             if let Some(value_array) = graphson_obj.get("@value").and_then(|v| v.as_array()) {
@@ -370,7 +377,7 @@ impl SchemaManager {
         } else {
             return Ok(indexes);
         };
-        
+
         for item in items {
             // Handle GraphSON map format: {"@type": "g:Map", "@value": [key1, value1, key2, value2, ...]}
             let map_data = if let Some(graphson_map) = item.as_object() {
@@ -409,27 +416,28 @@ impl SchemaManager {
                 .and_then(|v| v.as_str())
                 .unwrap_or_default()
                 .to_string();
-            
+
             // Handle properties which might be in GraphSON list format
             let properties = map_data
                 .get("properties")
                 .and_then(|v| {
                     if let Some(graphson_obj) = v.as_object() {
-                        if let Some(props_array) = graphson_obj.get("@value").and_then(|v| v.as_array()) {
-                            Some(props_array
+                        graphson_obj
+                            .get("@value")
+                            .and_then(|v| v.as_array())
+                            .map(|props_array| {
+                                props_array
+                                    .iter()
+                                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                    .collect()
+                            })
+                    } else {
+                        v.as_array().map(|props_array| {
+                            props_array
                                 .iter()
                                 .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                                .collect())
-                        } else {
-                            None
-                        }
-                    } else if let Some(props_array) = v.as_array() {
-                        Some(props_array
-                            .iter()
-                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                            .collect())
-                    } else {
-                        None
+                                .collect()
+                        })
                     }
                 })
                 .unwrap_or_default();
@@ -443,7 +451,7 @@ impl SchemaManager {
                 index_type: IndexType::Exact,
             });
         }
-        
+
         Ok(indexes)
     }
 

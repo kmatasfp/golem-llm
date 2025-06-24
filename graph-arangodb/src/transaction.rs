@@ -195,12 +195,17 @@ impl GuestTransaction for Transaction {
             // Find and delete all edges connected to this vertex
             // This is a simple implementation that looks across all edge collections
             let vertex_id = helpers::element_id_to_string(&id);
-            
+
             // Get all collections to find edge collections
             let collections = self.api.list_collections().unwrap_or_default();
             let edge_collections: Vec<_> = collections
                 .iter()
-                .filter(|c| matches!(c.container_type, golem_graph::golem::graph::schema::ContainerType::EdgeContainer))
+                .filter(|c| {
+                    matches!(
+                        c.container_type,
+                        golem_graph::golem::graph::schema::ContainerType::EdgeContainer
+                    )
+                })
                 .map(|c| c.name.clone())
                 .collect();
 
@@ -213,7 +218,9 @@ impl GuestTransaction for Transaction {
                         "@collection": edge_collection
                     }
                 });
-                let _ = self.api.execute_in_transaction(&self.transaction_id, delete_edges_query);
+                let _ = self
+                    .api
+                    .execute_in_transaction(&self.transaction_id, delete_edges_query);
             }
         }
 
@@ -375,13 +382,20 @@ impl GuestTransaction for Transaction {
         let collection = helpers::collection_from_element_id(&id)?;
 
         // First get the current edge to preserve _from and _to
-        let current_edge = self.get_edge(id.clone())?
+        let current_edge = self
+            .get_edge(id.clone())?
             .ok_or_else(|| GraphError::ElementNotFound(id.clone()))?;
 
         let mut props = conversions::to_arango_properties(properties)?;
         // Preserve _from and _to for edge replacement
-        props.insert("_from".to_string(), json!(helpers::element_id_to_string(&current_edge.from_vertex)));
-        props.insert("_to".to_string(), json!(helpers::element_id_to_string(&current_edge.to_vertex)));
+        props.insert(
+            "_from".to_string(),
+            json!(helpers::element_id_to_string(&current_edge.from_vertex)),
+        );
+        props.insert(
+            "_to".to_string(),
+            json!(helpers::element_id_to_string(&current_edge.to_vertex)),
+        );
 
         let query = json!({
             "query": "REPLACE @key WITH @props IN @@collection RETURN NEW",

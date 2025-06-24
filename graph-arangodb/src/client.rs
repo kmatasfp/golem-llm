@@ -3,9 +3,9 @@ use golem_graph::golem::graph::errors::GraphError;
 use golem_graph::golem::graph::schema::{
     ContainerInfo, ContainerType, EdgeTypeDefinition, IndexDefinition, IndexType,
 };
+use reqwest::{Client, Method, Response};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
-use reqwest::{Client, Method, Response};
 
 pub struct ArangoDbApi {
     base_url: String,
@@ -20,37 +20,48 @@ impl ArangoDbApi {
             "Basic {}",
             general_purpose::STANDARD.encode(format!("{}:{}", username, password))
         );
-        
+
         // Create client using the same pattern as working LLM clients
         let client = Client::builder()
             .build()
             .expect("Failed to initialize HTTP client");
 
-        Self { base_url, client, auth_header }
+        Self {
+            base_url,
+            client,
+            auth_header,
+        }
     }
 
-    fn execute<T: DeserializeOwned>(&self, method: Method, endpoint: &str, body: Option<&Value>) -> Result<T, GraphError> {
+    fn execute<T: DeserializeOwned>(
+        &self,
+        method: Method,
+        endpoint: &str,
+        body: Option<&Value>,
+    ) -> Result<T, GraphError> {
         let url = format!("{}{}", self.base_url, endpoint);
-        
+
         // Build request using the same pattern as working LLM clients
-        let mut request_builder = self.client
+        let mut request_builder = self
+            .client
             .request(method, url)
             .header("authorization", &self.auth_header);
 
         // Add body if provided - serialize to string to avoid chunked encoding
         if let Some(body_value) = body {
-            let body_string = serde_json::to_string(body_value)
-                .map_err(|e| GraphError::InternalError(format!("Failed to serialize request body: {}", e)))?;
-            
+            let body_string = serde_json::to_string(body_value).map_err(|e| {
+                GraphError::InternalError(format!("Failed to serialize request body: {}", e))
+            })?;
+
             request_builder = request_builder
                 .header("content-type", "application/json")
                 .header("content-length", body_string.len().to_string())
                 .body(body_string);
         }
 
-        let response = request_builder
-            .send()
-            .map_err(|e| GraphError::ConnectionFailed(e.to_string()+ " - Failed to send request"))?;
+        let response = request_builder.send().map_err(|e| {
+            GraphError::ConnectionFailed(e.to_string() + " - Failed to send request")
+        })?;
 
         self.handle_response(response)
     }
@@ -58,11 +69,11 @@ impl ArangoDbApi {
     fn handle_response<T: DeserializeOwned>(&self, response: Response) -> Result<T, GraphError> {
         let status = response.status();
         let status_code = status.as_u16();
-        
+
         if status.is_success() {
-            let response_body: Value = response
-                .json()
-                .map_err(|e| GraphError::InternalError(format!("Failed to parse response body: {}", e)))?;
+            let response_body: Value = response.json().map_err(|e| {
+                GraphError::InternalError(format!("Failed to parse response body: {}", e))
+            })?;
 
             if let Some(result) = response_body.get("result") {
                 serde_json::from_value(result.clone()).map_err(|e| {
@@ -80,10 +91,10 @@ impl ArangoDbApi {
                 })
             }
         } else {
-            let error_body: Value = response
-                .json()
-                .map_err(|e| GraphError::InternalError(format!("Failed to read error response: {}", e)))?;
-            
+            let error_body: Value = response.json().map_err(|e| {
+                GraphError::InternalError(format!("Failed to read error response: {}", e))
+            })?;
+
             let error_msg = error_body
                 .get("errorMessage")
                 .and_then(|v| v.as_str())
@@ -96,19 +107,21 @@ impl ArangoDbApi {
         match status {
             401 => GraphError::AuthenticationFailed(message.to_string()),
             403 => GraphError::AuthorizationFailed(message.to_string()),
-            404 => {
-                GraphError::InternalError(format!("Endpoint not found: {}", message))
-            }
+            404 => GraphError::InternalError(format!("Endpoint not found: {}", message)),
             409 => GraphError::TransactionConflict,
             _ => GraphError::InternalError(format!("ArangoDB error: {} - {}", status, message)),
         }
     }
 
+    #[allow(dead_code)]
     pub fn begin_transaction(&self, read_only: bool) -> Result<String, GraphError> {
         // Get all existing collections to register them with the transaction
         let existing_collections = self.list_collections().unwrap_or_default();
-        let collection_names: Vec<String> = existing_collections.iter().map(|c| c.name.clone()).collect();
-        
+        let collection_names: Vec<String> = existing_collections
+            .iter()
+            .map(|c| c.name.clone())
+            .collect();
+
         let collections = if read_only {
             json!({ "read": collection_names })
         } else {
@@ -127,7 +140,12 @@ impl ArangoDbApi {
             })
     }
 
-    pub fn begin_transaction_with_collections(&self, read_only: bool, collections: Vec<String>) -> Result<String, GraphError> {
+    #[allow(dead_code)]
+    pub fn begin_transaction_with_collections(
+        &self,
+        read_only: bool,
+        collections: Vec<String>,
+    ) -> Result<String, GraphError> {
         let collections_spec = if read_only {
             json!({ "read": collections })
         } else {
@@ -165,12 +183,13 @@ impl ArangoDbApi {
     ) -> Result<Value, GraphError> {
         // Use the same pattern but add the transaction header
         let url = format!("{}/_api/cursor", self.base_url);
-        
+
         // Serialize to string to avoid chunked encoding
         let body_string = serde_json::to_string(&query)
             .map_err(|e| GraphError::InternalError(format!("Failed to serialize query: {}", e)))?;
-        
-        let response = self.client
+
+        let response = self
+            .client
             .request(Method::POST, url)
             .header("authorization", &self.auth_header)
             .header("content-type", "application/json")
@@ -205,11 +224,13 @@ impl ArangoDbApi {
 
     pub fn list_collections(&self) -> Result<Vec<ContainerInfo>, GraphError> {
         let response: Value = self.execute(Method::GET, "/_api/collection", None)?;
-        
+
         // Try to get the result array from the response
         let collections_array = if let Some(result) = response.get("result") {
             result.as_array().ok_or_else(|| {
-                GraphError::InternalError("Invalid response for list_collections - result is not array".to_string())
+                GraphError::InternalError(
+                    "Invalid response for list_collections - result is not array".to_string(),
+                )
             })?
         } else {
             // Fallback: try to use response directly as array (older API format)
@@ -217,7 +238,7 @@ impl ArangoDbApi {
                 GraphError::InternalError("Invalid response for list_collections - no result field and response is not array".to_string())
             })?
         };
-        
+
         let collections = collections_array
             .iter()
             .filter(|v| !v["isSystem"].as_bool().unwrap_or(false)) // Filter out system collections
@@ -273,10 +294,10 @@ impl ArangoDbApi {
     pub fn drop_index(&self, name: &str) -> Result<(), GraphError> {
         // First, find the index by name to get its ID
         let collections = self.list_collections()?;
-        
+
         for collection in collections {
             let endpoint = format!("/_api/index?collection={}", collection.name);
-            
+
             if let Ok(response) = self.execute::<Value>(Method::GET, &endpoint, None) {
                 if let Some(indexes) = response["indexes"].as_array() {
                     for idx in indexes {
@@ -284,7 +305,8 @@ impl ArangoDbApi {
                             if idx_name == name {
                                 if let Some(idx_id) = idx["id"].as_str() {
                                     let delete_endpoint = format!("/_api/index/{}", idx_id);
-                                    let _: Value = self.execute(Method::DELETE, &delete_endpoint, None)?;
+                                    let _: Value =
+                                        self.execute(Method::DELETE, &delete_endpoint, None)?;
                                     return Ok(());
                                 }
                             }
@@ -293,18 +315,21 @@ impl ArangoDbApi {
                 }
             }
         }
-        
-        Err(GraphError::InternalError(format!("Index '{}' not found", name)))
+
+        Err(GraphError::InternalError(format!(
+            "Index '{}' not found",
+            name
+        )))
     }
 
     pub fn list_indexes(&self) -> Result<Vec<IndexDefinition>, GraphError> {
         // Get all collections first
         let collections = self.list_collections()?;
         let mut all_indexes = Vec::new();
-        
+
         for collection in collections {
             let endpoint = format!("/_api/index?collection={}", collection.name);
-            
+
             match self.execute::<Value>(Method::GET, &endpoint, None) {
                 Ok(response) => {
                     if let Some(indexes) = response["indexes"].as_array() {
@@ -315,10 +340,10 @@ impl ArangoDbApi {
                                     continue;
                                 }
                             }
-                            
+
                             let name = index["name"].as_str().unwrap_or("").to_string();
                             let id = index["id"].as_str().unwrap_or("").to_string();
-                            
+
                             let fields: Vec<String> = index["fields"]
                                 .as_array()
                                 .map(|arr| {
@@ -328,11 +353,11 @@ impl ArangoDbApi {
                                         .collect()
                                 })
                                 .unwrap_or_default();
-                            
+
                             if fields.is_empty() {
                                 continue;
                             }
-                            
+
                             let unique = index["unique"].as_bool().unwrap_or(false);
                             let index_type_str = index["type"].as_str().unwrap_or("persistent");
                             let index_type = match index_type_str {
@@ -340,17 +365,23 @@ impl ArangoDbApi {
                                 "inverted" => golem_graph::golem::graph::schema::IndexType::Text,
                                 _ => golem_graph::golem::graph::schema::IndexType::Exact,
                             };
-                            
+
                             // Use a combination of collection and fields as logical name for matching
                             let logical_name = if fields.len() == 1 {
                                 format!("idx_{}_{}", collection.name, fields[0])
                             } else {
                                 format!("idx_{}_{}", collection.name, fields.join("_"))
                             };
-                            
+
                             // Prefer the ArangoDB generated name, but fall back to our logical name
-                            let final_name = if !name.is_empty() { name } else if !id.is_empty() { id } else { logical_name };
-                            
+                            let final_name = if !name.is_empty() {
+                                name
+                            } else if !id.is_empty() {
+                                id
+                            } else {
+                                logical_name
+                            };
+
                             all_indexes.push(IndexDefinition {
                                 name: final_name,
                                 label: collection.name.clone(),
@@ -368,35 +399,35 @@ impl ArangoDbApi {
                 }
             }
         }
-        
+
         Ok(all_indexes)
     }
 
     pub fn get_index(&self, name: &str) -> Result<Option<IndexDefinition>, GraphError> {
         let all_indexes = self.list_indexes()?;
-        
+
         // Try to find by exact name match first
         if let Some(index) = all_indexes.iter().find(|idx| idx.name == name) {
             return Ok(Some(index.clone()));
         }
-        
+
         // If the requested name follows our pattern (idx_collection_field), try to match by properties
         if name.starts_with("idx_") {
             let parts: Vec<&str> = name.split('_').collect();
             if parts.len() >= 3 {
                 let collection_part = parts[1];
                 let field_part = parts[2..].join("_");
-                
+
                 if let Some(index) = all_indexes.iter().find(|idx| {
-                    idx.label == collection_part && 
-                    idx.properties.len() == 1 && 
-                    idx.properties[0] == field_part
+                    idx.label == collection_part
+                        && idx.properties.len() == 1
+                        && idx.properties[0] == field_part
                 }) {
                     return Ok(Some(index.clone()));
                 }
             }
         }
-        
+
         Ok(None)
     }
 
@@ -405,7 +436,7 @@ impl ArangoDbApi {
         // The from/to collection constraints are not enforced at the database level
         // but are handled at the application level
         self.create_collection(&definition.collection, ContainerType::EdgeContainer)?;
-        
+
         // Note: ArangoDB doesn't enforce from/to collection constraints like some other graph databases
         // The constraints in EdgeTypeDefinition are mainly for application-level validation
         Ok(())
@@ -435,14 +466,17 @@ impl ArangoDbApi {
     }
 
     pub fn get_database_statistics(&self) -> Result<DatabaseStatistics, GraphError> {
-        let collections: ListCollectionsResponse = self.execute(Method::GET, "/_api/collection?excludeSystem=true", None)?;
+        let collections: ListCollectionsResponse =
+            self.execute(Method::GET, "/_api/collection?excludeSystem=true", None)?;
 
         let mut total_vertex_count = 0;
         let mut total_edge_count = 0;
 
         for collection_info in collections.result {
-            let properties_endpoint = format!("/_api/collection/{}/properties", collection_info.name);
-            let properties: CollectionPropertiesResponse = self.execute(Method::GET, &properties_endpoint, None)?;
+            let properties_endpoint =
+                format!("/_api/collection/{}/properties", collection_info.name);
+            let properties: CollectionPropertiesResponse =
+                self.execute(Method::GET, &properties_endpoint, None)?;
 
             if properties.collection_type == ArangoCollectionType::Edge {
                 total_edge_count += properties.count;
@@ -457,11 +491,16 @@ impl ArangoDbApi {
         })
     }
 
+    #[allow(dead_code)]
     pub fn execute_query(&self, query: Value) -> Result<Value, GraphError> {
         self.execute(Method::POST, "/_api/cursor", Some(&query))
     }
 
-    pub fn ensure_collection_exists(&self, name: &str, container_type: ContainerType) -> Result<(), GraphError> {
+    pub fn ensure_collection_exists(
+        &self,
+        name: &str,
+        container_type: ContainerType,
+    ) -> Result<(), GraphError> {
         // Try to create collection, ignore error if it already exists
         match self.create_collection(name, container_type) {
             Ok(_) => Ok(()),
@@ -475,7 +514,7 @@ impl ArangoDbApi {
         // Start with common collections that are likely to be used
         let common_collections = vec![
             "Person".to_string(),
-            "TempUser".to_string(), 
+            "TempUser".to_string(),
             "Company".to_string(),
             "Employee".to_string(),
             "Node".to_string(),
@@ -486,18 +525,21 @@ impl ArangoDbApi {
             "CONNECTS".to_string(),
             "FOLLOWS".to_string(),
         ];
-        
+
         // Also include any existing collections
         let existing_collections = self.list_collections().unwrap_or_default();
-        let mut all_collections: Vec<String> = existing_collections.iter().map(|c| c.name.clone()).collect();
-        
+        let mut all_collections: Vec<String> = existing_collections
+            .iter()
+            .map(|c| c.name.clone())
+            .collect();
+
         // Add common collections that might not exist yet
         for common in common_collections {
             if !all_collections.contains(&common) {
                 all_collections.push(common);
             }
         }
-        
+
         let collections = if read_only {
             json!({ "read": all_collections })
         } else {

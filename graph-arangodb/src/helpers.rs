@@ -157,21 +157,27 @@ pub(crate) fn element_id_to_string(id: &ElementId) -> String {
 pub(crate) fn config_from_env() -> Result<ConnectionConfig, GraphError> {
     let host = env::var("ARANGO_HOST")
         .or_else(|_| env::var("ARANGODB_HOST"))
-        .map_err(|_| GraphError::ConnectionFailed("Missing ARANGO_HOST or ARANGODB_HOST env var".to_string()))?;
+        .map_err(|_| {
+            GraphError::ConnectionFailed("Missing ARANGO_HOST or ARANGODB_HOST env var".to_string())
+        })?;
     let port = env::var("ARANGO_PORT")
         .or_else(|_| env::var("ARANGODB_PORT"))
         .map_or(Ok(None), |p| {
-            p.parse::<u16>()
-                .map(Some)
-                .map_err(|e| GraphError::ConnectionFailed(format!("Invalid ARANGO_PORT/ARANGODB_PORT: {}", e)))
+            p.parse::<u16>().map(Some).map_err(|e| {
+                GraphError::ConnectionFailed(format!("Invalid ARANGO_PORT/ARANGODB_PORT: {}", e))
+            })
         })?;
     let username = env::var("ARANGO_USER")
         .or_else(|_| env::var("ARANGODB_USER"))
-        .map_err(|_| GraphError::ConnectionFailed("Missing ARANGO_USER or ARANGODB_USER env var".to_string()))?;
+        .map_err(|_| {
+            GraphError::ConnectionFailed("Missing ARANGO_USER or ARANGODB_USER env var".to_string())
+        })?;
     let password = env::var("ARANGO_PASSWORD")
         .or_else(|_| env::var("ARANGODB_PASSWORD"))
         .map_err(|_| {
-            GraphError::ConnectionFailed("Missing ARANGO_PASSWORD or ARANGODB_PASSWORD env var".to_string())
+            GraphError::ConnectionFailed(
+                "Missing ARANGO_PASSWORD or ARANGODB_PASSWORD env var".to_string(),
+            )
         })?;
     let database_name = env::var("ARANGO_DATABASE")
         .or_else(|_| env::var("ARANGODB_DATABASE"))
@@ -318,7 +324,7 @@ mod tests {
         env::remove_var("ARANGO_PORT");
         env::remove_var("ARANGODB_DATABASE");
         env::remove_var("ARANGO_DATABASE");
-        
+
         let err = config_from_env().unwrap_err();
         match err {
             GraphError::ConnectionFailed(msg) => assert!(msg.contains("Missing ARANGO_HOST")),
@@ -363,7 +369,7 @@ mod tests {
         } else {
             env::remove_var("ARANGODB_DATABASE");
         }
-        
+
         // Restore ARANGO_* variants
         if let Some(val) = orig_arango_host {
             env::set_var("ARANGO_HOST", val);

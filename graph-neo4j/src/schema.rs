@@ -37,7 +37,7 @@ impl GuestSchemaManager for SchemaManager {
                     "CREATE CONSTRAINT constraint_required_{label}_{name} \
                      IF NOT EXISTS FOR (n:{label}) REQUIRE n.{name} IS NOT NULL",
                     label = schema.label,
-                    name  = prop.name
+                    name = prop.name
                 );
                 let tx = self.graph.begin_transaction()?;
                 // run and swallow the EE‐only error
@@ -47,7 +47,9 @@ impl GuestSchemaManager for SchemaManager {
                 ) {
                     Err(e) => {
                         let msg = e.to_string();
-                        if msg.contains("Enterprise Edition") || msg.contains("ConstraintCreationFailed") {
+                        if msg.contains("Enterprise Edition")
+                            || msg.contains("ConstraintCreationFailed")
+                        {
                             println!("[WARN] Skipping property existence constraint: requires Neo4j Enterprise Edition. Error: {}", msg);
                             tx.commit()?;
                         } else {
@@ -63,7 +65,7 @@ impl GuestSchemaManager for SchemaManager {
                     "CREATE CONSTRAINT constraint_unique_{label}_{name} \
                      IF NOT EXISTS FOR (n:{label}) REQUIRE n.{name} IS UNIQUE",
                     label = schema.label,
-                    name  = prop.name
+                    name = prop.name
                 );
                 let tx = self.graph.begin_transaction()?;
                 // unique constraints work on CE
@@ -77,7 +79,6 @@ impl GuestSchemaManager for SchemaManager {
 
         Ok(())
     }
-
 
     fn define_edge_label(
         &self,
@@ -128,40 +129,43 @@ impl GuestSchemaManager for SchemaManager {
             "statement": props_query,
             "parameters": { "label": &label }
         });
-        let props_resp = tx.api.execute_in_transaction(
-            &tx.transaction_url,
-            json!({ "statements": [props_stmt] }),
-        )?;
+        let props_resp = tx
+            .api
+            .execute_in_transaction(&tx.transaction_url, json!({ "statements": [props_stmt] }))?;
 
         // Fetch uniqueness constraints
-        let cons_query =
-            "SHOW CONSTRAINTS YIELD name, type, properties, labelsOrTypes \
+        let cons_query = "SHOW CONSTRAINTS YIELD name, type, properties, labelsOrTypes \
              WHERE type = 'UNIQUENESS' AND $label IN labelsOrTypes \
              RETURN properties";
         let cons_stmt = json!({
             "statement": cons_query,
             "parameters": { "label": &label }
         });
-        let cons_resp = tx.api.execute_in_transaction(
-            &tx.transaction_url,
-            json!({ "statements": [cons_stmt] }),
-        )?;
+        let cons_resp = tx
+            .api
+            .execute_in_transaction(&tx.transaction_url, json!({ "statements": [cons_stmt] }))?;
 
         tx.commit()?;
 
         // Parse properties
         let props_block = props_resp["results"]
-            .as_array().and_then(|r| r.first())
+            .as_array()
+            .and_then(|r| r.first())
             .ok_or_else(|| GraphError::InternalError("Invalid property schema response".into()))?;
         let props_data = props_block["data"]
-            .as_array().ok_or_else(|| GraphError::InternalError("Missing property schema data".into()))?;
+            .as_array()
+            .ok_or_else(|| GraphError::InternalError("Missing property schema data".into()))?;
 
         if props_data.is_empty() {
             return Ok(None);
         }
 
         #[derive(serde::Deserialize)]
-        struct Info { property_name: String, property_types: Vec<String>, mandatory: bool }
+        struct Info {
+            property_name: String,
+            property_types: Vec<String>,
+            mandatory: bool,
+        }
 
         let mut defs: HashMap<String, PropertyDefinition> = HashMap::new();
         for row_item in props_data {
@@ -170,14 +174,16 @@ impl GuestSchemaManager for SchemaManager {
                     if row.len() >= 3 {
                         let info = Info {
                             property_name: row[0].as_str().unwrap_or("").to_string(),
-                            property_types: serde_json::from_value(row[1].clone()).unwrap_or_default(),
+                            property_types: serde_json::from_value(row[1].clone())
+                                .unwrap_or_default(),
                             mandatory: row[2].as_bool().unwrap_or(false),
                         };
                         defs.insert(
                             info.property_name.clone(),
                             PropertyDefinition {
                                 name: info.property_name.clone(),
-                                property_type: info.property_types
+                                property_type: info
+                                    .property_types
                                     .first()
                                     .map(|s| map_neo4j_type_to_wit(s))
                                     .unwrap_or(PropertyType::StringType),
@@ -193,10 +199,14 @@ impl GuestSchemaManager for SchemaManager {
 
         // Parse uniqueness constraints
         let cons_block = cons_resp["results"]
-            .as_array().and_then(|r| r.first())
-            .ok_or_else(|| GraphError::InternalError("Invalid constraint schema response".into()))?;
+            .as_array()
+            .and_then(|r| r.first())
+            .ok_or_else(|| {
+                GraphError::InternalError("Invalid constraint schema response".into())
+            })?;
         let cons_data = cons_block["data"]
-            .as_array().ok_or_else(|| GraphError::InternalError("Missing constraint data".into()))?;
+            .as_array()
+            .ok_or_else(|| GraphError::InternalError("Missing constraint data".into()))?;
 
         for row_item in cons_data {
             if let Some(row_val) = row_item.get("row") {
@@ -222,7 +232,11 @@ impl GuestSchemaManager for SchemaManager {
         }
 
         let props = defs.into_values().collect();
-        Ok(Some(VertexLabelSchema { label, properties: props, container: None }))
+        Ok(Some(VertexLabelSchema {
+            label,
+            properties: props,
+            container: None,
+        }))
     }
 
     fn get_edge_label_schema(
