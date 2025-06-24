@@ -192,16 +192,14 @@ impl<G: ProviderGraph + 'static> connection::GuestGraph for DurableGraphResource
     fn begin_transaction(&self) -> Result<transactions::Transaction, GraphError> {
         self.graph.begin_transaction().map(|tx_wrapper| {
             let provider_transaction = tx_wrapper.into_inner::<G::Transaction>();
-            let durable = DurableTransaction::new(provider_transaction);
-            transactions::Transaction::new(durable)
+            transactions::Transaction::new(provider_transaction)
         })
     }
 
     fn begin_read_transaction(&self) -> Result<transactions::Transaction, GraphError> {
         self.graph.begin_read_transaction().map(|tx_wrapper| {
             let provider_transaction = tx_wrapper.into_inner::<G::Transaction>();
-            let durable = DurableTransaction::new(provider_transaction);
-            transactions::Transaction::new(durable)
+            transactions::Transaction::new(provider_transaction)
         })
     }
 
@@ -702,8 +700,8 @@ mod tests {
         roundtrip_test(PropertyValue::Uint16(65535));
         roundtrip_test(PropertyValue::Uint32(1234567890));
         roundtrip_test(PropertyValue::Uint64(12345678901234567890));
-        roundtrip_test(PropertyValue::Float32(123.456));
-        roundtrip_test(PropertyValue::Float64(123.456789012345));
+        roundtrip_test(PropertyValue::Float32Value(123.456));
+        roundtrip_test(PropertyValue::Float64Value(123.456789012345));
         roundtrip_test(PropertyValue::StringValue("hello world".to_string()));
         roundtrip_test(PropertyValue::Bytes(vec![1, 2, 3, 4, 5]));
     }
@@ -714,7 +712,7 @@ mod tests {
             edge_type: "knows".to_string(),
             from_vertex: ElementId::Int64(1),
             to_vertex: ElementId::Int64(2),
-            properties: vec![("weight".to_string(), PropertyValue::Float32(0.9))],
+            properties: vec![("weight".to_string(), PropertyValue::Float32Value(0.9))],
         };
         roundtrip_test(params);
     }

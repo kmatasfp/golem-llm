@@ -998,7 +998,7 @@ impl GuestTransaction for Transaction {
             println!("[LOG update_edge] parsed inV = {:#?}", arr[1].get("@value").unwrap());
         }
     
-        // 7d) properties: everything else (here only “weight”)
+        // 7d) properties: everything else (here only "weight")
         let mut props = serde_json::Map::new();
         for (k, v) in flat.into_iter() {
             if k != "id" && k != "label" && k != "IN" && k != "OUT" {
@@ -1107,15 +1107,21 @@ impl GuestTransaction for Transaction {
             Direction::Both => "both",
         };
 
-        let mut labels_str = "".to_string();
-        if let Some(labels) = edge_types {
+        let mut gremlin = if let Some(labels) = edge_types {
             if !labels.is_empty() {
-                bindings.insert("edge_labels".to_string(), json!(labels));
-                labels_str = "edge_labels".to_string();
+                let label_bindings: Vec<String> = labels.iter().enumerate().map(|(i, label)| {
+                    let binding_key = format!("label_{}", i);
+                    bindings.insert(binding_key.clone(), json!(label));
+                    binding_key
+                }).collect();
+                let labels_str = label_bindings.join(", ");
+                format!("g.V(vertex_id).{}({})", direction_step, labels_str)
+            } else {
+                format!("g.V(vertex_id).{}()", direction_step)
             }
-        }
-
-        let mut gremlin = format!("g.V(vertex_id).{}({})", direction_step, labels_str);
+        } else {
+            format!("g.V(vertex_id).{}()", direction_step)
+        };
 
         if let Some(lim) = limit {
             gremlin.push_str(&format!(".limit({})", lim));
@@ -1123,13 +1129,20 @@ impl GuestTransaction for Transaction {
 
         gremlin.push_str(".elementMap()");
 
-        let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
+        println!("[DEBUG get_adjacent_vertices] Generated Gremlin: {}", gremlin);
+        println!("[DEBUG get_adjacent_vertices] Bindings: {:#?}", bindings);
 
-        let result_data = response["result"]["data"].as_array().ok_or_else(|| {
-            GraphError::InternalError(
-                "Invalid response from Gremlin for get_adjacent_vertices".to_string(),
-            )
-        })?;
+        let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
+        println!("[DEBUG get_adjacent_vertices] Raw response: {:#?}", response);
+
+        let data = &response["result"]["data"];
+        let result_data = if let Some(arr) = data.as_array() {
+            arr.clone()
+        } else if let Some(inner) = data.get("@value").and_then(Value::as_array) {
+            inner.clone()
+        } else {
+            return Err(GraphError::InternalError("Invalid response from Gremlin for get_adjacent_vertices".to_string()));
+        };
 
         result_data
             .iter()
@@ -1158,15 +1171,21 @@ impl GuestTransaction for Transaction {
             Direction::Both => "bothE",
         };
 
-        let mut labels_str = "".to_string();
-        if let Some(labels) = edge_types {
+        let mut gremlin = if let Some(labels) = edge_types {
             if !labels.is_empty() {
-                bindings.insert("edge_labels".to_string(), json!(labels));
-                labels_str = "edge_labels".to_string();
+                let label_bindings: Vec<String> = labels.iter().enumerate().map(|(i, label)| {
+                    let binding_key = format!("edge_label_{}", i);
+                    bindings.insert(binding_key.clone(), json!(label));
+                    binding_key
+                }).collect();
+                let labels_str = label_bindings.join(", ");
+                format!("g.V(vertex_id).{}({})", direction_step, labels_str)
+            } else {
+                format!("g.V(vertex_id).{}()", direction_step)
             }
-        }
-
-        let mut gremlin = format!("g.V(vertex_id).{}({})", direction_step, labels_str);
+        } else {
+            format!("g.V(vertex_id).{}()", direction_step)
+        };
 
         if let Some(lim) = limit {
             gremlin.push_str(&format!(".limit({})", lim));
@@ -1174,13 +1193,20 @@ impl GuestTransaction for Transaction {
 
         gremlin.push_str(".elementMap()");
 
-        let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
+        println!("[DEBUG get_connected_edges] Generated Gremlin: {}", gremlin);
+        println!("[DEBUG get_connected_edges] Bindings: {:#?}", bindings);
 
-        let result_data = response["result"]["data"].as_array().ok_or_else(|| {
-            GraphError::InternalError(
-                "Invalid response from Gremlin for get_connected_edges".to_string(),
-            )
-        })?;
+        let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
+        println!("[DEBUG get_connected_edges] Raw response: {:#?}", response);
+
+        let data = &response["result"]["data"];
+        let result_data = if let Some(arr) = data.as_array() {
+            arr.clone()
+        } else if let Some(inner) = data.get("@value").and_then(Value::as_array) {
+            inner.clone()
+        } else {
+            return Err(GraphError::InternalError("Invalid response from Gremlin for get_connected_edges".to_string()));
+        };
 
         result_data
             .iter()
@@ -1345,7 +1371,7 @@ impl GuestTransaction for Transaction {
         to: ElementId,
         properties: PropertyMap,
     ) -> Result<Edge, GraphError> {
-        // 1) If no properties, upsert isn’t supported
+        // 1) If no properties, upsert isn't supported
         if properties.is_empty() {
             return Err(GraphError::UnsupportedOperation(
                 "Upsert requires at least one property to match on.".to_string(),
@@ -1408,344 +1434,3 @@ impl GuestTransaction for Transaction {
         true
     }
 }
-
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::client::JanusGraphApi;
-//     use golem_graph::golem::graph::types::PropertyValue;
-//     use std::env;
-//     use std::sync::Arc;
-
-//     fn create_test_transaction() -> Transaction {
-//         let host = env::var("JANUSGRAPH_HOST").unwrap_or_else(|_| "localhost".to_string());
-//         let port = env::var("JANUSGRAPH_PORT")
-//             .unwrap_or_else(|_| "8182".to_string())
-//             .parse()
-//             .unwrap();
-//         let api = JanusGraphApi::new(&host, port, None, None).unwrap();
-//         Transaction { api: Arc::new(api) }
-//     }
-
-//     #[test]
-//     fn test_create_and_get_vertex() {
-//         // if env::var("JANUSGRAPH_HOST").is_err() {
-//         //     println!("Skipping test_create_and_get_vertex: JANUSGRAPH_HOST not set");
-//         //     return;
-//         // }
-
-//         let tx = create_test_transaction();
-//         let vertex_type = "person".to_string();
-//         let properties = vec![(
-//             "name".to_string(),
-//             PropertyValue::StringValue("Alice".to_string()),
-//         )];
-
-//         let created_vertex = tx
-//             .create_vertex(vertex_type.clone(), properties.clone())
-//             .unwrap();
-//         assert_eq!(created_vertex.vertex_type, vertex_type);
-
-//         let retrieved_vertex = tx.get_vertex(created_vertex.id.clone()).unwrap().unwrap();
-//         assert_eq!(retrieved_vertex.id, created_vertex.id);
-//         assert_eq!(
-//             retrieved_vertex.properties[0].1,
-//             PropertyValue::StringValue("Alice".to_string())
-//         );
-
-//         tx.delete_vertex(created_vertex.id, true).unwrap();
-//     }
-
-//     #[test]
-// fn test_create_and_delete_edge() {
-//     // if env::var("JANUSGRAPH_HOST").is_err() {
-//     //     println!("Skipping test_create_and_get_vertex: JANUSGRAPH_HOST not set");
-//     //     return;
-//     // }
-//     let tx1 = create_test_transaction();
-
-//     // Create two vertices
-//     let v1 = tx1.create_vertex("person".into(), vec![]).unwrap();
-//     let v2 = tx1.create_vertex("person".into(), vec![]).unwrap();
-
-//     // Commit the transaction to persist the vertices
-//     tx1.commit().unwrap();
-
-//     // Start a new transaction for creating the edge
-//     let tx2 = create_test_transaction();
-
-//     // Create the edge between the committed vertices
-//     let created_edge = tx2
-//         .create_edge("knows".to_string(), v1.id.clone(), v2.id.clone(), vec![])
-//         .unwrap();
-
-//     // Validate the edge
-//     assert_eq!(created_edge.edge_type, "knows");
-//     assert_eq!(created_edge.from_vertex, v1.id);
-//     assert_eq!(created_edge.to_vertex, v2.id);
-
-//     // Delete the edge
-//     tx2.delete_edge(created_edge.id.clone()).unwrap();
-//     assert!(tx2.get_edge(created_edge.id).unwrap().is_none());
-
-//     // Clean up the vertices
-//     tx2.delete_vertex(v1.id, true).unwrap();
-//     tx2.delete_vertex(v2.id, true).unwrap();
-
-//     // Commit the deletions
-//     tx2.commit().unwrap();
-// }
-
-    
-
-//     #[test]
-//     fn test_update_vertex_properties() {
-//         // if env::var("JANUSGRAPH_HOST").is_err() {
-//         //     println!("Skipping test_update_vertex_properties: JANUSGRAPH_HOST not set");
-//         //     return;
-//         // }
-
-//         let tx = create_test_transaction();
-//         let vertex_type = "character".to_string();
-//         let initial_properties = vec![(
-//             "name".to_string(),
-//             PropertyValue::StringValue("Gandalf".to_string()),
-//         )];
-
-//         let created_vertex = tx
-//             .create_vertex(vertex_type.clone(), initial_properties)
-//             .unwrap();
-
-//         let updated_properties = vec![(
-//             "name".to_string(),
-//             PropertyValue::StringValue("Gandalf the White".to_string()),
-//         )];
-//         let updated_vertex = tx
-//             .update_vertex_properties(created_vertex.id.clone(), updated_properties)
-//             .unwrap();
-
-//         let retrieved_name = updated_vertex
-//             .properties
-//             .iter()
-//             .find(|(k, _)| k == "name")
-//             .unwrap();
-//         assert_eq!(
-//             retrieved_name.1,
-//             PropertyValue::StringValue("Gandalf the White".to_string())
-//         );
-
-//         tx.delete_vertex(created_vertex.id, true).unwrap();
-//     }
-
-//     #[test]
-//     fn test_update_edge_properties() {
-//         // if env::var("JANUSGRAPH_HOST").is_err() {
-//         //     println!("Skipping test_update_edge_properties: JANUSGRAPH_HOST not set");
-//         //     return;
-//         // }
-
-//         let tx = create_test_transaction();
-
-//         let v1 = tx.create_vertex("person".to_string(), vec![]).unwrap();
-//         let v2 = tx.create_vertex("person".to_string(), vec![]).unwrap();
-
-//         let initial_properties = vec![("weight".to_string(), PropertyValue::Float64(1.0))];
-//         let created_edge = tx
-//             .create_edge(
-//                 "knows".to_string(),
-//                 v1.id.clone(),
-//                 v2.id.clone(),
-//                 initial_properties,
-//             )
-//             .unwrap();
-
-//         let updated_properties = vec![("weight".to_string(), PropertyValue::Float64(2.0))];
-//         tx.update_edge_properties(created_edge.id.clone(), updated_properties)
-//             .unwrap();
-
-//         let retrieved_edge = tx.get_edge(created_edge.id.clone()).unwrap().unwrap();
-//         let retrieved_weight = retrieved_edge
-//             .properties
-//             .iter()
-//             .find(|(k, _)| k == "weight")
-//             .unwrap();
-//         assert_eq!(retrieved_weight.1, PropertyValue::Float64(2.0));
-
-//         tx.delete_vertex(v1.id, true).unwrap();
-//         tx.delete_vertex(v2.id, true).unwrap();
-//     }
-
-//     #[test]
-//     fn test_update_vertex_replaces_properties() {
-//         // if env::var("JANUSGRAPH_HOST").is_err() {
-//         //     println!("Skipping test_update_vertex_replaces_properties: JANUSGRAPH_HOST not set");
-//         //     return;
-//         // }
-
-//         let tx = create_test_transaction();
-//         let initial_properties = vec![
-//             (
-//                 "name".to_string(),
-//                 PropertyValue::StringValue("test".to_string()),
-//             ),
-//             (
-//                 "status".to_string(),
-//                 PropertyValue::StringValue("initial".to_string()),
-//             ),
-//         ];
-//         let vertex = tx
-//             .create_vertex("test_v".to_string(), initial_properties)
-//             .unwrap();
-
-//         let new_properties = vec![
-//             (
-//                 "name".to_string(),
-//                 PropertyValue::StringValue("test_updated".to_string()),
-//             ),
-//             (
-//                 "new_prop".to_string(),
-//                 PropertyValue::StringValue("added".to_string()),
-//             ),
-//         ];
-//         let updated_vertex = tx.update_vertex(vertex.id.clone(), new_properties).unwrap();
-
-//         assert_eq!(updated_vertex.properties.len(), 2);
-//         let updated_name = updated_vertex
-//             .properties
-//             .iter()
-//             .find(|(k, _)| k == "name")
-//             .unwrap()
-//             .1
-//             .clone();
-//         let new_prop = updated_vertex
-//             .properties
-//             .iter()
-//             .find(|(k, _)| k == "new_prop")
-//             .unwrap()
-//             .1
-//             .clone();
-//         assert_eq!(
-//             updated_name,
-//             PropertyValue::StringValue("test_updated".to_string())
-//         );
-//         assert_eq!(new_prop, PropertyValue::StringValue("added".to_string()));
-//         assert!(!updated_vertex.properties.iter().any(|(k, _)| k == "status"));
-
-//         tx.delete_vertex(vertex.id, true).unwrap();
-//     }
-
-//     #[test]
-//     fn test_update_edge_replaces_properties() {
-//         // if env::var("JANUSGRAPH_HOST").is_err() {
-//         //     println!("Skipping test_update_edge_replaces_properties: JANUSGRAPH_HOST not set");
-//         //     return;
-//         // }
-
-//         let tx = create_test_transaction();
-//         let v1 = tx.create_vertex("person".to_string(), vec![]).unwrap();
-//         let v2 = tx.create_vertex("person".to_string(), vec![]).unwrap();
-
-//         let initial_properties = vec![
-//             ("weight".to_string(), PropertyValue::Float64(1.0)),
-//             (
-//                 "type".to_string(),
-//                 PropertyValue::StringValue("original".to_string()),
-//             ),
-//         ];
-//         let edge = tx
-//             .create_edge(
-//                 "rel".to_string(),
-//                 v1.id.clone(),
-//                 v2.id.clone(),
-//                 initial_properties,
-//             )
-//             .unwrap();
-
-//         // Replace properties
-//         let new_properties = vec![
-//             ("weight".to_string(), PropertyValue::Float64(2.0)),
-//             (
-//                 "notes".to_string(),
-//                 PropertyValue::StringValue("replaced".to_string()),
-//             ),
-//         ];
-//         let updated_edge = tx.update_edge(edge.id.clone(), new_properties).unwrap();
-
-//         assert_eq!(updated_edge.properties.len(), 2);
-//         let updated_weight = updated_edge
-//             .properties
-//             .iter()
-//             .find(|(k, _)| k == "weight")
-//             .unwrap()
-//             .1
-//             .clone();
-//         let new_prop = updated_edge
-//             .properties
-//             .iter()
-//             .find(|(k, _)| k == "notes")
-//             .unwrap()
-//             .1
-//             .clone();
-//         assert_eq!(updated_weight, PropertyValue::Float64(2.0));
-//         assert_eq!(new_prop, PropertyValue::StringValue("replaced".to_string()));
-//         //assert!(updated_edge.properties.iter().any(|(k, _)| k == "type"));
-
-//         tx.delete_vertex(v1.id, true).unwrap();
-//         tx.delete_vertex(v2.id, true).unwrap();
-//     }
-
-//     #[test]
-//     fn test_transaction_commit() {
-//         // if env::var("JANUSGRAPH_HOST").is_err() {
-//         //     println!("Skipping test_transaction_commit: JANUSGRAPH_HOST not set");
-//         //     return;
-//         // }
-
-//         let tx = create_test_transaction();
-//         let result = tx.commit();
-//         assert!(result.is_ok());
-//     }
-
-//     #[test]
-//     fn test_transaction_rollback() {
-//         // if env::var("JANUSGRAPH_HOST").is_err() {
-//         //     println!("Skipping test_transaction_rollback: JANUSGRAPH_HOST not set");
-//         //     return;
-//         // }
-
-//         let tx = create_test_transaction();
-//         let result = tx.rollback();
-//         assert!(result.is_ok());
-//     }
-
-//     #[test]
-//     fn test_unsupported_upsert_operations() {
-//         // if env::var("JANUSGRAPH_HOST").is_err() {
-//         //     println!("Skipping test_unsupported_upsert_operations: JANUSGRAPH_HOST not set");
-//         //     return;
-//         // }
-//         let tx = create_test_transaction();
-
-//         let v1 = tx.create_vertex("person".to_string(), vec![]).unwrap();
-
-//         let upsert_vertex_result = tx.upsert_vertex(None, "person".to_string(), vec![]);
-//         assert!(matches!(
-//             upsert_vertex_result,
-//             Err(GraphError::UnsupportedOperation(_))
-//         ));
-
-//         let upsert_edge_result = tx.upsert_edge(
-//             None,
-//             "knows".to_string(),
-//             v1.id.clone(),
-//             v1.id.clone(),
-//             vec![],
-//         );
-//         assert!(matches!(
-//             upsert_edge_result,
-//             Err(GraphError::UnsupportedOperation(_))
-//         ));
-
-//         tx.commit().unwrap();
-//     }
-// }

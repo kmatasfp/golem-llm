@@ -17,8 +17,8 @@ pub(crate) fn to_json_value(value: PropertyValue) -> Result<Value, GraphError> {
         PropertyValue::Uint16(i) => json!(i),
         PropertyValue::Uint32(i) => json!(i),
         PropertyValue::Uint64(i) => json!(i),
-        PropertyValue::Float32(f) => json!(f),
-        PropertyValue::Float64(f) => json!(f),
+        PropertyValue::Float32Value(f) => json!(f),
+        PropertyValue::Float64Value(f) => json!(f),
         PropertyValue::StringValue(s) => Value::String(s),
         PropertyValue::Bytes(b) => Value::String(general_purpose::STANDARD.encode(b)),
         PropertyValue::Date(d) => {
@@ -61,7 +61,7 @@ pub(crate) fn from_gremlin_value(value: &Value) -> Result<PropertyValue, GraphEr
             if let Some(i) = n.as_i64() {
                 Ok(PropertyValue::Int64(i))
             } else if let Some(f) = n.as_f64() {
-                Ok(PropertyValue::Float64(f))
+                Ok(PropertyValue::Float64Value(f))
             } else {
                 Err(GraphError::InvalidPropertyType(
                     "Unsupported number type from Gremlin".to_string(),
@@ -95,7 +95,7 @@ pub(crate) fn from_gremlin_value(value: &Value) -> Result<PropertyValue, GraphEr
                     }
                     "g:Float" | "g:Double" => {
                         if let Some(f) = gvalue.as_f64() {
-                            Ok(PropertyValue::Float64(f))
+                            Ok(PropertyValue::Float64Value(f))
                         } else {
                             Err(GraphError::InvalidPropertyType(
                                 "Invalid GraphSON float value".to_string(),
@@ -196,19 +196,19 @@ fn parse_iso_datetime(s: &str) -> Result<Datetime, ()> {
     })
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use golem_graph::golem::graph::types::{Duration, PropertyValue};
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use golem_graph::golem::graph::types::{Duration, PropertyValue};
 
-//     #[test]
-//     fn test_unsupported_duration_conversion() {
-//         let original = PropertyValue::Duration(Duration {
-//             seconds: 10,
-//             nanoseconds: 0,
-//         });
+    #[test]
+    fn test_unsupported_duration_conversion() {
+        let original = PropertyValue::Duration(Duration {
+            seconds: 10,
+            nanoseconds: 0,
+        });
 
-//         let result = to_json_value(original);
-//         assert!(matches!(result, Err(GraphError::UnsupportedOperation(_))));
-//     }
-// }
+        let result = to_json_value(original);
+        assert!(matches!(result, Err(GraphError::UnsupportedOperation(_))));
+    }
+}

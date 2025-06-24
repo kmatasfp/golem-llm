@@ -15,7 +15,12 @@ pub(crate) fn parse_vertex_from_graph_data(
     let id = if let Some(id_val) = id_override {
         id_val
     } else {
-        from_cypher_element_id(&node_val["id"])?
+        // Use elementId first (Neo4j 5.x), fallback to id (Neo4j 4.x)
+        if let Some(element_id) = node_val.get("elementId") {
+            from_cypher_element_id(element_id)?
+        } else {
+            from_cypher_element_id(&node_val["id"])?
+        }
     };
 
     let labels: Vec<String> = node_val["labels"]
@@ -122,7 +127,7 @@ pub(crate) fn map_neo4j_type_to_wit(neo4j_type: &str) -> PropertyType {
     match neo4j_type {
         "String" => PropertyType::StringType,
         "Integer" => PropertyType::Int64,
-        "Float" => PropertyType::Float64,
+        "Float" => PropertyType::Float64Type,
         "Boolean" => PropertyType::Boolean,
         "Date" => PropertyType::Date,
         "DateTime" => PropertyType::Datetime,
@@ -212,7 +217,7 @@ mod tests {
     fn test_map_neo4j_type_to_wit() {
         assert_eq!(map_neo4j_type_to_wit("String"), PropertyType::StringType);
         assert_eq!(map_neo4j_type_to_wit("Integer"), PropertyType::Int64);
-        assert_eq!(map_neo4j_type_to_wit("Float"), PropertyType::Float64);
+        assert_eq!(map_neo4j_type_to_wit("Float"), PropertyType::Float64Type);
         assert_eq!(map_neo4j_type_to_wit("Boolean"), PropertyType::Boolean);
         assert_eq!(map_neo4j_type_to_wit("Date"), PropertyType::Date);
         assert_eq!(map_neo4j_type_to_wit("DateTime"), PropertyType::Datetime);

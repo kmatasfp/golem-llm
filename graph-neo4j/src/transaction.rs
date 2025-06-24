@@ -199,7 +199,8 @@ impl GuestTransaction for Transaction {
         let properties_map = conversions::to_cypher_properties(properties)?;
         let statement = json!({
             "statement": "MATCH (n) WHERE elementId(n) = $id SET n = $props RETURN n",
-            "parameters": { "id": cypher_id, "props": properties_map }
+            "parameters": { "id": cypher_id, "props": properties_map },
+            "resultDataContents": ["row","graph"]
         });
         let statements = json!({ "statements": [statement] });
         let response = self
@@ -242,7 +243,8 @@ impl GuestTransaction for Transaction {
             "parameters": {
                 "id": cypher_id,
                 "props": properties_map,
-            }
+            },
+            "resultDataContents": ["row","graph"]
         });
 
         let statements = json!({ "statements": [statement] });
@@ -378,44 +380,34 @@ impl GuestTransaction for Transaction {
         to_vertex: ElementId,
         properties: PropertyMap,
     ) -> Result<Edge, GraphError> {
-        // 1) Turn ElementId::StringValue("67") or Int64(67) into an i64 for id(...)
-        let from_id_int = match from_vertex.clone() {
-            ElementId::Int64(i)       => i,
-            ElementId::StringValue(s) => s.parse::<i64>()
-                                           .map_err(|_| GraphError::InvalidQuery("Expected numeric id".into()))?,
-            ElementId::Uuid(_)        => {
-                return Err(GraphError::InvalidQuery(
-                    "Cannot use UUID for numeric id match".into(),
-                ))
-            }
+        // Convert ElementId to string for elementId() queries
+        let from_id_str = match from_vertex.clone() {
+            ElementId::StringValue(s) => s,
+            ElementId::Int64(i) => i.to_string(),
+            ElementId::Uuid(u) => u,
         };
-        let to_id_int = match to_vertex.clone() {
-            ElementId::Int64(i)       => i,
-            ElementId::StringValue(s) => s.parse::<i64>()
-                                           .map_err(|_| GraphError::InvalidQuery("Expected numeric id".into()))?,
-            ElementId::Uuid(_)        => {
-                return Err(GraphError::InvalidQuery(
-                    "Cannot use UUID for numeric id match".into(),
-                ))
-            }
+        let to_id_str = match to_vertex.clone() {
+            ElementId::StringValue(s) => s,
+            ElementId::Int64(i) => i.to_string(),
+            ElementId::Uuid(u) => u,
         };
     
-        // 2) Convert properties
+        // Convert properties
         let props = conversions::to_cypher_properties(properties.clone())?;
     
-        // 3) MATCH by id(), CREATE, then RETURN toString(id(...)) so we get "67", not "4:...:67"
+        // Use elementId() for vertex matching, return elementId for edge
         let stmt = json!({
             "statement": format!(
-                "MATCH (a) WHERE id(a) = $from_id \
-                 MATCH (b) WHERE id(b) = $to_id \
+                "MATCH (a) WHERE elementId(a) = $from_id \
+                 MATCH (b) WHERE elementId(b) = $to_id \
                  CREATE (a)-[r:`{}`]->(b) SET r = $props \
-                 RETURN toString(id(r)), type(r), properties(r), \
-                        toString(id(startNode(r))), toString(id(endNode(r)))",
+                 RETURN elementId(r), type(r), properties(r), \
+                        elementId(startNode(r)), elementId(endNode(r))",
                 edge_type
             ),
             "parameters": {
-                "from_id": from_id_int,
-                "to_id":   to_id_int,
+                "from_id": from_id_str,
+                "to_id":   to_id_str,
                 "props":   props
             }
         });
@@ -423,7 +415,7 @@ impl GuestTransaction for Transaction {
             .api
             .execute_in_transaction(&self.transaction_url, json!({ "statements": [stmt] }))?;
     
-        // 4) Pull out the first row and hand off to your existing parser
+        // Pull out the first row and hand off to your existing parser
         let results = response["results"].as_array()
             .and_then(|a| a.first())
             .ok_or_else(|| GraphError::InternalError("Invalid response from Neo4j for create_edge".into()))?;
@@ -438,31 +430,24 @@ impl GuestTransaction for Transaction {
     
 
     fn get_edge(&self, id: ElementId) -> Result<Option<Edge>, GraphError> {
-        // 1) Parse numeric id
-        let id_num = match id.clone() {
-            ElementId::Int64(i) => i,
-            ElementId::StringValue(s) => s
-                .parse::<i64>()
-                .map_err(|_| GraphError::InvalidQuery("Invalid edge ID".into()))?,
-            ElementId::Uuid(_) => {
-                return Err(GraphError::InvalidQuery(
-                    "Cannot use UUID for numeric id match".into(),
-                ))
-            }
+        let cypher_id = match id.clone() {
+            ElementId::StringValue(s) => s,
+            ElementId::Int64(i) => i.to_string(),
+            ElementId::Uuid(u) => u,
         };
     
-        // 2) MATCH on id(r) but RETURN toString(id(...)) so parse_edge_from_row yields StringValue
+        // Use elementId() for edge matching
         let statement = json!({
             "statement": "\
                 MATCH ()-[r]-() \
-                WHERE id(r) = $id \
+                WHERE elementId(r) = $id \
                 RETURN \
-                  toString(id(r)), \
+                  elementId(r), \
                   type(r), \
                   properties(r), \
-                  toString(id(startNode(r))), \
-                  toString(id(endNode(r)))",
-            "parameters": { "id": id_num }
+                  elementId(startNode(r)), \
+                  elementId(endNode(r))",
+            "parameters": { "id": cypher_id }
         });
         let resp = self
             .api
@@ -604,22 +589,16 @@ impl GuestTransaction for Transaction {
     }
 
     fn delete_edge(&self, id: ElementId) -> Result<(), GraphError> {
-        // 1) Turn ElementId::StringValue("1") or Int64(1) into an i64 for MATCH id(r)
-        let id_num = match id {
-            ElementId::Int64(i)       => i,
-            ElementId::StringValue(s) => s.parse::<i64>()
-                                           .map_err(|_| GraphError::InvalidQuery("Invalid edge ID".into()))?,
-            ElementId::Uuid(_)        => {
-                return Err(GraphError::InvalidQuery(
-                    "Cannot use UUID for numeric id match".into(),
-                ))
-            }
+        let cypher_id = match id {
+            ElementId::StringValue(s) => s,
+            ElementId::Int64(i) => i.to_string(),
+            ElementId::Uuid(u) => u,
         };
     
-        // 2) MATCH on id(r) = $id_num and DELETE the relationship
+        // Use elementId() for edge matching
         let stmt = json!({
-            "statement": "MATCH ()-[r]-() WHERE id(r) = $id DELETE r",
-            "parameters": { "id": id_num }
+            "statement": "MATCH ()-[r]-() WHERE elementId(r) = $id DELETE r",
+            "parameters": { "id": cypher_id }
         });
         let batch = json!({ "statements": [stmt] });
         self.api.execute_in_transaction(&self.transaction_url, batch)?;
@@ -714,9 +693,9 @@ impl GuestTransaction for Transaction {
             ElementId::Uuid(u) => u,
         };
 
-        let (left_arrow, right_arrow) = match direction {
-            Direction::Outgoing => ("", "->"),
-            Direction::Incoming => ("<-", ""),
+        let (left_pattern, right_pattern) = match direction {
+            Direction::Outgoing => ("-", "->"),
+            Direction::Incoming => ("<-", "-"),
             Direction::Both => ("-", "-"),
         };
 
@@ -732,12 +711,13 @@ impl GuestTransaction for Transaction {
 
         let full_query = format!(
             "MATCH (a){}[r{}]{}(b) WHERE elementId(a) = $id RETURN b {}",
-            left_arrow, edge_type_str, right_arrow, limit_clause
+            left_pattern, edge_type_str, right_pattern, limit_clause
         );
 
         let statement = json!({
             "statement": full_query,
-            "parameters": { "id": cypher_id }
+            "parameters": { "id": cypher_id },
+            "resultDataContents": ["row","graph"]
         });
 
         let statements = json!({ "statements": [statement] });
@@ -790,9 +770,9 @@ impl GuestTransaction for Transaction {
             ElementId::Uuid(u) => u,
         };
 
-        let (left_arrow, right_arrow) = match direction {
-            Direction::Outgoing => ("", "->"),
-            Direction::Incoming => ("<-", ""),
+        let (left_pattern, right_pattern) = match direction {
+            Direction::Outgoing => ("-", "->"),
+            Direction::Incoming => ("<-", "-"),
             Direction::Both => ("-", "-"),
         };
 
@@ -808,7 +788,7 @@ impl GuestTransaction for Transaction {
 
         let full_query = format!(
             "MATCH (a){}[r{}]{}(b) WHERE elementId(a) = $id RETURN elementId(r), type(r), properties(r), elementId(startNode(r)), elementId(endNode(r)) {}",
-            left_arrow, edge_type_str, right_arrow, limit_clause
+            left_pattern, edge_type_str, right_pattern, limit_clause
         );
 
         let statement = json!({
@@ -869,7 +849,8 @@ impl GuestTransaction for Transaction {
 
             let statement = json!({
                 "statement": format!("CREATE (n:`{}`) SET n = $props RETURN n", cypher_labels),
-                "parameters": { "props": properties_map }
+                "parameters": { "props": properties_map },
+                "resultDataContents": ["row","graph"]
             });
             statements.push(statement);
         }
@@ -1013,6 +994,7 @@ impl GuestTransaction for Transaction {
                 vertex_type, merge_clause
             ),
             "parameters": params,
+            "resultDataContents": ["row","graph"]
         });
 
         let statements = json!({ "statements": [statement] });
@@ -1147,193 +1129,9 @@ impl GuestTransaction for Transaction {
     }
 
     fn is_active(&self) -> bool {
-        true
+        self.api
+            .get_transaction_status(&self.transaction_url)
+            .map(|status| status == "running")
+            .unwrap_or(false)
     }
 }
-
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::client::Neo4jApi;
-//     use golem_graph::golem::graph::types::PropertyValue;
-//     use std::env;
-
-//     fn get_neo4j_host() -> String {
-//         env::var("NEO4J_HOST").unwrap_or_else(|_| "localhost".to_string())
-//     }
-
-//     fn get_neo4j_port() -> u16 {
-//         env::var("NEO4J_PORT")
-//             .unwrap_or_else(|_| "7474".to_string())
-//             .parse()
-//             .unwrap()
-//     }
-
-//     fn get_neo4j_user() -> String {
-//         env::var("NEO4J_USER").unwrap_or_else(|_| "neo4j".to_string())
-//     }
-
-//     fn get_neo4j_password() -> String {
-//         env::var("NEO4J_PASSWORD").unwrap_or_else(|_| "password".to_string())
-//     }
-
-//     fn create_test_transaction() -> Result<Transaction, GraphError> {
-//         let host = get_neo4j_host();
-//         let port = get_neo4j_port();
-//         let user = get_neo4j_user();
-//         let password = get_neo4j_password();
-    
-//         let api = Neo4jApi::new(&host, port, "neo4j", &user, &password);
-//         let transaction_url = api.begin_transaction()?;
-//         Ok(Transaction {
-//             api: std::sync::Arc::new(api),
-//             transaction_url,
-//         })
-//     }
-    
-
-//     #[test]
-//     fn test_create_and_get_vertex() {
-//         let tx = match create_test_transaction() {
-//             Ok(t) => t,
-//             Err(e) => {
-//                 panic!("Failed to create test transaction: {:?}", e);
-//             }
-//         };
-
-//         let vertex_type = "TestVertex".to_string();
-//         let name_value = "test_vertex_1".to_string();
-//         let properties = vec![
-//             ("name".to_string(), PropertyValue::StringValue(name_value.clone())),
-//         ];
-
-//         let created_vertex = tx
-//             .create_vertex(vertex_type.clone(), properties.clone())
-//             .expect("Failed to create vertex");
-//         assert_eq!(created_vertex.vertex_type, vertex_type);
-
-//         // Use property-based lookup for robustness
-//         let property_id = ElementId::StringValue(format!("prop:name:{}", name_value));
-//         let retrieved_vertex = tx
-//             .get_vertex(property_id)
-//             .expect("get_vertex failed")
-//             .expect("Vertex not found");
-//         assert_eq!(retrieved_vertex.vertex_type, vertex_type);
-//         let retrieved_name = retrieved_vertex
-//             .properties
-//             .iter()
-//             .find(|(k, _)| k == "name")
-//             .expect("Missing 'name' property")
-//             .1
-//             .clone();
-//         assert_eq!(retrieved_name, properties[0].1);
-
-//         tx.delete_vertex(created_vertex.id, true)
-//             .expect("delete_vertex failed");
-//         tx.commit().expect("commit failed");
-//     }
-
-//     #[test]
-//     fn test_create_and_delete_edge() {
-//         use std::time::{SystemTime, UNIX_EPOCH};
-//         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
-//         let from_name = format!("from_vertex_{}", now);
-//         let to_name = format!("to_vertex_{}", now);
-
-//         let tx = create_test_transaction()
-//             .expect("Failed to create test transaction for create/delete edge");
-//         let _from_vertex = tx.create_vertex("TestVertex".to_string(), vec![
-//             ("name".to_string(), PropertyValue::StringValue(from_name.clone())),
-//         ]).unwrap();
-//         let _to_vertex = tx.create_vertex("TestVertex".to_string(), vec![
-//             ("name".to_string(), PropertyValue::StringValue(to_name.clone())),
-//         ]).unwrap();
-//         tx.commit().unwrap();
-
-//         let tx = create_test_transaction().expect("Failed to create test transaction for edge creation");
-//         let edge_type = "TEST_EDGE".to_string();
-//         let properties = vec![("weight".to_string(), PropertyValue::Float32(0.5))];
-
-//         // Use property-based lookup for from/to vertices, ensure exactly one match
-//         let from_id = ElementId::StringValue(format!("prop:name:{}", from_name));
-//         let to_id = ElementId::StringValue(format!("prop:name:{}", to_name));
-//         let from_vertex = tx.get_vertex(from_id).unwrap().expect("from_vertex not found");
-//         let to_vertex = tx.get_vertex(to_id).unwrap().expect("to_vertex not found");
-//         println!("from_vertex.id: {:?}", from_vertex.id);
-//         println!("to_vertex.id: {:?}", to_vertex.id);
-
-//         let created_edge = tx
-//             .create_edge(
-//                 edge_type.clone(),
-//                 from_vertex.id.clone(),
-//                 to_vertex.id.clone(),
-//                 properties.clone(),
-//             )
-//             .unwrap();
-//         assert_eq!(created_edge.edge_type, edge_type);
-//         assert_eq!(created_edge.from_vertex, from_vertex.id);
-//         assert_eq!(created_edge.to_vertex, to_vertex.id);
-
-//         let retrieved_edge = tx.get_edge(created_edge.id.clone()).unwrap().unwrap();
-//         assert_eq!(retrieved_edge.id, created_edge.id);
-
-//         let edge_id = created_edge.id.clone();
-//         tx.delete_edge(edge_id.clone()).unwrap();
-//         let deleted_edge = tx.get_edge(edge_id).unwrap();
-//         assert!(deleted_edge.is_none());
-
-//         tx.delete_vertex(from_vertex.id, true).unwrap();
-//         tx.delete_vertex(to_vertex.id, true).unwrap();
-//         tx.commit().unwrap();
-//     }
-
-//     #[test]
-//     fn test_transaction_commit() {
-//         let vertex_type = "CommitTest".to_string();
-//         let key_value = "value_1".to_string();
-//         let properties = vec![
-//             ("key".to_string(), PropertyValue::StringValue(key_value.clone())),
-//         ];
-
-//         let tx1 = create_test_transaction()
-//             .expect("Failed to transmit test transaction ");
-//         let created_vertex = tx1.create_vertex(vertex_type.clone(), properties.clone()).unwrap();
-//         tx1.commit().unwrap();
-
-//         let tx2 = create_test_transaction()
-//             .expect("Failed to transmit test transaction 2");
-//         // Use property-based lookup for robustness
-//         let property_id = ElementId::StringValue(format!("prop:key:{}", key_value));
-//         let retrieved_vertex = tx2.get_vertex(property_id).unwrap();
-//         assert!(retrieved_vertex.is_some());
-
-//         tx2.delete_vertex(created_vertex.id, true).unwrap();
-//         tx2.commit().unwrap();
-//     }
-
-//     #[test]
-//     fn test_transaction_rollback() {
-//         // if env::var("NEO4J_HOST").is_err() {
-//         //     println!("Skipping test_transaction_rollback: NEO4J_HOST not set");
-//         //     return;
-//         // }
-
-//         let vertex_type = "RollbackTest".to_string();
-//         let properties = vec![(
-//             "key".to_string(),
-//             PropertyValue::StringValue("value".to_string()),
-//         )];
-
-//         let tx1 = create_test_transaction()
-//         .expect("Failed to transaction rollback test transaction ");
-//         let created_vertex = tx1.create_vertex(vertex_type.clone(), properties).unwrap();
-//         tx1.rollback().unwrap();
-
-//         let tx2 = create_test_transaction()
-//         .expect("Failed to transaction rollback test transaction ");
-//         let retrieved_vertex = tx2.get_vertex(created_vertex.id.clone()).unwrap();
-//         assert!(retrieved_vertex.is_none());
-
-//         tx2.commit().unwrap();
-//     }
-// }

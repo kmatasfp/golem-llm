@@ -5,11 +5,11 @@ use golem_graph::golem::graph::schema::{
 };
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
-use ureq::{Agent, Response};
+use reqwest::{Client, Method, Response};
 
 pub struct ArangoDbApi {
     base_url: String,
-    agent: Agent,
+    client: Client,
     auth_header: String,
 }
 
@@ -20,75 +20,50 @@ impl ArangoDbApi {
             "Basic {}",
             general_purpose::STANDARD.encode(format!("{}:{}", username, password))
         );
-        let agent = Agent::new();
+        
+        // Create client using the same pattern as working LLM clients
+        let client = Client::builder()
+            .build()
+            .expect("Failed to initialize HTTP client");
 
-        Self { base_url, agent, auth_header }
+        Self { base_url, client, auth_header }
     }
 
-    fn post(&self, endpoint: &str) -> ureq::Request {
-        self.agent
-            .post(&format!("{}{}", self.base_url, endpoint))
-            .set("Authorization", &self.auth_header)
-            .set("Content-Type", "application/json")
-    }
+    fn execute<T: DeserializeOwned>(&self, method: Method, endpoint: &str, body: Option<&Value>) -> Result<T, GraphError> {
+        let url = format!("{}{}", self.base_url, endpoint);
+        
+        // Build request using the same pattern as working LLM clients
+        let mut request_builder = self.client
+            .request(method, url)
+            .header("authorization", &self.auth_header);
 
-    fn get(&self, endpoint: &str) -> ureq::Request {
-        self.agent
-            .get(&format!("{}{}", self.base_url, endpoint))
-            .set("Authorization", &self.auth_header)
-    }
+        // Add body if provided - serialize to string to avoid chunked encoding
+        if let Some(body_value) = body {
+            let body_string = serde_json::to_string(body_value)
+                .map_err(|e| GraphError::InternalError(format!("Failed to serialize request body: {}", e)))?;
+            
+            request_builder = request_builder
+                .header("content-type", "application/json")
+                .header("content-length", body_string.len().to_string())
+                .body(body_string);
+        }
 
-    fn put(&self, endpoint: &str) -> ureq::Request {
-        self.agent
-            .put(&format!("{}{}", self.base_url, endpoint))
-            .set("Authorization", &self.auth_header)
-            .set("Content-Type", "application/json")
-    }
+        let response = request_builder
+            .send()
+            .map_err(|e| GraphError::ConnectionFailed(e.to_string()+ " - Failed to send request"))?;
 
-    fn delete(&self, endpoint: &str) -> ureq::Request {
-        self.agent
-            .delete(&format!("{}{}", self.base_url, endpoint))
-            .set("Authorization", &self.auth_header)
-    }
-
-    fn execute<T: DeserializeOwned>(&self, request: ureq::Request) -> Result<T, GraphError> {
-        let resp_result = request.call();
-        let resp = match resp_result {
-            Ok(r) => r,
-            Err(ureq::Error::Status(code, r)) => {
-                let body = r.into_string().unwrap_or_default();
-                return Err(self.map_error(code, &body));
-            }
-            Err(e) => return Err(GraphError::ConnectionFailed(e.to_string())),
-        };
-        self.handle_response(resp)
-    }
-
-    fn execute_json<T: DeserializeOwned>(&self, request: ureq::Request, body: &Value) -> Result<T, GraphError> {
-        let body_str = body.to_string();
-        let resp_result = request.send_string(&body_str);
-        let resp = match resp_result {
-            Ok(r) => r,
-            Err(ureq::Error::Status(code, r)) => {
-                let body = r.into_string().unwrap_or_default();
-                return Err(self.map_error(code, &body));
-            }
-            Err(e) => return Err(GraphError::ConnectionFailed(e.to_string())),
-        };
-        self.handle_response(resp)
+        self.handle_response(response)
     }
 
     fn handle_response<T: DeserializeOwned>(&self, response: Response) -> Result<T, GraphError> {
         let status = response.status();
-        let body_text = response.into_string().map_err(|e| {
-            GraphError::InternalError(format!("Failed to read response body: {}", e))
-        })?;
+        let status_code = status.as_u16();
         
-        let response_body: Value = serde_json::from_str(&body_text).map_err(|e| {
-            GraphError::InternalError(format!("Failed to parse response body: {}", e))
-        })?;
+        if status.is_success() {
+            let response_body: Value = response
+                .json()
+                .map_err(|e| GraphError::InternalError(format!("Failed to parse response body: {}", e)))?;
 
-        if status >= 200 && status < 300 {
             if let Some(result) = response_body.get("result") {
                 serde_json::from_value(result.clone()).map_err(|e| {
                     GraphError::InternalError(format!(
@@ -105,11 +80,15 @@ impl ArangoDbApi {
                 })
             }
         } else {
-            let error_msg = response_body
+            let error_body: Value = response
+                .json()
+                .map_err(|e| GraphError::InternalError(format!("Failed to read error response: {}", e)))?;
+            
+            let error_msg = error_body
                 .get("errorMessage")
                 .and_then(|v| v.as_str())
                 .unwrap_or("Unknown error");
-            Err(self.map_error(status, error_msg))
+            Err(self.map_error(status_code, error_msg))
         }
     }
 
@@ -119,22 +98,25 @@ impl ArangoDbApi {
             403 => GraphError::AuthorizationFailed(message.to_string()),
             404 => {
                 GraphError::InternalError(format!("Endpoint not found: {}", message))
-            } // This might need more specific handling
+            }
             409 => GraphError::TransactionConflict,
             _ => GraphError::InternalError(format!("ArangoDB error: {} - {}", status, message)),
         }
     }
 
     pub fn begin_transaction(&self, read_only: bool) -> Result<String, GraphError> {
+        // Get all existing collections to register them with the transaction
+        let existing_collections = self.list_collections().unwrap_or_default();
+        let collection_names: Vec<String> = existing_collections.iter().map(|c| c.name.clone()).collect();
+        
         let collections = if read_only {
-            json!({ "read": [] })
+            json!({ "read": collection_names })
         } else {
-            json!({ "write": [] })
+            json!({ "write": collection_names })
         };
 
         let body = json!({ "collections": collections });
-        let request = self.post("/_api/transaction/begin");
-        let result: Value = self.execute_json(request, &body)?;
+        let result: Value = self.execute(Method::POST, "/_api/transaction/begin", Some(&body))?;
 
         result
             .get("id")
@@ -153,8 +135,7 @@ impl ArangoDbApi {
         };
 
         let body = json!({ "collections": collections_spec });
-        let request = self.post("/_api/transaction/begin");
-        let result: Value = self.execute_json(request, &body)?;
+        let result: Value = self.execute(Method::POST, "/_api/transaction/begin", Some(&body))?;
 
         result
             .get("id")
@@ -167,15 +148,13 @@ impl ArangoDbApi {
 
     pub fn commit_transaction(&self, transaction_id: &str) -> Result<(), GraphError> {
         let endpoint = format!("/_api/transaction/{}", transaction_id);
-        let request = self.put(&endpoint);
-        let _: Value = self.execute(request)?;
+        let _: Value = self.execute(Method::PUT, &endpoint, None)?;
         Ok(())
     }
 
     pub fn rollback_transaction(&self, transaction_id: &str) -> Result<(), GraphError> {
         let endpoint = format!("/_api/transaction/{}", transaction_id);
-        let request = self.delete(&endpoint);
-        let _: Value = self.execute(request)?;
+        let _: Value = self.execute(Method::DELETE, &endpoint, None)?;
         Ok(())
     }
 
@@ -184,15 +163,28 @@ impl ArangoDbApi {
         transaction_id: &str,
         query: Value,
     ) -> Result<Value, GraphError> {
-        let request = self
-            .post("/_api/cursor")
-            .set("x-arango-trx-id", transaction_id);
-        self.execute_json(request, &query)
+        // Use the same pattern but add the transaction header
+        let url = format!("{}/_api/cursor", self.base_url);
+        
+        // Serialize to string to avoid chunked encoding
+        let body_string = serde_json::to_string(&query)
+            .map_err(|e| GraphError::InternalError(format!("Failed to serialize query: {}", e)))?;
+        
+        let response = self.client
+            .request(Method::POST, url)
+            .header("authorization", &self.auth_header)
+            .header("content-type", "application/json")
+            .header("content-length", body_string.len().to_string())
+            .header("x-arango-trx-id", transaction_id)
+            .body(body_string)
+            .send()
+            .map_err(|e| GraphError::ConnectionFailed(e.to_string()))?;
+
+        self.handle_response(response)
     }
 
     pub fn ping(&self) -> Result<(), GraphError> {
-        let request = self.get("/_api/version");
-        let _: Value = self.execute(request)?;
+        let _: Value = self.execute(Method::GET, "/_api/version", None)?;
         Ok(())
     }
 
@@ -207,14 +199,12 @@ impl ArangoDbApi {
             ContainerType::EdgeContainer => 3,
         };
         let body = json!({ "name": name, "type": collection_type });
-        let request = self.post("/_api/collection");
-        let _: Value = self.execute_json(request, &body)?;
+        let _: Value = self.execute(Method::POST, "/_api/collection", Some(&body))?;
         Ok(())
     }
 
     pub fn list_collections(&self) -> Result<Vec<ContainerInfo>, GraphError> {
-        let request = self.get("/_api/collection");
-        let response: Value = self.execute(request)?;
+        let response: Value = self.execute(Method::GET, "/_api/collection", None)?;
         
         // Try to get the result array from the response
         let collections_array = if let Some(result) = response.get("result") {
@@ -275,8 +265,8 @@ impl ArangoDbApi {
             body["name"] = json!(index_name);
         }
 
-        let request = self.post(&format!("/_api/index?collection={}", collection));
-        let _: Value = self.execute_json(request, &body)?;
+        let endpoint = format!("/_api/index?collection={}", collection);
+        let _: Value = self.execute(Method::POST, &endpoint, Some(&body))?;
         Ok(())
     }
 
@@ -286,16 +276,15 @@ impl ArangoDbApi {
         
         for collection in collections {
             let endpoint = format!("/_api/index?collection={}", collection.name);
-            let request = self.get(&endpoint);
             
-            if let Ok(response) = self.execute::<Value>(request) {
+            if let Ok(response) = self.execute::<Value>(Method::GET, &endpoint, None) {
                 if let Some(indexes) = response["indexes"].as_array() {
                     for idx in indexes {
                         if let Some(idx_name) = idx["name"].as_str() {
                             if idx_name == name {
                                 if let Some(idx_id) = idx["id"].as_str() {
-                                    let delete_request = self.delete(&format!("/_api/index/{}", idx_id));
-                                    let _: Value = self.execute(delete_request)?;
+                                    let delete_endpoint = format!("/_api/index/{}", idx_id);
+                                    let _: Value = self.execute(Method::DELETE, &delete_endpoint, None)?;
                                     return Ok(());
                                 }
                             }
@@ -315,9 +304,8 @@ impl ArangoDbApi {
         
         for collection in collections {
             let endpoint = format!("/_api/index?collection={}", collection.name);
-            let request = self.get(&endpoint);
             
-            match self.execute::<Value>(request) {
+            match self.execute::<Value>(Method::GET, &endpoint, None) {
                 Ok(response) => {
                     if let Some(indexes) = response["indexes"].as_array() {
                         for index in indexes {
@@ -442,24 +430,19 @@ impl ArangoDbApi {
 
     pub fn get_transaction_status(&self, transaction_id: &str) -> Result<String, GraphError> {
         let endpoint = format!("/_api/transaction/{}", transaction_id);
-        let request = self.get(&endpoint);
-
-        let response: TransactionStatusResponse = self.execute(request)?;
+        let response: TransactionStatusResponse = self.execute(Method::GET, &endpoint, None)?;
         Ok(response.status)
     }
 
     pub fn get_database_statistics(&self) -> Result<DatabaseStatistics, GraphError> {
-        let collections: ListCollectionsResponse = self
-            .execute(self.get("/_api/collection?excludeSystem=true"))?;
+        let collections: ListCollectionsResponse = self.execute(Method::GET, "/_api/collection?excludeSystem=true", None)?;
 
         let mut total_vertex_count = 0;
         let mut total_edge_count = 0;
 
         for collection_info in collections.result {
-            let properties_endpoint =
-                format!("/_api/collection/{}/properties", collection_info.name);
-            let properties: CollectionPropertiesResponse =
-                self.execute(self.get(&properties_endpoint))?;
+            let properties_endpoint = format!("/_api/collection/{}/properties", collection_info.name);
+            let properties: CollectionPropertiesResponse = self.execute(Method::GET, &properties_endpoint, None)?;
 
             if properties.collection_type == ArangoCollectionType::Edge {
                 total_edge_count += properties.count;
@@ -475,8 +458,7 @@ impl ArangoDbApi {
     }
 
     pub fn execute_query(&self, query: Value) -> Result<Value, GraphError> {
-        let request = self.post("/_api/cursor");
-        self.execute_json(request, &query)
+        self.execute(Method::POST, "/_api/cursor", Some(&query))
     }
 
     pub fn ensure_collection_exists(&self, name: &str, container_type: ContainerType) -> Result<(), GraphError> {
@@ -487,8 +469,55 @@ impl ArangoDbApi {
             Err(e) => Err(e),
         }
     }
+
+    // Method to begin transaction with dynamic collection registration
+    pub fn begin_dynamic_transaction(&self, read_only: bool) -> Result<String, GraphError> {
+        // Start with common collections that are likely to be used
+        let common_collections = vec![
+            "Person".to_string(),
+            "TempUser".to_string(), 
+            "Company".to_string(),
+            "Employee".to_string(),
+            "Node".to_string(),
+            "Product".to_string(),
+            "User".to_string(),
+            "KNOWS".to_string(),
+            "WORKS_FOR".to_string(),
+            "CONNECTS".to_string(),
+            "FOLLOWS".to_string(),
+        ];
+        
+        // Also include any existing collections
+        let existing_collections = self.list_collections().unwrap_or_default();
+        let mut all_collections: Vec<String> = existing_collections.iter().map(|c| c.name.clone()).collect();
+        
+        // Add common collections that might not exist yet
+        for common in common_collections {
+            if !all_collections.contains(&common) {
+                all_collections.push(common);
+            }
+        }
+        
+        let collections = if read_only {
+            json!({ "read": all_collections })
+        } else {
+            json!({ "write": all_collections })
+        };
+
+        let body = json!({ "collections": collections });
+        let result: Value = self.execute(Method::POST, "/_api/transaction/begin", Some(&body))?;
+
+        result
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| {
+                GraphError::InternalError("Missing transaction ID in response".to_string())
+            })
+    }
 }
 
+// Rest of the structs remain the same...
 #[derive(serde::Deserialize, Debug)]
 struct TransactionStatusResponse {
     #[serde(rename = "id")]

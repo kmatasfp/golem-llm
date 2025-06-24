@@ -19,8 +19,8 @@ pub(crate) fn to_json_value(value: PropertyValue) -> Result<Value, GraphError> {
         PropertyValue::Uint16(i) => json!(i),
         PropertyValue::Uint32(i) => json!(i),
         PropertyValue::Uint64(i) => json!(i),
-        PropertyValue::Float32(f) => json!(f),
-        PropertyValue::Float64(f) => json!(f),
+        PropertyValue::Float32Value(f32) => json!(f32),
+        PropertyValue::Float64Value(f64) => json!(f64),
         PropertyValue::StringValue(s) => Value::String(s),
         PropertyValue::Bytes(b) => Value::String(format!(
             "__bytes_b64__:{}",
@@ -172,7 +172,7 @@ pub(crate) fn from_json_value(value: Value) -> Result<PropertyValue, GraphError>
             if let Some(i) = n.as_i64() {
                 Ok(PropertyValue::Int64(i))
             } else if let Some(f) = n.as_f64() {
-                Ok(PropertyValue::Float64(f))
+                Ok(PropertyValue::Float64Value(f))
             } else {
                 Err(GraphError::InvalidPropertyType(
                     "Unsupported number type from Neo4j".to_string(),
@@ -202,6 +202,7 @@ pub(crate) fn from_json_value(value: Value) -> Result<PropertyValue, GraphError>
             Ok(PropertyValue::StringValue(s))
         }
         Value::Object(map) => {
+            // First, try to parse as GeoJSON if it has the right structure
             if let Some(typ) = map.get("type").and_then(Value::as_str) {
                 if let Some(coords_val) = map.get("coordinates") {
                     match typ {
@@ -284,10 +285,9 @@ pub(crate) fn from_json_value(value: Value) -> Result<PropertyValue, GraphError>
                 }
             }
 
-            Err(GraphError::InvalidPropertyType(
-                "Object-like properties must be valid GeoJSON for Point, LineString, or Polygon."
-                    .to_string(),
-            ))
+            // If it's not valid GeoJSON, try to convert to a string representation
+            // This handles cases where Neo4j returns complex objects that aren't GeoJSON
+            Ok(PropertyValue::StringValue(serde_json::to_string(&Value::Object(map)).unwrap_or_else(|_| "{}".to_string())))
         }
         _ => Err(GraphError::InvalidPropertyType(
             "Unsupported property type from Neo4j".to_string(),

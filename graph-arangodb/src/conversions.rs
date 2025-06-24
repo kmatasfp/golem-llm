@@ -18,8 +18,8 @@ pub(crate) fn to_arango_value(value: PropertyValue) -> Result<Value, GraphError>
         PropertyValue::Uint16(i) => json!(i),
         PropertyValue::Uint32(i) => json!(i),
         PropertyValue::Uint64(i) => json!(i),
-        PropertyValue::Float32(f) => json!(f),
-        PropertyValue::Float64(f) => json!(f),
+        PropertyValue::Float32Value(f) => json!(f),
+        PropertyValue::Float64Value(f) => json!(f),
         PropertyValue::StringValue(s) => Value::String(s),
         PropertyValue::Bytes(b) => Value::String(general_purpose::STANDARD.encode(b)),
         PropertyValue::Date(d) => {
@@ -141,7 +141,7 @@ pub(crate) fn from_arango_value(value: Value) -> Result<PropertyValue, GraphErro
             if let Some(i) = n.as_i64() {
                 Ok(PropertyValue::Int64(i))
             } else if let Some(f) = n.as_f64() {
-                Ok(PropertyValue::Float64(f))
+                Ok(PropertyValue::Float64Value(f))
             } else {
                 Err(GraphError::InvalidPropertyType(
                     "Unsupported number type from ArangoDB".to_string(),
@@ -303,7 +303,7 @@ mod tests {
             to_arango_value(PropertyValue::Int32(42)).unwrap(),
             json!(42)
         );
-        assert_eq!(to_arango_value(PropertyValue::Float32(PI)).unwrap(), PI);
+        assert_eq!(to_arango_value(PropertyValue::Float32Value(PI)).unwrap(), PI);
         assert_eq!(
             to_arango_value(PropertyValue::StringValue("foo".into())).unwrap(),
             Value::String("foo".into())

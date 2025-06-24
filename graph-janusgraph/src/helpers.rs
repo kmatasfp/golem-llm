@@ -147,10 +147,14 @@ fn from_gremlin_id(value: &Value) -> Result<ElementId, GraphError> {
                     }
                 }
             }
-        }
-        // Fallback for generic @value unwrapping
-        else if let Some(id_val) = id_obj.get("@value") {
+        } else if let Some(id_val) = id_obj.get("@value") {
+            // Fallback for generic @value unwrapping
             return from_gremlin_id(id_val);
+        } else if id_obj.len() == 1 && id_obj.contains_key("relationId") {
+            // Handle JanusGraph's RelationIdentifier as a plain object
+            if let Some(rel_id) = id_obj.get("relationId").and_then(Value::as_str) {
+                return Ok(ElementId::StringValue(rel_id.to_string()));
+            }
         }
         Err(GraphError::InvalidPropertyType(
             format!("Unsupported element ID object from Gremlin: {:?}", value)
@@ -193,6 +197,42 @@ pub(crate) fn parse_edge_from_gremlin(value: &Value) -> Result<Edge, GraphError>
         value.get("@value").ok_or_else(|| {
             GraphError::InternalError("g:Edge missing @value".to_string())
         })?.clone()
+    } else if value.get("@type") == Some(&json!("g:Map")) {
+        // Handle g:Map (alternating key-value pairs in @value array)
+        let arr = value.get("@value").and_then(Value::as_array).ok_or_else(|| {
+            GraphError::InternalError("g:Map missing @value array in edge".to_string())
+        })?;
+        let mut map = serde_json::Map::new();
+        let mut it = arr.iter();
+        while let (Some(kv), Some(vv)) = (it.next(), it.next()) {
+            // key:
+            let key = if let Some(s) = kv.as_str() {
+                s.to_string()
+            } else if kv.get("@type") == Some(&json!("g:T")) {
+                kv.get("@value")
+                    .and_then(Value::as_str)
+                    .unwrap()
+                    .to_string()
+            } else if kv.get("@type") == Some(&json!("g:Direction")) {
+                kv.get("@value")
+                    .and_then(Value::as_str)
+                    .unwrap()
+                    .to_string()
+            } else {
+                return Err(GraphError::InternalError(
+                    "Unexpected key format in Gremlin edge map".into(),
+                ));
+            };
+            // val:
+            let val = if let Some(obj) = vv.as_object() {
+                // wrapped value
+                obj.get("@value").cloned().unwrap_or(Value::Object(obj.clone()))
+            } else {
+                vv.clone()
+            };
+            map.insert(key, val);
+        }
+        Value::Object(map)
     } else {
         value.clone()
     };
@@ -201,10 +241,9 @@ pub(crate) fn parse_edge_from_gremlin(value: &Value) -> Result<Edge, GraphError>
         GraphError::InternalError("Gremlin edge value is not a JSON object".to_string())
     })?;
 
-    let id =
-        from_gremlin_id(obj.get("id").ok_or_else(|| {
-            GraphError::InternalError("Missing 'id' in Gremlin edge".to_string())
-        })?)?;
+    let id = from_gremlin_id(obj.get("id").ok_or_else(|| {
+        GraphError::InternalError("Missing 'id' in Gremlin edge".to_string())
+    })?)?;
 
     let label = obj
         .get("label")
@@ -212,15 +251,70 @@ pub(crate) fn parse_edge_from_gremlin(value: &Value) -> Result<Edge, GraphError>
         .unwrap_or_default()
         .to_string();
 
-    let in_v =
-        from_gremlin_id(obj.get("inV").ok_or_else(|| {
-            GraphError::InternalError("Missing 'inV' in Gremlin edge".to_string())
-        })?)?;
+    // Try to get inV/outV, or fallback to IN/OUT (elementMap format)
+    let in_v = if let Some(in_v) = obj.get("inV") {
+        from_gremlin_id(in_v)?
+    } else if let Some(in_map) = obj.get("IN") {
+        // IN is a g:Map with alternating key-value pairs, or possibly just an array
+        let arr_opt = if let Some(arr) = in_map.get("@value").and_then(Value::as_array) {
+            Some(arr)
+        } else if let Some(arr) = in_map.as_array() {
+            Some(arr)
+        } else {
+            None
+        };
+        if let Some(arr) = arr_opt {
+            let mut it = arr.iter();
+            let mut found = None;
+            while let (Some(k), Some(v)) = (it.next(), it.next()) {
+                if k == "id" || (k.get("@type") == Some(&json!("g:T")) && k.get("@value") == Some(&json!("id"))) {
+                    found = Some(v);
+                    break;
+                }
+            }
+            if let Some(val) = found {
+                from_gremlin_id(val)?
+            } else {
+                return Err(GraphError::InternalError("Missing 'id' in IN map for Gremlin edge".to_string()));
+            }
+        } else {
+            return Err(GraphError::InternalError("IN map is not a g:Map with @value array or array".to_string()));
+        }
+    } else {
+        return Err(GraphError::InternalError("Missing 'inV' in Gremlin edge".to_string()));
+    };
 
-    let out_v =
-        from_gremlin_id(obj.get("outV").ok_or_else(|| {
-            GraphError::InternalError("Missing 'outV' in Gremlin edge".to_string())
-        })?)?;
+    let out_v = if let Some(out_v) = obj.get("outV") {
+        from_gremlin_id(out_v)?
+    } else if let Some(out_map) = obj.get("OUT") {
+        // OUT is a g:Map with alternating key-value pairs, or possibly just an array
+        let arr_opt = if let Some(arr) = out_map.get("@value").and_then(Value::as_array) {
+            Some(arr)
+        } else if let Some(arr) = out_map.as_array() {
+            Some(arr)
+        } else {
+            None
+        };
+        if let Some(arr) = arr_opt {
+            let mut it = arr.iter();
+            let mut found = None;
+            while let (Some(k), Some(v)) = (it.next(), it.next()) {
+                if k == "id" || (k.get("@type") == Some(&json!("g:T")) && k.get("@value") == Some(&json!("id"))) {
+                    found = Some(v);
+                    break;
+                }
+            }
+            if let Some(val) = found {
+                from_gremlin_id(val)?
+            } else {
+                return Err(GraphError::InternalError("Missing 'id' in OUT map for Gremlin edge".to_string()));
+            }
+        } else {
+            return Err(GraphError::InternalError("OUT map is not a g:Map with @value array or array".to_string()));
+        }
+    } else {
+        return Err(GraphError::InternalError("Missing 'outV' in Gremlin edge".to_string()));
+    };
 
     let properties = if let Some(properties_val) = obj.get("properties") {
         from_gremlin_properties(properties_val)?
@@ -355,96 +449,96 @@ pub(crate) fn element_id_to_key(id: &ElementId) -> String {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use golem_graph::golem::graph::types::PropertyValue;
-//     use serde_json::json;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use golem_graph::golem::graph::types::PropertyValue;
+    use serde_json::json;
 
-//     #[test]
-//     fn test_parse_vertex_from_gremlin() {
-//         let value = json!({
-//             "id": 1,
-//             "label": "Person",
-//             "properties": {
-//                 "name": [{"id": "p1", "value": "Alice"}],
-//                 "age": [{"id": "p2", "value": 30}]
-//             }
-//         });
+    #[test]
+    fn test_parse_vertex_from_gremlin() {
+        let value = json!({
+            "id": 1,
+            "label": "Person",
+            "properties": {
+                "name": [{"id": "p1", "value": "Alice"}],
+                "age": [{"id": "p2", "value": 30}]
+            }
+        });
 
-//         let vertex = parse_vertex_from_gremlin(&value).unwrap();
-//         assert_eq!(vertex.id, ElementId::Int64(1));
-//         assert_eq!(vertex.vertex_type, "Person");
-//         assert_eq!(vertex.additional_labels, Vec::<String>::new());
-//         assert_eq!(vertex.properties.len(), 2);
-//     }
+        let vertex = parse_vertex_from_gremlin(&value).unwrap();
+        assert_eq!(vertex.id, ElementId::Int64(1));
+        assert_eq!(vertex.vertex_type, "Person");
+        assert_eq!(vertex.additional_labels, Vec::<String>::new());
+        assert_eq!(vertex.properties.len(), 2);
+    }
 
-//     #[test]
-//     fn test_parse_edge_from_gremlin() {
-//         let value = json!({
-//             "id": "e123",
-//             "label": "KNOWS",
-//             "inV": 2,
-//             "outV": 1,
-//             "properties": {
-//                 "since": {"@type": "g:Int64", "@value": 2020}
-//             }
-//         });
+    #[test]
+    fn test_parse_edge_from_gremlin() {
+        let value = json!({
+            "id": "e123",
+            "label": "KNOWS",
+            "inV": 2,
+            "outV": 1,
+            "properties": {
+                "since": {"@type": "g:Int64", "@value": 2020}
+            }
+        });
 
-//         let edge = parse_edge_from_gremlin(&value).unwrap();
-//         assert_eq!(edge.id, ElementId::StringValue("e123".to_string()));
-//         assert_eq!(edge.edge_type, "KNOWS");
-//         assert_eq!(edge.from_vertex, ElementId::Int64(1));
-//         assert_eq!(edge.to_vertex, ElementId::Int64(2));
-//         assert_eq!(edge.properties.len(), 1);
-//         assert_eq!(edge.properties[0].1, PropertyValue::Int64(2020));
-//     }
+        let edge = parse_edge_from_gremlin(&value).unwrap();
+        assert_eq!(edge.id, ElementId::StringValue("e123".to_string()));
+        assert_eq!(edge.edge_type, "KNOWS");
+        assert_eq!(edge.from_vertex, ElementId::Int64(1));
+        assert_eq!(edge.to_vertex, ElementId::Int64(2));
+        assert_eq!(edge.properties.len(), 1);
+        assert_eq!(edge.properties[0].1, PropertyValue::Int64(2020));
+    }
 
-//     #[test]
-//     fn test_parse_path_from_gremlin() {
-//         let path = json!([
-//             {
-//                 "id": 1,
-//                 "label": "Person",
-//                 "properties": {
-//                     "name": [{"id": "p1", "value": "Alice"}]
-//                 }
-//             },
-//             {
-//                 "id": "e123",
-//                 "label": "KNOWS",
-//                 "inV": 2,
-//                 "outV": 1,
-//                 "properties": {
-//                     "since": {"@type": "g:Int64", "@value": 2020}
-//                 }
-//             },
-//             {
-//                 "id": 2,
-//                 "label": "Person",
-//                 "properties": {
-//                     "name": [{"id": "p2", "value": "Bob"}]
-//                 }
-//             }
-//         ]);
+    #[test]
+    fn test_parse_path_from_gremlin() {
+        let path = json!([
+            {
+                "id": 1,
+                "label": "Person",
+                "properties": {
+                    "name": [{"id": "p1", "value": "Alice"}]
+                }
+            },
+            {
+                "id": "e123",
+                "label": "KNOWS",
+                "inV": 2,
+                "outV": 1,
+                "properties": {
+                    "since": {"@type": "g:Int64", "@value": 2020}
+                }
+            },
+            {
+                "id": 2,
+                "label": "Person",
+                "properties": {
+                    "name": [{"id": "p2", "value": "Bob"}]
+                }
+            }
+        ]);
 
-//         let path_obj = parse_path_from_gremlin(&path).unwrap();
-//         assert_eq!(path_obj.vertices.len(), 2);
-//         assert_eq!(path_obj.edges.len(), 1);
-//         assert_eq!(path_obj.length, 1);
-//     }
+        let path_obj = parse_path_from_gremlin(&path).unwrap();
+        assert_eq!(path_obj.vertices.len(), 2);
+        assert_eq!(path_obj.edges.len(), 1);
+        assert_eq!(path_obj.length, 1);
+    }
 
-//     #[test]
-//     fn test_element_id_to_key() {
-//         assert_eq!(
-//             element_id_to_key(&ElementId::StringValue("abc".to_string())),
-//             "s:abc"
-//         );
-//         assert_eq!(element_id_to_key(&ElementId::Int64(123)), "i:123");
-//         let uuid = "a1a2a3a4-b1b2-c1c2-d1d2-d3d4d5d6d7d8";
-//         assert_eq!(
-//             element_id_to_key(&ElementId::Uuid(uuid.to_string())),
-//             format!("u:{}", uuid)
-//         );
-//     }
-// }
+    #[test]
+    fn test_element_id_to_key() {
+        assert_eq!(
+            element_id_to_key(&ElementId::StringValue("abc".to_string())),
+            "s:abc"
+        );
+        assert_eq!(element_id_to_key(&ElementId::Int64(123)), "i:123");
+        let uuid = "a1a2a3a4-b1b2-c1c2-d1d2-d3d4d5d6d7d8";
+        assert_eq!(
+            element_id_to_key(&ElementId::Uuid(uuid.to_string())),
+            format!("u:{}", uuid)
+        );
+    }
+}

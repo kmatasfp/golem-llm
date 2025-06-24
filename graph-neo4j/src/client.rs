@@ -1,5 +1,6 @@
+
 use golem_graph::golem::graph::errors::GraphError;
-use ureq::{Agent, Response};
+use reqwest::{Client, Response};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::Value;
 
@@ -8,7 +9,7 @@ pub(crate) struct Neo4jApi {
     base_url: String,
     database: String,
     auth_header: String,
-    agent: Agent,
+    client: Client,
 }
 
 impl Neo4jApi {
@@ -23,13 +24,15 @@ impl Neo4jApi {
         let base_url = format!("http://{}:{}", host, port);
         let auth = format!("{}:{}", username, password);
         let auth_header = format!("Basic {}", STANDARD.encode(auth.as_bytes()));
-        let agent = Agent::new();   // ureq’s sync HTTP agent
+        let client = Client::builder()
+            .build()
+            .expect("Failed to initialize HTTP client");
 
         Neo4jApi {
             base_url,
             database: database.to_string(),
             auth_header,
-            agent,
+            client,
         }
     }
 
@@ -41,10 +44,10 @@ impl Neo4jApi {
     pub(crate) fn begin_transaction(&self) -> Result<String, GraphError> {
         let url = format!("{}{}", self.base_url, self.tx_endpoint());
         let resp = self
-            .agent
+            .client
             .post(&url)
-            .set("Authorization", &self.auth_header)
-            .call()
+            .header("Authorization", &self.auth_header)
+            .send()
             .map_err(|e| GraphError::ConnectionFailed(e.to_string()))?;
         Self::ensure_success_and_get_location(resp)
     }
@@ -56,11 +59,12 @@ impl Neo4jApi {
     ) -> Result<Value, GraphError> {
         println!("[Neo4jApi] Cypher request: {}", statements);
         let resp = self
-            .agent
+            .client
             .post(tx_url)
-            .set("Authorization", &self.auth_header)
-            .set("Content-Type", "application/json")
-            .send_string(&statements.to_string())
+            .header("Authorization", &self.auth_header)
+            .header("Content-Type", "application/json")
+            .body(statements.to_string())
+            .send()
             .map_err(|e| GraphError::ConnectionFailed(e.to_string()))?;
         let json = Self::ensure_success_and_json(resp)?;
         println!("[Neo4jApi] Cypher response: {}", json);
@@ -70,61 +74,87 @@ impl Neo4jApi {
     pub(crate) fn commit_transaction(&self, tx_url: &str) -> Result<(), GraphError> {
         let commit_url = format!("{}/commit", tx_url);
         let resp = self
-            .agent
+            .client
             .post(&commit_url)
-            .set("Authorization", &self.auth_header)
-            .call()
+            .header("Authorization", &self.auth_header)
+            .send()
             .map_err(|e| GraphError::ConnectionFailed(e.to_string()))?;
         Self::ensure_success(resp).map(|_| ())
     }
 
     pub(crate) fn rollback_transaction(&self, tx_url: &str) -> Result<(), GraphError> {
         let resp = self
-            .agent
+            .client
             .delete(tx_url)
-            .set("Authorization", &self.auth_header)
-            .call()
+            .header("Authorization", &self.auth_header)
+            .send()
             .map_err(|e| GraphError::ConnectionFailed(e.to_string()))?;
         Self::ensure_success(resp).map(|_| ())
+    }
+
+    pub(crate) fn get_transaction_status(&self, tx_url: &str) -> Result<String, GraphError> {
+        let resp = self
+            .client
+            .get(tx_url)
+            .header("Authorization", &self.auth_header)
+            .send()
+            .map_err(|e| GraphError::ConnectionFailed(e.to_string()))?;
+        
+        if resp.status().is_success() {
+            Ok("running".to_string())
+        } else {
+            // If we get 404 or other error, transaction likely doesn't exist or is closed
+            Ok("closed".to_string())
+        }
     }
 
     // Helpers
 
     fn ensure_success(response: Response) -> Result<Response, GraphError> {
-        if response.status() < 400 {
+        if response.status().is_success() {
             Ok(response)
         } else {
-             // pull the entire body as a string
-             let text = response
-             .into_string()
-             .map_err(|e| GraphError::InternalError(e.to_string()))?;
-         // then deserialize
-         let err: Value = serde_json::from_str(&text)
-             .map_err(|e| GraphError::InternalError(e.to_string()))?;
-         Err(GraphError::TransactionFailed(err.to_string()))
+            // pull the entire body as a string
+            let text = response
+                .text()
+                .map_err(|e| GraphError::InternalError(e.to_string()))?;
+            // then deserialize
+            let err: Value = serde_json::from_str(&text)
+                .map_err(|e| GraphError::InternalError(e.to_string()))?;
+            Err(GraphError::TransactionFailed(err.to_string()))
         }
     }
 
     fn ensure_success_and_json(response: Response) -> Result<Value, GraphError> {
-        let text = response
-            .into_string()
-            .map_err(|e| GraphError::InternalError(e.to_string()))?;
-        serde_json::from_str(&text).map_err(|e| GraphError::InternalError(e.to_string()))
+        if response.status().is_success() {
+            response
+                .json()
+                .map_err(|e| GraphError::InternalError(e.to_string()))
+        } else {
+            let text = response
+                .text()
+                .map_err(|e| GraphError::InternalError(e.to_string()))?;
+            let err: Value = serde_json::from_str(&text)
+                .map_err(|e| GraphError::InternalError(e.to_string()))?;
+            Err(GraphError::TransactionFailed(err.to_string()))
+        }
     }
 
     fn ensure_success_and_get_location(response: Response) -> Result<String, GraphError> {
-        if response.status() < 400 {
+        if response.status().is_success() {
             response
-                .header("Location")
+                .headers()
+                .get("Location")
+                .and_then(|v| v.to_str().ok())
                 .map(|s| s.to_string())
                 .ok_or_else(|| GraphError::InternalError("Missing Location header".into()))
         } else {
             let text = response
-            .into_string()
-            .map_err(|e| GraphError::InternalError(e.to_string()))?;
-        let err: Value = serde_json::from_str(&text)
-            .map_err(|e| GraphError::InternalError(e.to_string()))?;
-        Err(GraphError::TransactionFailed(err.to_string()))
+                .text()
+                .map_err(|e| GraphError::InternalError(e.to_string()))?;
+            let err: Value = serde_json::from_str(&text)
+                .map_err(|e| GraphError::InternalError(e.to_string()))?;
+            Err(GraphError::TransactionFailed(err.to_string()))
         }
     }
 }
