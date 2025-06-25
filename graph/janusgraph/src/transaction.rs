@@ -11,7 +11,6 @@ use serde_json::{json, Value};
 
 /// Given a GraphSON Map element, turn it into a serde_json::Value::Object
 fn graphson_map_to_object(data: &Value) -> Result<Value, GraphError> {
-
     let arr = data
         .get("@value")
         .and_then(Value::as_array)
@@ -22,7 +21,6 @@ fn graphson_map_to_object(data: &Value) -> Result<Value, GraphError> {
     let mut obj = serde_json::Map::new();
     let mut iter = arr.iter();
     while let (Some(k), Some(v)) = (iter.next(), iter.next()) {
-
         let key = if let Some(s) = k.as_str() {
             s.to_string()
         } else if let Some(inner) = k.get("@value").and_then(Value::as_str) {
@@ -82,7 +80,6 @@ impl GuestTransaction for Transaction {
         _additional_labels: Vec<String>,
         properties: PropertyMap,
     ) -> Result<Vertex, GraphError> {
-
         let mut gremlin = "g.addV(vertex_label)".to_string();
         let mut bindings = serde_json::Map::new();
         bindings.insert("vertex_label".to_string(), json!(vertex_type));
@@ -131,7 +128,6 @@ impl GuestTransaction for Transaction {
         };
 
         if let Some(row) = list.into_iter().next() {
-
             let obj = if row.get("@type") == Some(&json!("g:Map")) {
                 let vals = row.get("@value").and_then(Value::as_array).unwrap();
                 let mut m = serde_json::Map::new();
@@ -165,7 +161,6 @@ impl GuestTransaction for Transaction {
     }
 
     fn update_vertex(&self, id: ElementId, properties: PropertyMap) -> Result<Vertex, GraphError> {
-
         let mut gremlin = "g.V(vertex_id).sideEffect(properties().drop())".to_string();
         let mut bindings = serde_json::Map::new();
         bindings.insert(
@@ -345,12 +340,9 @@ impl GuestTransaction for Transaction {
         helpers::parse_vertex_from_gremlin(&Value::Object(vertex_json))
     }
 
-    fn delete_vertex(&self, id: ElementId, detach: bool) -> Result<(), GraphError> {
-        let gremlin = if detach {
-            "g.V(vertex_id).drop().toList()"
-        } else {
-            "g.V(vertex_id).drop().toList()"
-        };
+    fn delete_vertex(&self, id: ElementId, _detach: bool) -> Result<(), GraphError> {
+        // Note: JanusGraph handles edge cleanup automatically during vertex deletion
+        let gremlin = "g.V(vertex_id).drop().toList()";
         let mut bindings = serde_json::Map::new();
         bindings.insert(
             "vertex_id".to_string(),
@@ -723,9 +715,7 @@ impl GuestTransaction for Transaction {
                     .and_then(Value::as_array)
                     .and_then(|a| a.first().cloned())
             })
-            .ok_or_else(|| {
-                GraphError::ElementNotFound(id.clone())
-            })?;
+            .ok_or_else(|| GraphError::ElementNotFound(id.clone()))?;
 
         let mut flat = serde_json::Map::new();
         if row.get("@type") == Some(&json!("g:Map")) {
@@ -782,7 +772,6 @@ impl GuestTransaction for Transaction {
             }
         }
         ej.insert("properties".into(), Value::Object(props.clone()));
-
 
         let edge = helpers::parse_edge_from_gremlin(&Value::Object(ej))?;
         Ok(edge)
@@ -1021,7 +1010,6 @@ impl GuestTransaction for Transaction {
 
         gremlin.push_str(".elementMap()");
 
-
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
         let data = &response["result"]["data"];
@@ -1087,7 +1075,6 @@ impl GuestTransaction for Transaction {
         }
 
         gremlin.push_str(".elementMap()");
-
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
@@ -1293,7 +1280,6 @@ impl GuestTransaction for Transaction {
             },
         );
 
-
         for (i, (k, v)) in properties.iter().enumerate() {
             let mk = format!("ek_{}", i);
             let mv = format!("ev_{}", i);
@@ -1301,7 +1287,6 @@ impl GuestTransaction for Transaction {
             bindings.insert(mk, json!(k));
             bindings.insert(mv, conversions::to_json_value(v.clone())?);
         }
-
 
         let mut gremlin_create =
             format!("addE('{}').from(__.V(from_id)).to(__.V(to_id))", edge_label);

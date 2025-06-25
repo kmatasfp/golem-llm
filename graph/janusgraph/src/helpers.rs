@@ -440,12 +440,10 @@ pub(crate) fn parse_path_from_gremlin(value: &Value) -> Result<Path, GraphError>
                         }
                     }
                 }
+            } else if obj.contains_key("inV") && obj.contains_key("outV") {
+                edges.push(parse_edge_from_gremlin(element_value)?);
             } else {
-                if obj.contains_key("inV") && obj.contains_key("outV") {
-                    edges.push(parse_edge_from_gremlin(element_value)?);
-                } else {
-                    vertices.push(parse_vertex_from_gremlin(element_value)?);
-                }
+                vertices.push(parse_vertex_from_gremlin(element_value)?);
             }
         }
 

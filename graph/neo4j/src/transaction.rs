@@ -100,7 +100,6 @@ impl GuestTransaction for Transaction {
     }
 
     fn get_vertex(&self, id: ElementId) -> Result<Option<Vertex>, GraphError> {
-
         if let ElementId::StringValue(s) = &id {
             if let Some((prop, value)) = s
                 .strip_prefix("prop:")

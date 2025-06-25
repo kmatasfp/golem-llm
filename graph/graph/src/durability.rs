@@ -16,7 +16,6 @@ pub struct DurableGraph<Impl> {
     _phantom: PhantomData<Impl>,
 }
 
-
 pub trait ExtendedGuest: 'static
 where
     Self::Graph: ProviderGraph + 'static,
@@ -39,7 +38,7 @@ mod passthrough_impl {
         Impl::Graph: ProviderGraph + 'static,
     {
         type Graph = Impl::Graph;
-        
+
         fn connect(config: ConnectionConfig) -> Result<connection::Graph, GraphError> {
             let graph = Impl::connect_internal(&config)?;
             Ok(connection::Graph::new(graph))
@@ -129,7 +128,6 @@ mod passthrough_impl {
         }
     }
 }
-
 
 #[cfg(feature = "durability")]
 mod durable_impl {
@@ -328,10 +326,9 @@ mod durable_impl {
                 WrappedFunctionType::WriteRemote,
             );
             if durability.is_live() {
-                let result = with_persistence_level(
-                    PersistenceLevel::PersistNothing,
-                    || self.inner.commit(),
-                );
+                let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
+                    self.inner.commit()
+                });
                 durability.persist(Unit, result.map(|_| Unit))?;
                 Ok(())
             } else {
@@ -347,8 +344,9 @@ mod durable_impl {
                 WrappedFunctionType::WriteRemote,
             );
             if durability.is_live() {
-                let result =
-                    with_persistence_level(PersistenceLevel::PersistNothing, || self.inner.rollback());
+                let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
+                    self.inner.rollback()
+                });
                 durability.persist(Unit, result.map(|_| Unit))?;
                 Ok(())
             } else {
@@ -416,319 +414,323 @@ mod durable_impl {
             }
         }
 
-    fn update_vertex(
-        &self,
-        id: crate::golem::graph::types::ElementId,
-        properties: crate::golem::graph::types::PropertyMap,
-    ) -> Result<crate::golem::graph::types::Vertex, GraphError> {
-        let durability: Durability<crate::golem::graph::types::Vertex, GraphError> =
-            Durability::new(
+        fn update_vertex(
+            &self,
+            id: crate::golem::graph::types::ElementId,
+            properties: crate::golem::graph::types::PropertyMap,
+        ) -> Result<crate::golem::graph::types::Vertex, GraphError> {
+            let durability: Durability<crate::golem::graph::types::Vertex, GraphError> =
+                Durability::new(
+                    "golem_graph_transaction",
+                    "update_vertex",
+                    WrappedFunctionType::WriteRemote,
+                );
+            if durability.is_live() {
+                let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
+                    self.inner.update_vertex(id.clone(), properties.clone())
+                });
+                durability.persist((id, properties), result)
+            } else {
+                durability.replay()
+            }
+        }
+
+        fn update_vertex_properties(
+            &self,
+            id: crate::golem::graph::types::ElementId,
+            updates: crate::golem::graph::types::PropertyMap,
+        ) -> Result<crate::golem::graph::types::Vertex, GraphError> {
+            let durability: Durability<crate::golem::graph::types::Vertex, GraphError> =
+                Durability::new(
+                    "golem_graph_transaction",
+                    "update_vertex_properties",
+                    WrappedFunctionType::WriteRemote,
+                );
+            if durability.is_live() {
+                let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
+                    self.inner
+                        .update_vertex_properties(id.clone(), updates.clone())
+                });
+                durability.persist((id, updates), result)
+            } else {
+                durability.replay()
+            }
+        }
+
+        fn delete_vertex(
+            &self,
+            id: crate::golem::graph::types::ElementId,
+            delete_edges: bool,
+        ) -> Result<(), GraphError> {
+            let durability: Durability<Unit, GraphError> = Durability::new(
                 "golem_graph_transaction",
-                "update_vertex",
+                "delete_vertex",
                 WrappedFunctionType::WriteRemote,
             );
-        if durability.is_live() {
-            let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                self.inner.update_vertex(id.clone(), properties.clone())
-            });
-            durability.persist((id, properties), result)
-        } else {
-            durability.replay()
+            if durability.is_live() {
+                let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
+                    self.inner.delete_vertex(id.clone(), delete_edges)
+                });
+                durability.persist((id, delete_edges), result.map(|_| Unit))?;
+                Ok(())
+            } else {
+                durability.replay::<Unit, GraphError>()?;
+                Ok(())
+            }
         }
-    }
 
-    fn update_vertex_properties(
-        &self,
-        id: crate::golem::graph::types::ElementId,
-        updates: crate::golem::graph::types::PropertyMap,
-    ) -> Result<crate::golem::graph::types::Vertex, GraphError> {
-        let durability: Durability<crate::golem::graph::types::Vertex, GraphError> =
-            Durability::new(
-                "golem_graph_transaction",
-                "update_vertex_properties",
-                WrappedFunctionType::WriteRemote,
-            );
-        if durability.is_live() {
-            let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                self.inner
-                    .update_vertex_properties(id.clone(), updates.clone())
-            });
-            durability.persist((id, updates), result)
-        } else {
-            durability.replay()
+        fn find_vertices(
+            &self,
+            vertex_type: Option<String>,
+            filters: Option<Vec<crate::golem::graph::types::FilterCondition>>,
+            sort: Option<Vec<crate::golem::graph::types::SortSpec>>,
+            limit: Option<u32>,
+            offset: Option<u32>,
+        ) -> Result<Vec<crate::golem::graph::types::Vertex>, GraphError> {
+            self.inner
+                .find_vertices(vertex_type, filters, sort, limit, offset)
         }
-    }
 
-    fn delete_vertex(
-        &self,
-        id: crate::golem::graph::types::ElementId,
-        delete_edges: bool,
-    ) -> Result<(), GraphError> {
-        let durability: Durability<Unit, GraphError> = Durability::new(
-            "golem_graph_transaction",
-            "delete_vertex",
-            WrappedFunctionType::WriteRemote,
-        );
-        if durability.is_live() {
-            let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                self.inner.delete_vertex(id.clone(), delete_edges)
-            });
-            durability.persist((id, delete_edges), result.map(|_| Unit))?;
-            Ok(())
-        } else {
-            durability.replay::<Unit, GraphError>()?;
-            Ok(())
-        }
-    }
-
-    fn find_vertices(
-        &self,
-        vertex_type: Option<String>,
-        filters: Option<Vec<crate::golem::graph::types::FilterCondition>>,
-        sort: Option<Vec<crate::golem::graph::types::SortSpec>>,
-        limit: Option<u32>,
-        offset: Option<u32>,
-    ) -> Result<Vec<crate::golem::graph::types::Vertex>, GraphError> {
-        self.inner
-            .find_vertices(vertex_type, filters, sort, limit, offset)
-    }
-
-    fn create_edge(
-        &self,
-        edge_type: String,
-        from_vertex: crate::golem::graph::types::ElementId,
-        to_vertex: crate::golem::graph::types::ElementId,
-        properties: crate::golem::graph::types::PropertyMap,
-    ) -> Result<crate::golem::graph::types::Edge, GraphError> {
-        let durability: Durability<crate::golem::graph::types::Edge, GraphError> = Durability::new(
-            "golem_graph_transaction",
-            "create_edge",
-            WrappedFunctionType::WriteRemote,
-        );
-        if durability.is_live() {
-            let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                self.inner.create_edge(
-                    edge_type.clone(),
-                    from_vertex.clone(),
-                    to_vertex.clone(),
-                    properties.clone(),
+        fn create_edge(
+            &self,
+            edge_type: String,
+            from_vertex: crate::golem::graph::types::ElementId,
+            to_vertex: crate::golem::graph::types::ElementId,
+            properties: crate::golem::graph::types::PropertyMap,
+        ) -> Result<crate::golem::graph::types::Edge, GraphError> {
+            let durability: Durability<crate::golem::graph::types::Edge, GraphError> =
+                Durability::new(
+                    "golem_graph_transaction",
+                    "create_edge",
+                    WrappedFunctionType::WriteRemote,
+                );
+            if durability.is_live() {
+                let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
+                    self.inner.create_edge(
+                        edge_type.clone(),
+                        from_vertex.clone(),
+                        to_vertex.clone(),
+                        properties.clone(),
+                    )
+                });
+                durability.persist(
+                    CreateEdgeParams {
+                        edge_type,
+                        from_vertex,
+                        to_vertex,
+                        properties,
+                    },
+                    result,
                 )
-            });
-            durability.persist(
-                CreateEdgeParams {
-                    edge_type,
-                    from_vertex,
-                    to_vertex,
-                    properties,
-                },
-                result,
-            )
-        } else {
-            durability.replay()
+            } else {
+                durability.replay()
+            }
         }
-    }
 
-    fn get_edge(
-        &self,
-        id: crate::golem::graph::types::ElementId,
-    ) -> Result<Option<crate::golem::graph::types::Edge>, GraphError> {
-        self.inner.get_edge(id)
-    }
-
-    fn update_edge(
-        &self,
-        id: crate::golem::graph::types::ElementId,
-        properties: crate::golem::graph::types::PropertyMap,
-    ) -> Result<crate::golem::graph::types::Edge, GraphError> {
-        let durability: Durability<crate::golem::graph::types::Edge, GraphError> = Durability::new(
-            "golem_graph_transaction",
-            "update_edge",
-            WrappedFunctionType::WriteRemote,
-        );
-        if durability.is_live() {
-            let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                self.inner.update_edge(id.clone(), properties.clone())
-            });
-            durability.persist((id, properties), result)
-        } else {
-            durability.replay()
+        fn get_edge(
+            &self,
+            id: crate::golem::graph::types::ElementId,
+        ) -> Result<Option<crate::golem::graph::types::Edge>, GraphError> {
+            self.inner.get_edge(id)
         }
-    }
 
-    fn update_edge_properties(
-        &self,
-        id: crate::golem::graph::types::ElementId,
-        updates: crate::golem::graph::types::PropertyMap,
-    ) -> Result<crate::golem::graph::types::Edge, GraphError> {
-        let durability: Durability<crate::golem::graph::types::Edge, GraphError> = Durability::new(
-            "golem_graph_transaction",
-            "update_edge_properties",
-            WrappedFunctionType::WriteRemote,
-        );
-        if durability.is_live() {
-            let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                self.inner
-                    .update_edge_properties(id.clone(), updates.clone())
-            });
-            durability.persist((id, updates), result)
-        } else {
-            durability.replay()
+        fn update_edge(
+            &self,
+            id: crate::golem::graph::types::ElementId,
+            properties: crate::golem::graph::types::PropertyMap,
+        ) -> Result<crate::golem::graph::types::Edge, GraphError> {
+            let durability: Durability<crate::golem::graph::types::Edge, GraphError> =
+                Durability::new(
+                    "golem_graph_transaction",
+                    "update_edge",
+                    WrappedFunctionType::WriteRemote,
+                );
+            if durability.is_live() {
+                let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
+                    self.inner.update_edge(id.clone(), properties.clone())
+                });
+                durability.persist((id, properties), result)
+            } else {
+                durability.replay()
+            }
         }
-    }
 
-    fn delete_edge(&self, id: crate::golem::graph::types::ElementId) -> Result<(), GraphError> {
-        let durability: Durability<Unit, GraphError> = Durability::new(
-            "golem_graph_transaction",
-            "delete_edge",
-            WrappedFunctionType::WriteRemote,
-        );
-        if durability.is_live() {
-            let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                self.inner.delete_edge(id.clone())
-            });
-            durability.persist(id, result.map(|_| Unit))?;
-            Ok(())
-        } else {
-            durability.replay::<Unit, GraphError>()?;
-            Ok(())
+        fn update_edge_properties(
+            &self,
+            id: crate::golem::graph::types::ElementId,
+            updates: crate::golem::graph::types::PropertyMap,
+        ) -> Result<crate::golem::graph::types::Edge, GraphError> {
+            let durability: Durability<crate::golem::graph::types::Edge, GraphError> =
+                Durability::new(
+                    "golem_graph_transaction",
+                    "update_edge_properties",
+                    WrappedFunctionType::WriteRemote,
+                );
+            if durability.is_live() {
+                let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
+                    self.inner
+                        .update_edge_properties(id.clone(), updates.clone())
+                });
+                durability.persist((id, updates), result)
+            } else {
+                durability.replay()
+            }
         }
-    }
 
-    fn find_edges(
-        &self,
-        edge_types: Option<Vec<String>>,
-        filters: Option<Vec<crate::golem::graph::types::FilterCondition>>,
-        sort: Option<Vec<crate::golem::graph::types::SortSpec>>,
-        limit: Option<u32>,
-        offset: Option<u32>,
-    ) -> Result<Vec<crate::golem::graph::types::Edge>, GraphError> {
-        self.inner
-            .find_edges(edge_types, filters, sort, limit, offset)
-    }
-
-    fn get_adjacent_vertices(
-        &self,
-        vertex_id: crate::golem::graph::types::ElementId,
-        direction: crate::golem::graph::types::Direction,
-        edge_types: Option<Vec<String>>,
-        limit: Option<u32>,
-    ) -> Result<Vec<crate::golem::graph::types::Vertex>, GraphError> {
-        self.inner
-            .get_adjacent_vertices(vertex_id, direction, edge_types, limit)
-    }
-
-    fn get_connected_edges(
-        &self,
-        vertex_id: crate::golem::graph::types::ElementId,
-        direction: crate::golem::graph::types::Direction,
-        edge_types: Option<Vec<String>>,
-        limit: Option<u32>,
-    ) -> Result<Vec<crate::golem::graph::types::Edge>, GraphError> {
-        self.inner
-            .get_connected_edges(vertex_id, direction, edge_types, limit)
-    }
-
-    fn create_vertices(
-        &self,
-        vertices: Vec<crate::golem::graph::transactions::VertexSpec>,
-    ) -> Result<Vec<crate::golem::graph::types::Vertex>, GraphError> {
-        let durability: Durability<Vec<crate::golem::graph::types::Vertex>, GraphError> =
-            Durability::new(
+        fn delete_edge(&self, id: crate::golem::graph::types::ElementId) -> Result<(), GraphError> {
+            let durability: Durability<Unit, GraphError> = Durability::new(
                 "golem_graph_transaction",
-                "create_vertices",
+                "delete_edge",
                 WrappedFunctionType::WriteRemote,
             );
-        if durability.is_live() {
-            let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                self.inner.create_vertices(vertices.clone())
-            });
-            durability.persist(vertices, result)
-        } else {
-            durability.replay()
+            if durability.is_live() {
+                let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
+                    self.inner.delete_edge(id.clone())
+                });
+                durability.persist(id, result.map(|_| Unit))?;
+                Ok(())
+            } else {
+                durability.replay::<Unit, GraphError>()?;
+                Ok(())
+            }
         }
-    }
 
-    fn create_edges(
-        &self,
-        edges: Vec<crate::golem::graph::transactions::EdgeSpec>,
-    ) -> Result<Vec<crate::golem::graph::types::Edge>, GraphError> {
-        let durability: Durability<Vec<crate::golem::graph::types::Edge>, GraphError> =
-            Durability::new(
-                "golem_graph_transaction",
-                "create_edges",
-                WrappedFunctionType::WriteRemote,
-            );
-        if durability.is_live() {
-            let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                self.inner.create_edges(edges.clone())
-            });
-            durability.persist(edges, result)
-        } else {
-            durability.replay()
+        fn find_edges(
+            &self,
+            edge_types: Option<Vec<String>>,
+            filters: Option<Vec<crate::golem::graph::types::FilterCondition>>,
+            sort: Option<Vec<crate::golem::graph::types::SortSpec>>,
+            limit: Option<u32>,
+            offset: Option<u32>,
+        ) -> Result<Vec<crate::golem::graph::types::Edge>, GraphError> {
+            self.inner
+                .find_edges(edge_types, filters, sort, limit, offset)
         }
-    }
 
-    fn upsert_vertex(
-        &self,
-        id: Option<crate::golem::graph::types::ElementId>,
-        vertex_type: String,
-        properties: crate::golem::graph::types::PropertyMap,
-    ) -> Result<crate::golem::graph::types::Vertex, GraphError> {
-        let durability: Durability<crate::golem::graph::types::Vertex, GraphError> =
-            Durability::new(
-                "golem_graph_transaction",
-                "upsert_vertex",
-                WrappedFunctionType::WriteRemote,
-            );
-        if durability.is_live() {
-            let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                self.inner
-                    .upsert_vertex(id.clone(), vertex_type.clone(), properties.clone())
-            });
-            durability.persist((id, vertex_type, properties), result)
-        } else {
-            durability.replay()
+        fn get_adjacent_vertices(
+            &self,
+            vertex_id: crate::golem::graph::types::ElementId,
+            direction: crate::golem::graph::types::Direction,
+            edge_types: Option<Vec<String>>,
+            limit: Option<u32>,
+        ) -> Result<Vec<crate::golem::graph::types::Vertex>, GraphError> {
+            self.inner
+                .get_adjacent_vertices(vertex_id, direction, edge_types, limit)
         }
-    }
 
-    fn upsert_edge(
-        &self,
-        id: Option<crate::golem::graph::types::ElementId>,
-        edge_type: String,
-        from_vertex: crate::golem::graph::types::ElementId,
-        to_vertex: crate::golem::graph::types::ElementId,
-        properties: crate::golem::graph::types::PropertyMap,
-    ) -> Result<crate::golem::graph::types::Edge, GraphError> {
-        let durability: Durability<crate::golem::graph::types::Edge, GraphError> = Durability::new(
-            "golem_graph_transaction",
-            "upsert_edge",
-            WrappedFunctionType::WriteRemote,
-        );
-        if durability.is_live() {
-            let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                self.inner.upsert_edge(
-                    id.clone(),
-                    edge_type.clone(),
-                    from_vertex.clone(),
-                    to_vertex.clone(),
-                    properties.clone(),
+        fn get_connected_edges(
+            &self,
+            vertex_id: crate::golem::graph::types::ElementId,
+            direction: crate::golem::graph::types::Direction,
+            edge_types: Option<Vec<String>>,
+            limit: Option<u32>,
+        ) -> Result<Vec<crate::golem::graph::types::Edge>, GraphError> {
+            self.inner
+                .get_connected_edges(vertex_id, direction, edge_types, limit)
+        }
+
+        fn create_vertices(
+            &self,
+            vertices: Vec<crate::golem::graph::transactions::VertexSpec>,
+        ) -> Result<Vec<crate::golem::graph::types::Vertex>, GraphError> {
+            let durability: Durability<Vec<crate::golem::graph::types::Vertex>, GraphError> =
+                Durability::new(
+                    "golem_graph_transaction",
+                    "create_vertices",
+                    WrappedFunctionType::WriteRemote,
+                );
+            if durability.is_live() {
+                let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
+                    self.inner.create_vertices(vertices.clone())
+                });
+                durability.persist(vertices, result)
+            } else {
+                durability.replay()
+            }
+        }
+
+        fn create_edges(
+            &self,
+            edges: Vec<crate::golem::graph::transactions::EdgeSpec>,
+        ) -> Result<Vec<crate::golem::graph::types::Edge>, GraphError> {
+            let durability: Durability<Vec<crate::golem::graph::types::Edge>, GraphError> =
+                Durability::new(
+                    "golem_graph_transaction",
+                    "create_edges",
+                    WrappedFunctionType::WriteRemote,
+                );
+            if durability.is_live() {
+                let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
+                    self.inner.create_edges(edges.clone())
+                });
+                durability.persist(edges, result)
+            } else {
+                durability.replay()
+            }
+        }
+
+        fn upsert_vertex(
+            &self,
+            id: Option<crate::golem::graph::types::ElementId>,
+            vertex_type: String,
+            properties: crate::golem::graph::types::PropertyMap,
+        ) -> Result<crate::golem::graph::types::Vertex, GraphError> {
+            let durability: Durability<crate::golem::graph::types::Vertex, GraphError> =
+                Durability::new(
+                    "golem_graph_transaction",
+                    "upsert_vertex",
+                    WrappedFunctionType::WriteRemote,
+                );
+            if durability.is_live() {
+                let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
+                    self.inner
+                        .upsert_vertex(id.clone(), vertex_type.clone(), properties.clone())
+                });
+                durability.persist((id, vertex_type, properties), result)
+            } else {
+                durability.replay()
+            }
+        }
+
+        fn upsert_edge(
+            &self,
+            id: Option<crate::golem::graph::types::ElementId>,
+            edge_type: String,
+            from_vertex: crate::golem::graph::types::ElementId,
+            to_vertex: crate::golem::graph::types::ElementId,
+            properties: crate::golem::graph::types::PropertyMap,
+        ) -> Result<crate::golem::graph::types::Edge, GraphError> {
+            let durability: Durability<crate::golem::graph::types::Edge, GraphError> =
+                Durability::new(
+                    "golem_graph_transaction",
+                    "upsert_edge",
+                    WrappedFunctionType::WriteRemote,
+                );
+            if durability.is_live() {
+                let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
+                    self.inner.upsert_edge(
+                        id.clone(),
+                        edge_type.clone(),
+                        from_vertex.clone(),
+                        to_vertex.clone(),
+                        properties.clone(),
+                    )
+                });
+                durability.persist(
+                    UpsertEdgeParams {
+                        id,
+                        edge_type,
+                        from_vertex,
+                        to_vertex,
+                        properties,
+                    },
+                    result,
                 )
-            });
-            durability.persist(
-                UpsertEdgeParams {
-                    id,
-                    edge_type,
-                    from_vertex,
-                    to_vertex,
-                    properties,
-                },
-                result,
-            )
-        } else {
-            durability.replay()
+            } else {
+                durability.replay()
+            }
         }
     }
-}
 
     #[derive(Debug, Clone, FromValueAndType, IntoValue, PartialEq)]
     struct CreateEdgeParams {

@@ -30,7 +30,6 @@ impl GuestSchemaManager for SchemaManager {
         &self,
         schema: golem_graph::golem::graph::schema::VertexLabelSchema,
     ) -> Result<(), GraphError> {
-
         for prop in schema.properties {
             if prop.required {
                 let q = format!(

@@ -111,7 +111,6 @@ impl GuestSchemaManager for SchemaManager {
                 .unwrap_or(false)
         };
 
-
         if exists {
             Ok(Some(EdgeLabelSchema {
                 label,

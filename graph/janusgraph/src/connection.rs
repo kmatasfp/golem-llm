@@ -72,7 +72,7 @@ impl GuestGraph for Graph {
         Ok(GraphStatistics {
             vertex_count,
             edge_count,
-            label_count: None, 
+            label_count: None,
             property_count: None,
         })
     }

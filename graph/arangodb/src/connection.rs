@@ -149,7 +149,7 @@ impl GuestGraph for Graph {
             vertex_count: Some(stats.vertex_count),
             edge_count: Some(stats.edge_count),
             label_count: None, // ArangoDB doesn't have a direct concept of "labels" count
-            property_count: None, 
+            property_count: None,
         })
     }
 }

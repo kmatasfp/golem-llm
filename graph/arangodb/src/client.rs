@@ -422,7 +422,6 @@ impl ArangoDbApi {
     }
 
     pub fn define_edge_type(&self, definition: EdgeTypeDefinition) -> Result<(), GraphError> {
-        
         self.create_collection(&definition.collection, ContainerType::EdgeContainer)?;
         // Note: ArangoDB doesn't enforce from/to collection constraints like some other graph databases
         // The constraints in EdgeTypeDefinition are mainly for application-level validation
@@ -482,7 +481,7 @@ impl ArangoDbApi {
     pub fn execute_query(&self, query: Value) -> Result<Value, GraphError> {
         self.execute(Method::POST, "/_api/cursor", Some(&query))
     }
-    
+
     #[allow(dead_code)]
     pub fn ensure_collection_exists(
         &self,

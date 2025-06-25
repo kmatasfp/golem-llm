@@ -55,7 +55,6 @@ impl Transaction {
         let gremlin =
             "g.V(from_id).repeat(outE().inV().simplePath()).until(hasId(to_id)).path().limit(1)";
 
-
         let resp = self.api.execute(gremlin, Some(Value::Object(bindings)))?;
 
         // Handle GraphSON g:List format
@@ -89,7 +88,6 @@ impl Transaction {
         options: Option<PathOptions>,
         limit: Option<u32>,
     ) -> Result<Vec<Path>, GraphError> {
-
         if let Some(opts) = &options {
             if opts.vertex_types.is_some()
                 || opts.vertex_filters.is_some()
@@ -115,7 +113,6 @@ impl Transaction {
         if let Some(lim) = limit {
             gremlin.push_str(&format!(".limit({})", lim));
         }
-
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
@@ -158,7 +155,7 @@ impl Transaction {
         }
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
-        
+
         let data_array = if let Some(data) = response["result"]["data"].as_object() {
             if data.get("@type") == Some(&Value::String("g:List".to_string())) {
                 data.get("@value").and_then(|v| v.as_array())
@@ -235,7 +232,6 @@ impl Transaction {
             "g.V(source_id).repeat({}({})).times({}).dedup().elementMap()",
             step, label_key, distance
         );
-
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
