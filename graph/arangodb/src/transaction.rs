@@ -192,11 +192,8 @@ impl GuestTransaction for Transaction {
         }
 
         if delete_edges {
-            // Find and delete all edges connected to this vertex
-            // This is a simple implementation that looks across all edge collections
             let vertex_id = helpers::element_id_to_string(&id);
 
-            // Get all collections to find edge collections
             let collections = self.api.list_collections().unwrap_or_default();
             let edge_collections: Vec<_> = collections
                 .iter()
@@ -209,7 +206,6 @@ impl GuestTransaction for Transaction {
                 .map(|c| c.name.clone())
                 .collect();
 
-            // Delete edges from each edge collection
             for edge_collection in edge_collections {
                 let delete_edges_query = json!({
                     "query": "FOR e IN @@collection FILTER e._from == @vertex_id OR e._to == @vertex_id REMOVE e IN @@collection",
@@ -381,13 +377,13 @@ impl GuestTransaction for Transaction {
         let key = helpers::element_id_to_key(&id)?;
         let collection = helpers::collection_from_element_id(&id)?;
 
-        // First get the current edge to preserve _from and _to
+        // First getting the current edge to preserve _from and _to
         let current_edge = self
             .get_edge(id.clone())?
             .ok_or_else(|| GraphError::ElementNotFound(id.clone()))?;
 
         let mut props = conversions::to_arango_properties(properties)?;
-        // Preserve _from and _to for edge replacement
+        // Preserving _from and _to for edge replacement
         props.insert(
             "_from".to_string(),
             json!(helpers::element_id_to_string(&current_edge.from_vertex)),

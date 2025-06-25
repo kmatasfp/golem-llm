@@ -32,14 +32,14 @@ pub(crate) fn config_from_env() -> Result<ConnectionConfig, GraphError> {
 }
 
 pub(crate) fn parse_vertex_from_gremlin(value: &Value) -> Result<Vertex, GraphError> {
-    // Handle g:Vertex (GraphSON vertex from path traversals)
+    // Handling g:Vertex (GraphSON vertex from path traversals)
     let obj = if value.get("@type") == Some(&json!("g:Vertex")) {
         value
             .get("@value")
             .ok_or_else(|| GraphError::InternalError("g:Vertex missing @value".to_string()))?
             .clone()
     }
-    // Handle g:Map (alternating key-value pairs in @value array)
+    // Handling g:Map (alternating key-value pairs in @value array)
     else if value.get("@type") == Some(&json!("g:Map")) {
         let arr = value
             .get("@value")
@@ -61,9 +61,7 @@ pub(crate) fn parse_vertex_from_gremlin(value: &Value) -> Result<Vertex, GraphEr
                     "Unexpected key format in Gremlin map".into(),
                 ));
             };
-            // val:
             let val = if let Some(obj) = vv.as_object() {
-                // wrapped value
                 obj.get("@value")
                     .cloned()
                     .unwrap_or(Value::Object(obj.clone()))
@@ -92,26 +90,21 @@ pub(crate) fn parse_vertex_from_gremlin(value: &Value) -> Result<Vertex, GraphEr
         .unwrap_or_default()
         .to_string();
 
-    // 1) If there is a "properties" map, flatten it with your helper
     let mut properties = Vec::new();
     if let Some(props_val) = obj.get("properties") {
         let mut pmap = from_gremlin_properties(props_val)?;
         properties.append(&mut pmap);
     }
 
-    // 2) Any other top‑level scalar props? (for regular format or valueMap(true) format)
     for (key, value) in obj {
         if key == "id" || key == "label" || key == "properties" {
             continue;
         }
 
-        // Handle valueMap(true) format where properties are arrays
         let parsed_value = if let Some(array) = value.as_array() {
-            // In valueMap(true), properties come as arrays like ["marko"] or [29]
             if let Some(first_item) = array.first() {
                 from_gremlin_value(first_item)?
             } else {
-                // Empty array, skip this property
                 continue;
             }
         } else {
@@ -135,28 +128,25 @@ fn from_gremlin_id(value: &Value) -> Result<ElementId, GraphError> {
     } else if let Some(id) = value.as_str() {
         Ok(ElementId::StringValue(id.to_string()))
     } else if let Some(id_obj) = value.as_object() {
-        // Handle GraphSON wrapped values with @type and @value
+        // Handling GraphSON wrapped values with @type and @value
         if let Some(type_val) = id_obj.get("@type") {
             if let Some(type_str) = type_val.as_str() {
                 if type_str == "janusgraph:RelationIdentifier" {
-                    // Handle JanusGraph's RelationIdentifier
+                    // Handl JanusGraph's RelationIdentifier
                     if let Some(rel_obj) = id_obj.get("@value").and_then(Value::as_object) {
                         if let Some(rel_id) = rel_obj.get("relationId").and_then(Value::as_str) {
                             return Ok(ElementId::StringValue(rel_id.to_string()));
                         }
                     }
                 } else if type_str.starts_with("g:") {
-                    // Handle standard GraphSON types (g:Int64, g:String, etc.)
                     if let Some(id_val) = id_obj.get("@value") {
                         return from_gremlin_id(id_val);
                     }
                 }
             }
         } else if let Some(id_val) = id_obj.get("@value") {
-            // Fallback for generic @value unwrapping
             return from_gremlin_id(id_val);
         } else if id_obj.len() == 1 && id_obj.contains_key("relationId") {
-            // Handle JanusGraph's RelationIdentifier as a plain object
             if let Some(rel_id) = id_obj.get("relationId").and_then(Value::as_str) {
                 return Ok(ElementId::StringValue(rel_id.to_string()));
             }
@@ -198,14 +188,12 @@ pub(crate) fn from_gremlin_properties(properties_value: &Value) -> Result<Proper
 }
 
 pub(crate) fn parse_edge_from_gremlin(value: &Value) -> Result<Edge, GraphError> {
-    // Handle g:Edge (GraphSON edge from path traversals)
     let obj = if value.get("@type") == Some(&json!("g:Edge")) {
         value
             .get("@value")
             .ok_or_else(|| GraphError::InternalError("g:Edge missing @value".to_string()))?
             .clone()
     } else if value.get("@type") == Some(&json!("g:Map")) {
-        // Handle g:Map (alternating key-value pairs in @value array)
         let arr = value
             .get("@value")
             .and_then(Value::as_array)
@@ -230,9 +218,7 @@ pub(crate) fn parse_edge_from_gremlin(value: &Value) -> Result<Edge, GraphError>
                     "Unexpected key format in Gremlin edge map".into(),
                 ));
             };
-            // val:
             let val = if let Some(obj) = vv.as_object() {
-                // wrapped value
                 obj.get("@value")
                     .cloned()
                     .unwrap_or(Value::Object(obj.clone()))
@@ -261,11 +247,9 @@ pub(crate) fn parse_edge_from_gremlin(value: &Value) -> Result<Edge, GraphError>
         .unwrap_or_default()
         .to_string();
 
-    // Try to get inV/outV, or fallback to IN/OUT (elementMap format)
     let in_v = if let Some(in_v) = obj.get("inV") {
         from_gremlin_id(in_v)?
     } else if let Some(in_map) = obj.get("IN") {
-        // IN is a g:Map with alternating key-value pairs, or possibly just an array
         let arr_opt = if let Some(arr) = in_map.get("@value").and_then(Value::as_array) {
             Some(arr)
         } else {
@@ -304,7 +288,6 @@ pub(crate) fn parse_edge_from_gremlin(value: &Value) -> Result<Edge, GraphError>
     let out_v = if let Some(out_v) = obj.get("outV") {
         from_gremlin_id(out_v)?
     } else if let Some(out_map) = obj.get("OUT") {
-        // OUT is a g:Map with alternating key-value pairs, or possibly just an array
         let arr_opt = if let Some(arr) = out_map.get("@value").and_then(Value::as_array) {
             Some(arr)
         } else {
@@ -358,7 +341,6 @@ pub(crate) fn parse_edge_from_gremlin(value: &Value) -> Result<Edge, GraphError>
 pub(crate) fn parse_path_from_gremlin(value: &Value) -> Result<Path, GraphError> {
     println!("[DEBUG][parse_path_from_gremlin] Input value: {:?}", value);
 
-    // Handle GraphSON g:Path format
     if let Some(obj) = value.as_object() {
         if let Some(path_type) = obj.get("@type") {
             if path_type == "g:Path" {
@@ -433,7 +415,6 @@ pub(crate) fn parse_path_from_gremlin(value: &Value) -> Result<Path, GraphError>
         }
     }
 
-    // Handle regular path arrays (non-GraphSON format)
     if let Some(path_array) = value.as_array() {
         let mut vertices = Vec::new();
         let mut edges = Vec::new();
@@ -443,7 +424,6 @@ pub(crate) fn parse_path_from_gremlin(value: &Value) -> Result<Path, GraphError>
                 GraphError::InternalError("Path element is not a JSON object".to_string())
             })?;
 
-            // Check if this element is a vertex or edge by examining GraphSON type first
             if let Some(type_value) = obj.get("@type") {
                 match type_value.as_str() {
                     Some("g:Edge") => {
@@ -453,7 +433,6 @@ pub(crate) fn parse_path_from_gremlin(value: &Value) -> Result<Path, GraphError>
                         vertices.push(parse_vertex_from_gremlin(element_value)?);
                     }
                     _ => {
-                        // Fall back to property-based detection for non-GraphSON format
                         if obj.contains_key("inV") && obj.contains_key("outV") {
                             edges.push(parse_edge_from_gremlin(element_value)?);
                         } else {
@@ -462,7 +441,6 @@ pub(crate) fn parse_path_from_gremlin(value: &Value) -> Result<Path, GraphError>
                     }
                 }
             } else {
-                // No @type field, use property-based detection
                 if obj.contains_key("inV") && obj.contains_key("outV") {
                     edges.push(parse_edge_from_gremlin(element_value)?);
                 } else {

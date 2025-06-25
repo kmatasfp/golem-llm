@@ -37,7 +37,6 @@ impl GuestGraph for Graph {
         let vertex_count_res = self.api.execute("g.V().count()", None)?;
         let edge_count_res = self.api.execute("g.E().count()", None)?;
 
-        // Helper to extract count from JanusGraph response
         fn extract_count(val: &serde_json::Value) -> Option<u64> {
             val.get("result")
                 .and_then(|r| r.get("data"))
@@ -73,8 +72,8 @@ impl GuestGraph for Graph {
         Ok(GraphStatistics {
             vertex_count,
             edge_count,
-            label_count: None, // JanusGraph requires a more complex query for this
-            property_count: None, // JanusGraph requires a more complex query for this
+            label_count: None, 
+            property_count: None,
         })
     }
 }

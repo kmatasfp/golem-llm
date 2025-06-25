@@ -55,14 +55,8 @@ impl Transaction {
         let gremlin =
             "g.V(from_id).repeat(outE().inV().simplePath()).until(hasId(to_id)).path().limit(1)";
 
-        println!("[DEBUG][find_shortest_path] Executing query: {}", gremlin);
-        println!("[DEBUG][find_shortest_path] Bindings: {:?}", bindings);
 
         let resp = self.api.execute(gremlin, Some(Value::Object(bindings)))?;
-        println!(
-            "[DEBUG][find_shortest_path] Raw response: {}",
-            serde_json::to_string_pretty(&resp).unwrap_or_else(|_| format!("{:?}", resp))
-        );
 
         // Handle GraphSON g:List format
         let data_array = if let Some(data) = resp["result"]["data"].as_object() {
@@ -76,15 +70,7 @@ impl Transaction {
         };
 
         if let Some(arr) = data_array {
-            println!(
-                "[DEBUG][find_shortest_path] Data array length: {}",
-                arr.len()
-            );
             if let Some(val) = arr.first() {
-                println!(
-                    "[DEBUG][find_shortest_path] First value: {}",
-                    serde_json::to_string_pretty(val).unwrap_or_else(|_| format!("{:?}", val))
-                );
                 return Ok(Some(parse_path_from_gremlin(val)?));
             } else {
                 println!("[DEBUG][find_shortest_path] Data array is empty");
@@ -103,7 +89,7 @@ impl Transaction {
         options: Option<PathOptions>,
         limit: Option<u32>,
     ) -> Result<Vec<Path>, GraphError> {
-        // ←— Unsuppported‑options guard
+
         if let Some(opts) = &options {
             if opts.vertex_types.is_some()
                 || opts.vertex_filters.is_some()
@@ -130,16 +116,9 @@ impl Transaction {
             gremlin.push_str(&format!(".limit({})", lim));
         }
 
-        println!("[DEBUG][find_all_paths] Executing query: {}", gremlin);
-        println!("[DEBUG][find_all_paths] Bindings: {:?}", bindings);
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
-        println!(
-            "[DEBUG][find_all_paths] Raw response: {}",
-            serde_json::to_string_pretty(&response).unwrap_or_else(|_| format!("{:?}", response))
-        );
 
-        // Handle GraphSON g:List format (same as find_shortest_path)
         let data_array = if let Some(data) = response["result"]["data"].as_object() {
             if data.get("@type") == Some(&Value::String("g:List".to_string())) {
                 data.get("@value").and_then(|v| v.as_array())
@@ -151,10 +130,8 @@ impl Transaction {
         };
 
         if let Some(arr) = data_array {
-            println!("[DEBUG][find_all_paths] Data array length: {}", arr.len());
             arr.iter().map(parse_path_from_gremlin).collect()
         } else {
-            println!("[DEBUG][find_all_paths] No data array in response");
             Ok(Vec::new())
         }
     }
@@ -181,12 +158,7 @@ impl Transaction {
         }
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
-        println!(
-            "[DEBUG][get_neighborhood] Raw response: {}",
-            serde_json::to_string_pretty(&response).unwrap_or_default()
-        );
-
-        // Handle GraphSON g:List format (same as find_shortest_path and find_all_paths)
+        
         let data_array = if let Some(data) = response["result"]["data"].as_object() {
             if data.get("@type") == Some(&Value::String("g:List".to_string())) {
                 data.get("@value").and_then(|v| v.as_array())
@@ -198,14 +170,9 @@ impl Transaction {
         };
 
         if let Some(arr) = data_array {
-            println!("[DEBUG][get_neighborhood] Data array length: {}", arr.len());
             let mut verts = std::collections::HashMap::new();
             let mut edges = std::collections::HashMap::new();
             for val in arr {
-                println!(
-                    "[DEBUG][get_neighborhood] Processing path: {}",
-                    serde_json::to_string_pretty(val).unwrap_or_else(|_| format!("{:?}", val))
-                );
                 let path = parse_path_from_gremlin(val)?;
                 for v in path.vertices {
                     verts.insert(element_id_to_key(&v.id), v);
@@ -220,7 +187,6 @@ impl Transaction {
                 edges: edges.into_values().collect(),
             })
         } else {
-            println!("[DEBUG][get_neighborhood] No data array in response");
             Ok(Subgraph {
                 vertices: Vec::new(),
                 edges: Vec::new(),
@@ -270,17 +236,8 @@ impl Transaction {
             step, label_key, distance
         );
 
-        println!(
-            "[DEBUG][get_vertices_at_distance] Executing query: {}",
-            gremlin
-        );
-        println!("[DEBUG][get_vertices_at_distance] Bindings: {:?}", bindings);
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
-        println!(
-            "[DEBUG][get_vertices_at_distance] Raw response: {}",
-            serde_json::to_string_pretty(&response).unwrap_or_else(|_| format!("{:?}", response))
-        );
 
         // Handle GraphSON g:List format (same as other methods)
         let data_array = if let Some(data) = response["result"]["data"].as_object() {
@@ -294,13 +251,8 @@ impl Transaction {
         };
 
         if let Some(arr) = data_array {
-            println!(
-                "[DEBUG][get_vertices_at_distance] Data array length: {}",
-                arr.len()
-            );
             arr.iter().map(parse_vertex_from_gremlin).collect()
         } else {
-            println!("[DEBUG][get_vertices_at_distance] No data array in response");
             Ok(Vec::new())
         }
     }

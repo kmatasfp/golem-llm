@@ -40,9 +40,7 @@ impl ExtendedGuest for GraphJanusGraphComponent {
         let username = config.username.as_deref();
         let password = config.password.as_deref();
 
-        // Create a new JanusGraphApi instance, propagating any errors.
         let api = JanusGraphApi::new(host, port, username, password)?;
-        // Validate credentials by opening a transaction (will fail if creds are bad)
         api.execute("g.tx().open()", None)?;
         Ok(Graph::new(api))
     }

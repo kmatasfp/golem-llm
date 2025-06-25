@@ -193,7 +193,7 @@ fn parse_iso_datetime(s: &str) -> Result<Datetime, ()> {
             second,
             nanosecond,
         },
-        timezone_offset_minutes: Some(0), // Gremlin dates are timezone-aware, assume UTC
+        timezone_offset_minutes: Some(0), // Gremlin dates are timezone-aware
     })
 }
 

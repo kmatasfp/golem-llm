@@ -149,14 +149,13 @@ pub(crate) fn from_arango_value(value: Value) -> Result<PropertyValue, GraphErro
             }
         }
         Value::String(s) => {
-            // Try base64 decoding only for strings that clearly look like base64
             if s.len() >= 4
                 && s.len() % 4 == 0
                 && s.chars()
                     .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
             {
                 if let Ok(bytes) = general_purpose::STANDARD.decode(&s) {
-                    // Only treat as base64 bytes in these cases:
+                    // Only treating as base64 bytes in these cases:
                     // 1. String contains base64 padding or special characters
                     // 2. String is relatively long (likely encoded data)
                     // 3. String starts with common base64 prefixes or patterns

@@ -30,7 +30,7 @@ impl GuestSchemaManager for SchemaManager {
         &self,
         schema: golem_graph::golem::graph::schema::VertexLabelSchema,
     ) -> Result<(), GraphError> {
-        // For each property constraint, open a fresh tx, run it, then commit.
+
         for prop in schema.properties {
             if prop.required {
                 let q = format!(

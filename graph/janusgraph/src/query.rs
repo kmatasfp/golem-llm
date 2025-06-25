@@ -23,7 +23,7 @@ fn parse_gremlin_response(response: Value) -> Result<QueryResult, GraphError> {
             GraphError::InternalError("Invalid response structure from Gremlin".to_string())
         })?;
 
-    // Handle GraphSON format: {"@type": "g:List", "@value": [...]}
+    // Handling GraphSON format: {"@type": "g:List", "@value": [...]}
     let arr = if let Some(graphson_obj) = result_data.as_object() {
         if let Some(value_array) = graphson_obj.get("@value").and_then(|v| v.as_array()) {
             value_array
@@ -43,22 +43,20 @@ fn parse_gremlin_response(response: Value) -> Result<QueryResult, GraphError> {
     if let Some(first_item) = arr.first() {
         if first_item.is_object() {
             if let Some(obj) = first_item.as_object() {
-                // Check if this is a GraphSON Map
                 if obj.get("@type") == Some(&Value::String("g:Map".to_string())) {
-                    // Handle GraphSON Maps
                     let mut maps = Vec::new();
                     for item in arr {
                         if let Some(obj) = item.as_object() {
                             if let Some(map_array) = obj.get("@value").and_then(|v| v.as_array()) {
                                 let mut row: Vec<(String, PropertyValue)> = Vec::new();
-                                // Process GraphSON Map: array contains alternating keys and values
+                                // Processing GraphSON Map: array contains alternating keys and values
                                 let mut i = 0;
                                 while i + 1 < map_array.len() {
                                     if let (Some(key_val), Some(value_val)) =
                                         (map_array.get(i), map_array.get(i + 1))
                                     {
                                         if let Some(key_str) = key_val.as_str() {
-                                            // Handle GraphSON List format for valueMap results
+                                            // Handling GraphSON List format for valueMap results
                                             if let Some(graphson_obj) = value_val.as_object() {
                                                 if graphson_obj.get("@type")
                                                     == Some(&Value::String("g:List".to_string()))
@@ -79,7 +77,6 @@ fn parse_gremlin_response(response: Value) -> Result<QueryResult, GraphError> {
                                                         }
                                                     }
                                                 } else {
-                                                    // Regular GraphSON object
                                                     row.push((
                                                         key_str.to_string(),
                                                         conversions::from_gremlin_value(value_val)?,
@@ -101,20 +98,17 @@ fn parse_gremlin_response(response: Value) -> Result<QueryResult, GraphError> {
                     }
                     return Ok(QueryResult::Maps(maps));
                 } else if obj.contains_key("@type") && obj.contains_key("@value") {
-                    // This is a GraphSON wrapped primitive value, treat as values
                     let values = arr
                         .iter()
                         .map(conversions::from_gremlin_value)
                         .collect::<Result<Vec<_>, _>>()?;
                     return Ok(QueryResult::Values(values));
                 } else {
-                    // Regular JSON object maps
                     let mut maps = Vec::new();
                     for item in arr {
                         if let Some(gremlin_map) = item.as_object() {
                             let mut row: Vec<(String, PropertyValue)> = Vec::new();
                             for (key, gremlin_value) in gremlin_map {
-                                // Handle GraphSON List format for valueMap results
                                 if let Some(graphson_obj) = gremlin_value.as_object() {
                                     if graphson_obj.get("@type")
                                         == Some(&Value::String("g:List".to_string()))
@@ -130,7 +124,6 @@ fn parse_gremlin_response(response: Value) -> Result<QueryResult, GraphError> {
                                             }
                                         }
                                     } else {
-                                        // Regular GraphSON object
                                         row.push((
                                             key.clone(),
                                             conversions::from_gremlin_value(gremlin_value)?,

@@ -21,7 +21,6 @@ impl ArangoDbApi {
             general_purpose::STANDARD.encode(format!("{}:{}", username, password))
         );
 
-        // Create client using the same pattern as working LLM clients
         let client = Client::builder()
             .build()
             .expect("Failed to initialize HTTP client");
@@ -41,13 +40,11 @@ impl ArangoDbApi {
     ) -> Result<T, GraphError> {
         let url = format!("{}{}", self.base_url, endpoint);
 
-        // Build request using the same pattern as working LLM clients
         let mut request_builder = self
             .client
             .request(method, url)
             .header("authorization", &self.auth_header);
 
-        // Add body if provided - serialize to string to avoid chunked encoding
         if let Some(body_value) = body {
             let body_string = serde_json::to_string(body_value).map_err(|e| {
                 GraphError::InternalError(format!("Failed to serialize request body: {}", e))
@@ -115,7 +112,6 @@ impl ArangoDbApi {
 
     #[allow(dead_code)]
     pub fn begin_transaction(&self, read_only: bool) -> Result<String, GraphError> {
-        // Get all existing collections to register them with the transaction
         let existing_collections = self.list_collections().unwrap_or_default();
         let collection_names: Vec<String> = existing_collections
             .iter()
@@ -181,10 +177,8 @@ impl ArangoDbApi {
         transaction_id: &str,
         query: Value,
     ) -> Result<Value, GraphError> {
-        // Use the same pattern but add the transaction header
         let url = format!("{}/_api/cursor", self.base_url);
 
-        // Serialize to string to avoid chunked encoding
         let body_string = serde_json::to_string(&query)
             .map_err(|e| GraphError::InternalError(format!("Failed to serialize query: {}", e)))?;
 
@@ -225,7 +219,6 @@ impl ArangoDbApi {
     pub fn list_collections(&self) -> Result<Vec<ContainerInfo>, GraphError> {
         let response: Value = self.execute(Method::GET, "/_api/collection", None)?;
 
-        // Try to get the result array from the response
         let collections_array = if let Some(result) = response.get("result") {
             result.as_array().ok_or_else(|| {
                 GraphError::InternalError(
@@ -233,7 +226,6 @@ impl ArangoDbApi {
                 )
             })?
         } else {
-            // Fallback: try to use response directly as array (older API format)
             response.as_array().ok_or_else(|| {
                 GraphError::InternalError("Invalid response for list_collections - no result field and response is not array".to_string())
             })?
@@ -394,7 +386,6 @@ impl ArangoDbApi {
                     }
                 }
                 Err(_) => {
-                    // Skip collections that we can't access
                     continue;
                 }
             }
@@ -406,12 +397,11 @@ impl ArangoDbApi {
     pub fn get_index(&self, name: &str) -> Result<Option<IndexDefinition>, GraphError> {
         let all_indexes = self.list_indexes()?;
 
-        // Try to find by exact name match first
         if let Some(index) = all_indexes.iter().find(|idx| idx.name == name) {
             return Ok(Some(index.clone()));
         }
 
-        // If the requested name follows our pattern (idx_collection_field), try to match by properties
+        // If the requested name follows our pattern (idx_collection_field)
         if name.starts_with("idx_") {
             let parts: Vec<&str> = name.split('_').collect();
             if parts.len() >= 3 {
@@ -432,11 +422,8 @@ impl ArangoDbApi {
     }
 
     pub fn define_edge_type(&self, definition: EdgeTypeDefinition) -> Result<(), GraphError> {
-        // In ArangoDB, we just ensure the edge collection exists
-        // The from/to collection constraints are not enforced at the database level
-        // but are handled at the application level
+        
         self.create_collection(&definition.collection, ContainerType::EdgeContainer)?;
-
         // Note: ArangoDB doesn't enforce from/to collection constraints like some other graph databases
         // The constraints in EdgeTypeDefinition are mainly for application-level validation
         Ok(())
@@ -495,13 +482,13 @@ impl ArangoDbApi {
     pub fn execute_query(&self, query: Value) -> Result<Value, GraphError> {
         self.execute(Method::POST, "/_api/cursor", Some(&query))
     }
-
+    
+    #[allow(dead_code)]
     pub fn ensure_collection_exists(
         &self,
         name: &str,
         container_type: ContainerType,
     ) -> Result<(), GraphError> {
-        // Try to create collection, ignore error if it already exists
         match self.create_collection(name, container_type) {
             Ok(_) => Ok(()),
             Err(GraphError::InternalError(msg)) if msg.contains("duplicate name") => Ok(()),
@@ -509,9 +496,7 @@ impl ArangoDbApi {
         }
     }
 
-    // Method to begin transaction with dynamic collection registration
     pub fn begin_dynamic_transaction(&self, read_only: bool) -> Result<String, GraphError> {
-        // Start with common collections that are likely to be used
         let common_collections = vec![
             "Person".to_string(),
             "TempUser".to_string(),
@@ -526,7 +511,6 @@ impl ArangoDbApi {
             "FOLLOWS".to_string(),
         ];
 
-        // Also include any existing collections
         let existing_collections = self.list_collections().unwrap_or_default();
         let mut all_collections: Vec<String> = existing_collections
             .iter()
@@ -559,7 +543,6 @@ impl ArangoDbApi {
     }
 }
 
-// Rest of the structs remain the same...
 #[derive(serde::Deserialize, Debug)]
 struct TransactionStatusResponse {
     #[serde(rename = "id")]

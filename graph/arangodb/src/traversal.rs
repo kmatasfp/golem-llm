@@ -31,9 +31,6 @@ impl Transaction {
         let edge_collections = options.and_then(|o| o.edge_types).unwrap_or_default();
 
         let edge_collections_str = if edge_collections.is_empty() {
-            // When no specific edge collections are provided, we need to specify
-            // the collections used in the test. In a real-world scenario, this would
-            // need to be configured or discovered dynamically.
             "knows, created".to_string()
         } else {
             edge_collections.join(", ")

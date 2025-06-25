@@ -123,7 +123,6 @@ pub(crate) fn element_id_to_key(id: &ElementId) -> Result<String, GraphError> {
             if let Some(key) = s.split('/').nth(1) {
                 Ok(key.to_string())
             } else {
-                // Assume the string is the key itself
                 Ok(s.clone())
             }
         }

@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 
 /// Given a GraphSON Map element, turn it into a serde_json::Value::Object
 fn graphson_map_to_object(data: &Value) -> Result<Value, GraphError> {
-    // Expect `data["@value"]` is an array of alternating key, value entries
+
     let arr = data
         .get("@value")
         .and_then(Value::as_array)
@@ -22,7 +22,7 @@ fn graphson_map_to_object(data: &Value) -> Result<Value, GraphError> {
     let mut obj = serde_json::Map::new();
     let mut iter = arr.iter();
     while let (Some(k), Some(v)) = (iter.next(), iter.next()) {
-        // unwrap the key (either a plain string, or a typed-wrapped string)
+
         let key = if let Some(s) = k.as_str() {
             s.to_string()
         } else if let Some(inner) = k.get("@value").and_then(Value::as_str) {
@@ -34,7 +34,6 @@ fn graphson_map_to_object(data: &Value) -> Result<Value, GraphError> {
             )));
         };
 
-        // unwrap the value (if it's a typed wrapper, grab its @value; otherwise clone)
         let val = if let Some(inner) = v.get("@value") {
             inner.clone()
         } else {
@@ -47,7 +46,6 @@ fn graphson_map_to_object(data: &Value) -> Result<Value, GraphError> {
     Ok(Value::Object(obj))
 }
 
-/// Pull out the first list item, same as before
 fn unwrap_list(data: &Value) -> Result<&Vec<Value>, GraphError> {
     data.get("@value")
         .and_then(|v| v.as_array())
@@ -63,14 +61,10 @@ fn first_list_item(data: &Value) -> Result<&Value, GraphError> {
 
 impl GuestTransaction for Transaction {
     fn commit(&self) -> Result<(), GraphError> {
-        // In a sessionless, per-request transaction model, each request is a transaction.
-        // So, commit is implicitly handled.
         Ok(())
     }
 
     fn rollback(&self) -> Result<(), GraphError> {
-        // In a sessionless, per-request transaction model, there's nothing to roll back
-        // once a request has been made.
         Ok(())
     }
 
@@ -88,7 +82,7 @@ impl GuestTransaction for Transaction {
         _additional_labels: Vec<String>,
         properties: PropertyMap,
     ) -> Result<Vertex, GraphError> {
-        // 1) Build Gremlin + bindings
+
         let mut gremlin = "g.addV(vertex_label)".to_string();
         let mut bindings = serde_json::Map::new();
         bindings.insert("vertex_label".to_string(), json!(vertex_type));
@@ -101,7 +95,6 @@ impl GuestTransaction for Transaction {
         }
         gremlin.push_str(".elementMap()");
 
-        // 2) Execute and unwrap GraphSON
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
         eprintln!(
             "[JanusGraphApi] Raw vertex creation response: {:?}",
@@ -110,14 +103,12 @@ impl GuestTransaction for Transaction {
         let element = first_list_item(&response["result"]["data"])?;
         let obj = graphson_map_to_object(element)?;
 
-        // 3) Parse into your Vertex struct (this now sees id,label,plus all props)
         helpers::parse_vertex_from_gremlin(&obj)
     }
 
     fn get_vertex(&self, id: ElementId) -> Result<Option<Vertex>, GraphError> {
         let gremlin = "g.V(vertex_id).elementMap()".to_string();
 
-        // bind the id
         let mut bindings = serde_json::Map::new();
         bindings.insert(
             "vertex_id".to_string(),
@@ -128,10 +119,8 @@ impl GuestTransaction for Transaction {
             },
         );
 
-        // execute
         let resp = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
-        // unwrap the two "data" shapes into a Vec<Value>
         let data = &resp["result"]["data"];
         let list: Vec<Value> = if let Some(arr) = data.as_array() {
             arr.clone()
@@ -141,9 +130,8 @@ impl GuestTransaction for Transaction {
             vec![]
         };
 
-        // take the first row, if any
         if let Some(row) = list.into_iter().next() {
-            // flatten a g:Map wrapper if present
+
             let obj = if row.get("@type") == Some(&json!("g:Map")) {
                 let vals = row.get("@value").and_then(Value::as_array).unwrap();
                 let mut m = serde_json::Map::new();
@@ -177,7 +165,7 @@ impl GuestTransaction for Transaction {
     }
 
     fn update_vertex(&self, id: ElementId, properties: PropertyMap) -> Result<Vertex, GraphError> {
-        // 1) Build the Gremlin + bindings
+
         let mut gremlin = "g.V(vertex_id).sideEffect(properties().drop())".to_string();
         let mut bindings = serde_json::Map::new();
         bindings.insert(
@@ -189,7 +177,6 @@ impl GuestTransaction for Transaction {
             },
         );
 
-        // 2) Append .property() calls for the new props
         for (i, (k, v)) in properties.into_iter().enumerate() {
             let kb = format!("k{}", i);
             let vb = format!("v{}", i);
@@ -198,13 +185,10 @@ impl GuestTransaction for Transaction {
             bindings.insert(vb.clone(), conversions::to_json_value(v)?);
         }
 
-        // 3) Terminal .elementMap()
         gremlin.push_str(".elementMap()");
 
-        // 4) Execute
         let resp = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
-        // 5) Unwrap the two shapes of result.data
         let data = &resp["result"]["data"];
         let maybe_row = data
             .as_array()
@@ -216,7 +200,6 @@ impl GuestTransaction for Transaction {
             });
         let row = maybe_row.ok_or(GraphError::ElementNotFound(id.clone()))?;
 
-        // 6) Flatten a g:Map wrapper if present
         let mut flat = serde_json::Map::new();
         if row.get("@type") == Some(&json!("g:Map")) {
             let vals = row.get("@value").and_then(Value::as_array).unwrap();
@@ -231,7 +214,6 @@ impl GuestTransaction for Transaction {
                         .unwrap()
                         .to_string()
                 };
-                // val: unwrap nested @value if object
                 let val = if vv.is_object() {
                     vv.get("@value").cloned().unwrap_or(vv.clone())
                 } else {
@@ -247,12 +229,10 @@ impl GuestTransaction for Transaction {
             ));
         }
 
-        // 7) Build the exact JSON shape { id, label, properties }
         let mut obj = serde_json::Map::new();
         obj.insert("id".to_string(), flat["id"].clone());
         obj.insert("label".to_string(), flat["label"].clone());
 
-        // collect everything else as properties
         let mut props = serde_json::Map::new();
         for (k, v) in flat.into_iter() {
             if k != "id" && k != "label" {
@@ -261,7 +241,6 @@ impl GuestTransaction for Transaction {
         }
         obj.insert("properties".to_string(), Value::Object(props));
 
-        // 8) Parse and return
         helpers::parse_vertex_from_gremlin(&Value::Object(obj))
     }
 
@@ -276,7 +255,6 @@ impl GuestTransaction for Transaction {
                 .ok_or(GraphError::ElementNotFound(id));
         }
 
-        // 1) Build Gremlin + bindings
         let mut gremlin = "g.V(vertex_id)".to_string();
         let mut bindings = serde_json::Map::new();
         let id_clone = id.clone();
@@ -287,7 +265,6 @@ impl GuestTransaction for Transaction {
         };
         bindings.insert("vertex_id".to_string(), id_json);
 
-        // 2) Append .property() calls
         for (i, (k, v)) in updates.into_iter().enumerate() {
             let kb = format!("k{}", i);
             let vb = format!("v{}", i);
@@ -296,14 +273,11 @@ impl GuestTransaction for Transaction {
             bindings.insert(vb, conversions::to_json_value(v)?);
         }
 
-        // 3) Terminal step
         gremlin.push_str(".elementMap()");
 
-        // 4) Execute
         let resp = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
         let data = &resp["result"]["data"];
 
-        // 5) Unwrap outer g:List
         let row = if let Some(arr) = data.as_array() {
             arr.first()
         } else if let Some(inner) = data.get("@value").and_then(Value::as_array) {
@@ -313,10 +287,8 @@ impl GuestTransaction for Transaction {
         }
         .ok_or_else(|| GraphError::ElementNotFound(id_clone.clone()))?;
 
-        // 6) Debug raw row
         println!("[DEBUG update_vertex] raw row = {:#}", row);
 
-        // 7) Flatten row into a plain map
         let mut flat = serde_json::Map::new();
         if row.get("@type") == Some(&json!("g:Map")) {
             let vals = row.get("@value").and_then(Value::as_array).unwrap(); // we know it's an array
@@ -335,9 +307,7 @@ impl GuestTransaction for Transaction {
                         "Unexpected key format in Gremlin map".into(),
                     ));
                 };
-                // val:
                 let val = if let Some(obj) = vv.as_object() {
-                    // wrapped value
                     obj.get("@value")
                         .cloned()
                         .unwrap_or(Value::Object(obj.clone()))
@@ -354,12 +324,10 @@ impl GuestTransaction for Transaction {
             ));
         }
 
-        // 8) Build final JSON shape
         let mut vertex_json = serde_json::Map::new();
         vertex_json.insert("id".to_string(), flat["id"].clone());
         vertex_json.insert("label".to_string(), flat["label"].clone());
 
-        // collect all other kv pairs into properties
         let mut props = serde_json::Map::new();
         for (k, v) in flat.into_iter() {
             if k == "id" || k == "label" {
@@ -369,22 +337,18 @@ impl GuestTransaction for Transaction {
         }
         vertex_json.insert("properties".to_string(), Value::Object(props));
 
-        // 9) Debug final parser input
         println!(
             "[DEBUG update_vertex] parser input = {:#}",
             Value::Object(vertex_json.clone())
         );
 
-        // 10) Parse and return
         helpers::parse_vertex_from_gremlin(&Value::Object(vertex_json))
     }
 
     fn delete_vertex(&self, id: ElementId, detach: bool) -> Result<(), GraphError> {
-        // Build the Gremlin
         let gremlin = if detach {
             "g.V(vertex_id).drop().toList()"
         } else {
-            // If you need to prevent cascade, you could do `sideEffect()` etc.
             "g.V(vertex_id).drop().toList()"
         };
         let mut bindings = serde_json::Map::new();
@@ -397,7 +361,6 @@ impl GuestTransaction for Transaction {
             },
         );
 
-        // Try once
         for attempt in 1..=2 {
             let resp = self
                 .api
@@ -414,7 +377,6 @@ impl GuestTransaction for Transaction {
                 Err(GraphError::InvalidQuery(msg))
                     if msg.contains("Lock expired") && attempt == 1 =>
                 {
-                    // retry once
                     log::warn!(
                         "[delete_vertex] Lock expired on vertex {:?}, retrying drop (1/2)",
                         id
@@ -422,7 +384,6 @@ impl GuestTransaction for Transaction {
                     continue;
                 }
                 Err(GraphError::InvalidQuery(msg)) if msg.contains("Lock expired") => {
-                    // second failure: swallow it
                     log::warn!(
                         "[delete_vertex] Lock expired again on {:?}, ignoring cleanup",
                         id
@@ -430,13 +391,10 @@ impl GuestTransaction for Transaction {
                     return Ok(());
                 }
                 Err(e) => {
-                    // Some other error—propagate
                     return Err(e);
                 }
             }
         }
-
-        // Should never reach here
         Ok(())
     }
 
@@ -490,10 +448,8 @@ impl GuestTransaction for Transaction {
         // Handle GraphSON g:List structure
         let data = &response["result"]["data"];
         let result_data = if let Some(arr) = data.as_array() {
-            // Already an array (non-GraphSON response)
             arr.clone()
         } else if let Some(inner) = data.get("@value").and_then(Value::as_array) {
-            // GraphSON g:List structure
             inner.clone()
         } else {
             return Err(GraphError::InternalError(
@@ -523,15 +479,9 @@ impl GuestTransaction for Transaction {
         to_vertex: ElementId,
         properties: PropertyMap,
     ) -> Result<Edge, GraphError> {
-        // 1) Build Gremlin and bindings
         let mut gremlin = "g.V(from_id).addE(edge_label).to(__.V(to_id))".to_string();
         let mut bindings = serde_json::Map::new();
         let from_clone = from_vertex.clone();
-
-        // println!(
-        //     "[LOG create_edge] start: type={} from={:?} to={:?} props={:?}",
-        //     edge_type, from_clone, to_vertex, properties
-        // );
 
         bindings.insert(
             "from_id".into(),
@@ -551,7 +501,6 @@ impl GuestTransaction for Transaction {
         );
         bindings.insert("edge_label".into(), json!(edge_type));
 
-        // 2) Add properties
         for (i, (k, v)) in properties.into_iter().enumerate() {
             let kb = format!("k{}", i);
             let vb = format!("v{}", i);
@@ -561,18 +510,13 @@ impl GuestTransaction for Transaction {
             println!("[LOG create_edge] bound {} -> {:?}", kb, bindings[&kb]);
         }
 
-        // 3) Terminal step
         gremlin.push_str(".elementMap()");
-        // println!("[LOG create_edge] gremlin = {}", gremlin);
 
-        // 4) Execute
         let resp = self
             .api
             .execute(&gremlin, Some(Value::Object(bindings.clone())))?;
-        // println!("[LOG create_edge] raw resp = {:#?}", resp);
         let data = &resp["result"]["data"];
 
-        // 5) Unwrap outer g:List
         let row = if let Some(arr) = data.as_array() {
             arr.first().cloned()
         } else if let Some(inner) = data.get("@value").and_then(Value::as_array) {
@@ -582,15 +526,12 @@ impl GuestTransaction for Transaction {
             None
         }
         .ok_or_else(|| GraphError::ElementNotFound(from_clone.clone()))?;
-        // println!("[LOG create_edge] row = {:#?}", row);
 
-        // 6) Flatten the g:Map (or clone if plain)
         let mut flat = serde_json::Map::new();
         if row.get("@type") == Some(&json!("g:Map")) {
             let vals = row.get("@value").and_then(Value::as_array).unwrap();
             let mut it = vals.iter();
             while let (Some(kv), Some(vv)) = (it.next(), it.next()) {
-                // key: either plain string or wrapped
                 let key = if kv.is_string() {
                     kv.as_str().unwrap().to_string()
                 } else {
@@ -599,27 +540,22 @@ impl GuestTransaction for Transaction {
                         .unwrap()
                         .to_string()
                 };
-                // value: unwrap if object
                 let val = if vv.is_object() {
                     vv.get("@value").cloned().unwrap_or(vv.clone())
                 } else {
                     vv.clone()
                 };
                 flat.insert(key.clone(), val.clone());
-                // println!("[LOG create_edge] flat[{}] = {:#?}", key, val);
             }
         } else if let Some(obj) = row.as_object() {
             flat = obj.clone();
-            // println!("[LOG create_edge] row is plain object");
         } else {
             println!("[ERROR create_edge] unexpected row format: {:#?}", row);
             return Err(GraphError::InternalError("Unexpected row format".into()));
         }
 
-        // 7) Build the parser‐input JSON
         let mut edge_json = serde_json::Map::new();
 
-        // id
         let id_field = &flat["id"];
         let real_id = if let Some(rel) = id_field.get("relationId").and_then(Value::as_str) {
             json!(rel)
@@ -627,39 +563,27 @@ impl GuestTransaction for Transaction {
             id_field.clone()
         };
         edge_json.insert("id".into(), real_id.clone());
-        // println!("[LOG create_edge] parsed id = {:#?}", real_id);
 
-        // label
         let lbl = flat["label"].clone();
         edge_json.insert("label".into(), lbl.clone());
-        // println!("[LOG create_edge] parsed label = {:#?}", lbl);
 
-        // outV / inV
         if let Some(arr) = flat.get("OUT").and_then(Value::as_array) {
             if let Some(vv) = arr.get(1).and_then(|v| v.get("@value")).cloned() {
                 edge_json.insert("outV".into(), vv.clone());
-                // println!("[LOG create_edge] parsed outV = {:#?}", vv);
             }
         }
         if let Some(arr) = flat.get("IN").and_then(Value::as_array) {
             if let Some(vv) = arr.get(1).and_then(|v| v.get("@value")).cloned() {
                 edge_json.insert("inV".into(), vv.clone());
-                // println!("[LOG create_edge] parsed inV = {:#?}", vv);
             }
         }
 
-        // properties
         edge_json.insert("properties".into(), json!({}));
-        // println!("[LOG create_edge] default properties ");
 
-        // println!("[LOG create_edge] final JSON = {:#?}", edge_json);
-
-        // 8) Parse
         helpers::parse_edge_from_gremlin(&Value::Object(edge_json))
     }
 
     fn get_edge(&self, id: ElementId) -> Result<Option<Edge>, GraphError> {
-        // 1) Build the Gremlin and bindings
         let gremlin = "g.E(edge_id).elementMap()".to_string();
         let mut bindings = serde_json::Map::new();
         bindings.insert(
@@ -671,16 +595,8 @@ impl GuestTransaction for Transaction {
             },
         );
 
-        // 2) Execute
-        println!("[LOG get_edge] gremlin = {}", gremlin);
-        println!(
-            "[LOG get_edge] bindings = {:#}",
-            Value::Object(bindings.clone())
-        );
         let resp = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
-        println!("[LOG get_edge] raw resp = {:#?}", resp);
 
-        // 3) Unwrap the two shapes of `data`
         let data = &resp["result"]["data"];
         let maybe_row = data
             .as_array()
@@ -693,12 +609,10 @@ impl GuestTransaction for Transaction {
         let row = if let Some(r) = maybe_row {
             r
         } else {
-            // no such edge
             return Ok(None);
         };
         println!("[LOG get_edge] unwrapped row = {:#?}", row);
 
-        // 4) Flatten the g:Map wrapper
         let mut flat = serde_json::Map::new();
         if row.get("@type") == Some(&json!("g:Map")) {
             let vals = row.get("@value").and_then(Value::as_array).unwrap();
@@ -719,10 +633,8 @@ impl GuestTransaction for Transaction {
                     ));
                 };
 
-                // unwrap nested maps or values
                 let val = if vv.is_object() {
                     if vv.get("@type") == Some(&json!("g:Map")) {
-                        // we want the inner array as the raw array
                         vv.get("@value").cloned().unwrap()
                     } else {
                         vv.get("@value").cloned().unwrap_or(vv.clone())
@@ -731,7 +643,6 @@ impl GuestTransaction for Transaction {
                     vv.clone()
                 };
                 flat.insert(key.clone(), val.clone());
-                println!("[LOG get_edge] flat[{}] = {:#?}", key, val);
             }
         } else if let Some(obj) = row.as_object() {
             flat = obj.clone();
@@ -741,10 +652,8 @@ impl GuestTransaction for Transaction {
             ));
         }
 
-        // 5) Rebuild the exact JSON for parse_edge_from_gremlin
         let mut edge_json = serde_json::Map::new();
 
-        // id (unwrap relationId)
         let id_field = &flat["id"];
         let real_id = id_field
             .get("relationId")
@@ -752,26 +661,19 @@ impl GuestTransaction for Transaction {
             .map(|s| json!(s))
             .unwrap_or_else(|| id_field.clone());
         edge_json.insert("id".into(), real_id.clone());
-        println!("[LOG get_edge] parsed id = {:#?}", real_id);
 
-        // label
         let lbl = flat["label"].clone();
         edge_json.insert("label".into(), lbl.clone());
-        println!("[LOG get_edge] parsed label = {:#?}", lbl);
 
-        // outV / inV
         if let Some(arr) = flat.get("OUT").and_then(Value::as_array) {
             let ov = arr[1].get("@value").cloned().unwrap();
             edge_json.insert("outV".into(), ov.clone());
-            println!("[LOG get_edge] parsed outV = {:#?}", ov);
         }
         if let Some(arr) = flat.get("IN").and_then(Value::as_array) {
             let iv = arr[1].get("@value").cloned().unwrap();
             edge_json.insert("inV".into(), iv.clone());
-            println!("[LOG get_edge] parsed inV = {:#?}", iv);
         }
 
-        // properties: everything else
         let mut props = serde_json::Map::new();
         for (k, v) in flat.into_iter() {
             if k != "id" && k != "label" && k != "IN" && k != "OUT" {
@@ -779,18 +681,12 @@ impl GuestTransaction for Transaction {
             }
         }
         edge_json.insert("properties".into(), Value::Object(props.clone()));
-        println!("[LOG get_edge] parsed properties = {:#?}", props);
 
-        println!("[LOG get_edge] final JSON = {:#?}", edge_json);
-
-        // 6) Parse and return
         let edge = helpers::parse_edge_from_gremlin(&Value::Object(edge_json))?;
         Ok(Some(edge))
     }
 
     fn update_edge(&self, id: ElementId, properties: PropertyMap) -> Result<Edge, GraphError> {
-        // 1) Prepare bindings
-        log::info!("[update_edge] start id={:?}, props={:?}", id, properties);
         let id_json = match &id {
             ElementId::StringValue(s) => json!(s),
             ElementId::Int64(i) => json!(i),
@@ -808,25 +704,16 @@ impl GuestTransaction for Transaction {
             gremlin_update.push_str(&format!(".sideEffect(property({}, {}))", kb, vb));
             bindings.insert(kb.clone(), json!(k));
             bindings.insert(vb.clone(), conversions::to_json_value(v.clone())?);
-            log::info!("[update_edge] binding {} -> {:?}", kb, k);
-            log::info!("[update_edge] binding {} -> {:?}", vb, v);
         }
 
-        log::info!("[update_edge] update Gremlin = {}", gremlin_update);
-        log::info!("[update_edge] update bindings = {:#?}", bindings);
         self.api
             .execute(&gremlin_update, Some(Value::Object(bindings)))?;
 
-        // 3) STEP 2: Fetch the freshly updated edge
         let gremlin_fetch = "g.E(edge_id).elementMap()";
         let fetch_bindings = json!({ "edge_id": id_json });
-        log::info!("[update_edge] fetch Gremlin = {}", gremlin_fetch);
-        log::info!("[update_edge] fetch bindings = {:#?}", fetch_bindings);
 
         let resp = self.api.execute(gremlin_fetch, Some(fetch_bindings))?;
-        log::info!("[update_edge] raw fetch response = {:#?}", resp);
 
-        // 4) Unwrap data (array or @value)
         let data = &resp["result"]["data"];
         let row = data
             .as_array()
@@ -837,12 +724,9 @@ impl GuestTransaction for Transaction {
                     .and_then(|a| a.first().cloned())
             })
             .ok_or_else(|| {
-                log::error!("[update_edge] no row returned for id={:?}", id);
                 GraphError::ElementNotFound(id.clone())
             })?;
-        log::info!("[update_edge] unwrapped row = {:#?}", row);
 
-        // 5) Flatten a g:Map wrapper
         let mut flat = serde_json::Map::new();
         if row.get("@type") == Some(&json!("g:Map")) {
             let vals = row.get("@value").and_then(Value::as_array).unwrap();
@@ -870,9 +754,8 @@ impl GuestTransaction for Transaction {
             return Err(GraphError::InternalError("Unexpected row format".into()));
         }
 
-        // 6) Rebuild into the shape parse_edge_from_gremlin expects
         let mut ej = serde_json::Map::new();
-        // id
+
         let id_field = &flat["id"];
         let real_id = id_field
             .get("relationId")
@@ -880,25 +763,18 @@ impl GuestTransaction for Transaction {
             .map(|s| json!(s))
             .unwrap_or_else(|| id_field.clone());
         ej.insert("id".into(), real_id.clone());
-        log::info!("[update_edge] parsed id = {:#?}", real_id);
 
-        // label
         ej.insert("label".into(), flat["label"].clone());
-        log::info!("[update_edge] parsed label = {:#?}", flat["label"]);
 
-        // outV / inV
         if let Some(arr) = flat.get("OUT").and_then(Value::as_array) {
             let ov = arr[1].get("@value").cloned().unwrap();
             ej.insert("outV".into(), ov.clone());
-            log::info!("[update_edge] parsed outV = {:#?}", ov);
         }
         if let Some(arr) = flat.get("IN").and_then(Value::as_array) {
             let iv = arr[1].get("@value").cloned().unwrap();
             ej.insert("inV".into(), iv.clone());
-            log::info!("[update_edge] parsed inV = {:#?}", iv);
         }
 
-        // properties: everything else
         let mut props = serde_json::Map::new();
         for (k, v) in flat.into_iter() {
             if k != "id" && k != "label" && k != "IN" && k != "OUT" {
@@ -906,13 +782,9 @@ impl GuestTransaction for Transaction {
             }
         }
         ej.insert("properties".into(), Value::Object(props.clone()));
-        log::info!("[update_edge] parsed properties = {:#?}", props);
 
-        log::info!("[update_edge] final JSON = {:#?}", ej);
 
-        // 7) Parse & return
         let edge = helpers::parse_edge_from_gremlin(&Value::Object(ej))?;
-        log::info!("[update_edge] returning {:?}", edge);
         Ok(edge)
     }
 
@@ -927,7 +799,6 @@ impl GuestTransaction for Transaction {
                 .ok_or(GraphError::ElementNotFound(id));
         }
 
-        // 1) Build Gremlin + bindings
         let mut gremlin = "g.E(edge_id)".to_string();
         let mut bindings = serde_json::Map::new();
         let id_clone = id.clone();
@@ -938,7 +809,6 @@ impl GuestTransaction for Transaction {
         };
         bindings.insert("edge_id".into(), id_json);
 
-        // 2) Append .property() calls
         for (i, (k, v)) in updates.into_iter().enumerate() {
             let kb = format!("k{}", i);
             let vb = format!("v{}", i);
@@ -947,19 +817,10 @@ impl GuestTransaction for Transaction {
             bindings.insert(vb.clone(), conversions::to_json_value(v)?);
         }
 
-        // 3) Terminal step
         gremlin.push_str(".elementMap()");
-        println!("[LOG update_edge] Gremlin: {}", gremlin);
-        println!(
-            "[LOG update_edge] Bindings: {:#}",
-            Value::Object(bindings.clone())
-        );
 
-        // 4) Execute
         let resp = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
-        println!("[LOG update_edge] Raw response: {:#}", resp);
 
-        // 5) Unwrap outer g:List
         let data = &resp["result"]["data"];
         let row = if let Some(arr) = data.as_array() {
             arr.first().cloned()
@@ -969,21 +830,17 @@ impl GuestTransaction for Transaction {
             return Err(GraphError::ElementNotFound(id_clone.clone()));
         }
         .unwrap();
-        println!("[LOG update_edge] Unwrapped row: {:#}", row);
 
-        // 6) Flatten the g:Map, **including g:Direction** keys
         let mut flat = serde_json::Map::new();
         if row.get("@type") == Some(&json!("g:Map")) {
             let vals = row.get("@value").and_then(Value::as_array).unwrap();
             let mut it = vals.iter();
             while let (Some(kv), Some(vv)) = (it.next(), it.next()) {
-                // Determine the key name:
                 let key = if kv.is_string() {
                     kv.as_str().unwrap().to_string()
                 } else if kv.get("@type") == Some(&json!("g:T"))
                     || kv.get("@type") == Some(&json!("g:Direction"))
                 {
-                    // support IN / OUT and other types
                     kv.get("@value")
                         .and_then(Value::as_str)
                         .unwrap()
@@ -994,9 +851,7 @@ impl GuestTransaction for Transaction {
                     ));
                 };
 
-                // Extract the value, unwrapping maps into native JSON:
                 let val = if vv.is_object() {
-                    // If it's a nested g:Map with @value array, pull out that array:
                     if vv.get("@type") == Some(&json!("g:Map")) {
                         vv.get("@value").cloned().unwrap()
                     } else {
@@ -1018,10 +873,8 @@ impl GuestTransaction for Transaction {
             ));
         }
 
-        // 7) Rebuild the exact shape parse_edge_from_gremlin expects:
         let mut edge_json = serde_json::Map::new();
 
-        // 7a) id (unwrap relationId)
         let id_field = &flat["id"];
         let real_id = id_field
             .get("relationId")
@@ -1029,31 +882,17 @@ impl GuestTransaction for Transaction {
             .map(|s| json!(s))
             .unwrap_or_else(|| id_field.clone());
         edge_json.insert("id".into(), real_id.clone());
-        println!("[LOG update_edge] parsed id = {:#?}", real_id);
 
-        // 7b) label
         let lbl = flat["label"].clone();
         edge_json.insert("label".into(), lbl.clone());
-        println!("[LOG update_edge] parsed label = {:#?}", lbl);
 
-        // 7c) outV / inV (arrays from IN/OUT)
         if let Some(arr) = flat.get("OUT").and_then(Value::as_array) {
-            // arr itself *is* the elementMap array for the OUT vertex
             edge_json.insert("outV".into(), json!(arr[1].get("@value").unwrap()));
-            println!(
-                "[LOG update_edge] parsed outV = {:#?}",
-                arr[1].get("@value").unwrap()
-            );
         }
         if let Some(arr) = flat.get("IN").and_then(Value::as_array) {
             edge_json.insert("inV".into(), json!(arr[1].get("@value").unwrap()));
-            println!(
-                "[LOG update_edge] parsed inV = {:#?}",
-                arr[1].get("@value").unwrap()
-            );
         }
 
-        // 7d) properties: everything else (here only "weight")
         let mut props = serde_json::Map::new();
         for (k, v) in flat.into_iter() {
             if k != "id" && k != "label" && k != "IN" && k != "OUT" {
@@ -1061,16 +900,11 @@ impl GuestTransaction for Transaction {
             }
         }
         edge_json.insert("properties".into(), Value::Object(props.clone()));
-        println!("[LOG update_edge] parsed properties = {:#?}", props);
 
-        println!("[LOG update_edge] final JSON = {:#?}", edge_json);
-
-        // 8) Parse and return
         helpers::parse_edge_from_gremlin(&Value::Object(edge_json))
     }
 
     fn delete_edge(&self, id: ElementId) -> Result<(), GraphError> {
-        // same trick here
         let gremlin = "g.E(edge_id).drop().toList()".to_string();
 
         let id_json = match id {
@@ -1098,7 +932,6 @@ impl GuestTransaction for Transaction {
 
         if let Some(labels) = edge_types {
             if !labels.is_empty() {
-                // Gremlin's hasLabel can take multiple labels
                 gremlin.push_str(".hasLabel(edge_labels)");
                 bindings.insert("edge_labels".to_string(), json!(labels));
             }
@@ -1188,17 +1021,8 @@ impl GuestTransaction for Transaction {
 
         gremlin.push_str(".elementMap()");
 
-        println!(
-            "[DEBUG get_adjacent_vertices] Generated Gremlin: {}",
-            gremlin
-        );
-        println!("[DEBUG get_adjacent_vertices] Bindings: {:#?}", bindings);
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
-        println!(
-            "[DEBUG get_adjacent_vertices] Raw response: {:#?}",
-            response
-        );
 
         let data = &response["result"]["data"];
         let result_data = if let Some(arr) = data.as_array() {
@@ -1264,11 +1088,8 @@ impl GuestTransaction for Transaction {
 
         gremlin.push_str(".elementMap()");
 
-        println!("[DEBUG get_connected_edges] Generated Gremlin: {}", gremlin);
-        println!("[DEBUG get_connected_edges] Bindings: {:#?}", bindings);
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
-        println!("[DEBUG get_connected_edges] Raw response: {:#?}", response);
 
         let data = &response["result"]["data"];
         let result_data = if let Some(arr) = data.as_array() {
@@ -1444,17 +1265,15 @@ impl GuestTransaction for Transaction {
         to: ElementId,
         properties: PropertyMap,
     ) -> Result<Edge, GraphError> {
-        // 1) If no properties, upsert isn't supported
         if properties.is_empty() {
             return Err(GraphError::UnsupportedOperation(
                 "Upsert requires at least one property to match on.".to_string(),
             ));
         }
 
-        // 2) Otherwise, run your existing Gremlin logic:
         let mut gremlin_match = "g.E()".to_string();
         let mut bindings = serde_json::Map::new();
-        // bind from/to on the match step
+
         gremlin_match.push_str(".hasLabel(edge_label).has(\"_from\", from_id).has(\"_to\", to_id)");
         bindings.insert("edge_label".into(), json!(edge_label.clone()));
         bindings.insert(
@@ -1474,7 +1293,7 @@ impl GuestTransaction for Transaction {
             },
         );
 
-        // now append your has(...) clauses for each property
+
         for (i, (k, v)) in properties.iter().enumerate() {
             let mk = format!("ek_{}", i);
             let mv = format!("ev_{}", i);
@@ -1483,7 +1302,7 @@ impl GuestTransaction for Transaction {
             bindings.insert(mv, conversions::to_json_value(v.clone())?);
         }
 
-        // build the create part
+
         let mut gremlin_create =
             format!("addE('{}').from(__.V(from_id)).to(__.V(to_id))", edge_label);
         for (i, (k, v)) in properties.into_iter().enumerate() {

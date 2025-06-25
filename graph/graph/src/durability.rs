@@ -1,5 +1,3 @@
-//! Provides a generic, durable wrapper for graph database providers.
-
 use crate::golem::graph::{
     connection::{self, ConnectionConfig, GuestGraph},
     errors::GraphError,
@@ -14,14 +12,11 @@ pub trait TransactionBorrowExt<'a, T> {
     fn get(&self) -> &'a T;
 }
 
-/// Wraps a graph implementation with custom durability
 pub struct DurableGraph<Impl> {
     _phantom: PhantomData<Impl>,
 }
 
-// --- Guest Trait for Providers ---
 
-/// Must be implemented by graph providers to be wrapped with durability
 pub trait ExtendedGuest: 'static
 where
     Self::Graph: ProviderGraph + 'static,
@@ -30,7 +25,6 @@ where
     fn connect_internal(config: &ConnectionConfig) -> Result<Self::Graph, GraphError>;
 }
 
-/// A trait for provider graph implementations that specifies their transaction type.
 pub trait ProviderGraph: connection::GuestGraph {
     type Transaction: transactions::GuestTransaction;
 }
@@ -136,9 +130,7 @@ mod passthrough_impl {
     }
 }
 
-/// When the durability feature flag is on, wrapping with `DurableGraph` adds custom durability
-/// on top of the provider-specific graph implementation using Golem's special host functions and
-/// the `golem-rust` helper library.
+
 #[cfg(feature = "durability")]
 mod durable_impl {
     use super::*;
@@ -149,13 +141,11 @@ mod durable_impl {
     #[derive(Debug, Clone, FromValueAndType, IntoValue)]
     pub(super) struct Unit;
 
-    /// A durable wrapper for a `Graph` resource.
     #[derive(Debug)]
     pub struct DurableGraphResource<G> {
         graph: G,
     }
 
-    /// A durable wrapper for a `Transaction` resource.
     #[derive(Debug)]
     pub struct DurableTransaction<T: GuestTransaction> {
         pub inner: T,
@@ -294,7 +284,6 @@ mod durable_impl {
         }
     }
 
-    // --- Durable `GuestGraph` Implementation ---
     impl<G: ProviderGraph + 'static> connection::GuestGraph for DurableGraphResource<G> {
         fn begin_transaction(&self) -> Result<transactions::Transaction, GraphError> {
             self.graph.begin_transaction().map(|tx_wrapper| {

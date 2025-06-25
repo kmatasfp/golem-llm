@@ -21,7 +21,6 @@ impl JanusGraphApi {
         let client = Client::builder()
             .build()
             .expect("Failed to initialize HTTP client");
-        // one session per Api
         let session_id = Uuid::new_v4().to_string();
         Ok(JanusGraphApi {
             endpoint,
@@ -49,7 +48,6 @@ impl JanusGraphApi {
     }
 
     pub fn commit(&self) -> Result<(), GraphError> {
-        // explicit commit in the same session
         self.execute("g.tx().commit()", None)?;
         self.execute("g.tx().open()", None)?;
         Ok(())
@@ -57,7 +55,6 @@ impl JanusGraphApi {
 
     pub fn execute(&self, gremlin: &str, bindings: Option<Value>) -> Result<Value, GraphError> {
         let bindings = bindings.unwrap_or_else(|| json!({}));
-        // now include both session and op:"eval"
         let request_body = json!({
             "gremlin": gremlin,
             "bindings": bindings,
@@ -77,7 +74,6 @@ impl JanusGraphApi {
                 .unwrap_or_else(|_| "Failed to serialize".to_string())
         );
 
-        // Use the same pattern as ArangoDB - serialize to string and set Content-Length
         let body_string = serde_json::to_string(&request_body).map_err(|e| {
             GraphError::InternalError(format!("Failed to serialize request body: {}", e))
         })?;
@@ -113,7 +109,6 @@ impl JanusGraphApi {
             "bindings": bindings,
         });
 
-        // Use the same pattern as ArangoDB - serialize to string and set Content-Length
         let body_string = serde_json::to_string(&request_body).map_err(|e| {
             GraphError::InternalError(format!("Failed to serialize request body: {}", e))
         })?;
@@ -136,7 +131,6 @@ impl JanusGraphApi {
             "processor": "session"
         });
 
-        // Use the same pattern as ArangoDB - serialize to string and set Content-Length
         let body_string = serde_json::to_string(&request_body).map_err(|e| {
             GraphError::InternalError(format!("Failed to serialize request body: {}", e))
         })?;

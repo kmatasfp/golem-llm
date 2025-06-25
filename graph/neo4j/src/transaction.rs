@@ -100,7 +100,7 @@ impl GuestTransaction for Transaction {
     }
 
     fn get_vertex(&self, id: ElementId) -> Result<Option<Vertex>, GraphError> {
-        // Robust: If id is a string of the form 'prop:<property>:<value>', fetch by property
+
         if let ElementId::StringValue(s) = &id {
             if let Some((prop, value)) = s
                 .strip_prefix("prop:")
@@ -148,7 +148,6 @@ impl GuestTransaction for Transaction {
                 }
             }
         }
-        // Legacy: fallback to elementId(n)
         let id_str = match id.clone() {
             ElementId::StringValue(s) => s,
             ElementId::Int64(i) => i.to_string(),
@@ -399,10 +398,8 @@ impl GuestTransaction for Transaction {
             ElementId::Uuid(u) => u,
         };
 
-        // Convert properties
         let props = conversions::to_cypher_properties(properties.clone())?;
 
-        // Use elementId() for vertex matching, return elementId for edge
         let stmt = json!({
             "statement": format!(
                 "MATCH (a) WHERE elementId(a) = $from_id \
@@ -422,7 +419,6 @@ impl GuestTransaction for Transaction {
             .api
             .execute_in_transaction(&self.transaction_url, json!({ "statements": [stmt] }))?;
 
-        // Pull out the first row and hand off to your existing parser
         let results = response["results"]
             .as_array()
             .and_then(|a| a.first())
@@ -449,7 +445,6 @@ impl GuestTransaction for Transaction {
             ElementId::Uuid(u) => u,
         };
 
-        // Use elementId() for edge matching
         let statement = json!({
             "statement": "\
                 MATCH ()-[r]-() \
@@ -466,7 +461,6 @@ impl GuestTransaction for Transaction {
             .api
             .execute_in_transaction(&self.transaction_url, json!({ "statements": [statement] }))?;
 
-        // 3) Safely unwrap into slices
         let results = match resp["results"].as_array() {
             Some(arr) => arr.as_slice(),
             None => return Ok(None),
@@ -483,12 +477,10 @@ impl GuestTransaction for Transaction {
             return Ok(None);
         }
 
-        // 4) Extract the row array
         let row = data[0]["row"]
             .as_array()
             .ok_or_else(|| GraphError::InternalError("Missing row in get_edge".into()))?;
 
-        // 5) Delegate to your parser (which will see strings like "0", "71", "72")
         let edge = parse_edge_from_row(row)?;
         Ok(Some(edge))
     }

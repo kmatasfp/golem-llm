@@ -12,7 +12,6 @@ pub(crate) struct Neo4jApi {
 }
 
 impl Neo4jApi {
-    /// Pass in the database name instead of using "neo4j" everywhere.
     pub(crate) fn new(
         host: &str,
         port: u16,
@@ -35,7 +34,6 @@ impl Neo4jApi {
         }
     }
 
-    /// Dynamically build the tx endpoint for the configured database.
     fn tx_endpoint(&self) -> String {
         format!("/db/{}/tx", self.database)
     }
@@ -102,7 +100,6 @@ impl Neo4jApi {
         if resp.status().is_success() {
             Ok("running".to_string())
         } else {
-            // If we get 404 or other error, transaction likely doesn't exist or is closed
             Ok("closed".to_string())
         }
     }
@@ -113,11 +110,9 @@ impl Neo4jApi {
         if response.status().is_success() {
             Ok(response)
         } else {
-            // pull the entire body as a string
             let text = response
                 .text()
                 .map_err(|e| GraphError::InternalError(e.to_string()))?;
-            // then deserialize
             let err: Value = serde_json::from_str(&text)
                 .map_err(|e| GraphError::InternalError(e.to_string()))?;
             Err(GraphError::TransactionFailed(err.to_string()))

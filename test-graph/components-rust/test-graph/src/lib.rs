@@ -14,7 +14,6 @@ use crate::bindings::golem::graph::{
 struct Component;
 
 // Configuration constants for different graph database providers
-// Test configuration - can be overridden by environment variables or use localhost as fallback
 #[cfg(feature = "arangodb")]
 const PROVIDER: &'static str = "arangodb";
 #[cfg(feature = "janusgraph")]
@@ -53,11 +52,8 @@ const TEST_USERNAME: &'static str = "neo4j";
 #[cfg(feature = "neo4j")]
 const TEST_PASSWORD: &'static str = "password";
 
-// Helper function to get the test host (can be overridden via environment variables)
+// Helper function to get the test host
 fn get_test_host() -> String {
-    // Use environment variable if set, otherwise default to localhost
-    // For real testing with public endpoints, set: export GRAPH_TEST_HOST=your-public-endpoint.com
-    // Note: localhost connections will fail in WASI environment (expected )
     std::env::var("GRAPH_TEST_HOST").unwrap_or_else(|_| DEFAULT_TEST_HOST.to_string())
 }
 
@@ -66,21 +62,14 @@ impl Guest for Component {
     fn test1() -> String {
         println!("Starting test1: Basic vertex operations with {}", PROVIDER);
         
-        // Debug: Log environment variables to see what's available
-        // println!("DEBUG test1: Provider = {}", PROVIDER);
-        // println!("DEBUG test1: JANUSGRAPH_HOST = {:?}", std::env::var("JANUSGRAPH_HOST"));
-        // println!("DEBUG test1: JANUSGRAPH_PORT = {:?}", std::env::var("JANUSGRAPH_PORT"));
-        // println!("DEBUG test1: ARANGO_HOST = {:?}", std::env::var("ARANGO_HOST"));
-        // println!("DEBUG test1: ARANGODB_HOST = {:?}", std::env::var("ARANGODB_HOST"));
-        
         let config = ConnectionConfig {
             hosts: vec![get_test_host()],
             port: Some(TEST_PORT),
             database_name: Some(TEST_DATABASE.to_string()),
             username: if TEST_USERNAME.is_empty() { None } else { Some(TEST_USERNAME.to_string()) },
             password: if TEST_PASSWORD.is_empty() { None } else { Some(TEST_PASSWORD.to_string()) },
-            timeout_seconds: None,  // Simplified to avoid serialization issues
-            max_connections: None,  // Simplified to avoid serialization issues
+            timeout_seconds: None,  
+            max_connections: None,  
             provider_config: vec![],
         };
 
@@ -134,7 +123,6 @@ impl Guest for Component {
             Err(error) => return format!("Commit failed: {:?}", error),
         };
 
-        // Close connection
         let _ = graph_connection.close();
 
         format!(
@@ -156,8 +144,8 @@ impl Guest for Component {
             database_name: Some(TEST_DATABASE.to_string()),
             username: if TEST_USERNAME.is_empty() { None } else { Some(TEST_USERNAME.to_string()) },
             password: if TEST_PASSWORD.is_empty() { None } else { Some(TEST_PASSWORD.to_string()) },
-            timeout_seconds: None,  // Simplified to avoid serialization issues
-            max_connections: None,  // Simplified to avoid serialization issues
+            timeout_seconds: None,  
+            max_connections: None,  
             provider_config: vec![],
         };
 
@@ -177,7 +165,6 @@ impl Guest for Component {
             Ok(tx) => tx,
             Err(error) => {
                 let error_msg = format!("{:?}", error);
-                println!("DEBUG: Transaction error: {}", error_msg);
                 if error_msg.contains("operation not supported on this platform") || 
                    error_msg.contains("Connect error") {
                     return format!("SKIPPED: Localhost connections not supported in WASI environment. Error: {}", error_msg);
@@ -207,7 +194,6 @@ impl Guest for Component {
             Err(error) => return format!("Second vertex creation failed: {:?}", error),
         };
 
-        // Create an edge between them
         let edge_props = vec![
             ("relationship".to_string(), PropertyValue::StringValue("FRIEND".to_string())),
             ("since".to_string(), PropertyValue::StringValue("2020-01-01".to_string())),
@@ -252,15 +238,12 @@ impl Guest for Component {
                         Some(10),
                     ) {
                         Ok(edges) => {
-                            println!("INFO: JanusGraph found {} outgoing edges", edges.len());
-                            // Filter edges by type and get target vertices
                             let mut vertices = Vec::new();
                             for edge in edges {
                                 if edge.edge_type == "KNOWS" {
                                     match transaction.get_vertex(&edge.to_vertex) {
                                         Ok(Some(vertex)) => {
                                             vertices.push(vertex.clone());
-                                            println!("INFO: Found adjacent vertex via KNOWS edge: {:?}", vertex.id);
                                         },
                                         Ok(None) => println!("WARNING: Target vertex not found: {:?}", edge.to_vertex),
                                         Err(e) => println!("WARNING: Error retrieving target vertex: {:?}", e),
@@ -271,11 +254,7 @@ impl Guest for Component {
                         },
                         Err(edge_error) => {
                             let edge_error_msg = format!("{:?}", edge_error);
-                            println!("ERROR: Both get_adjacent_vertices and get_connected_edges failed for JanusGraph");
-                            println!("Primary error 1 details: {}", error_msg);
-                            println!("Fallback error 2 details: {}", edge_error_msg);
                             
-                            // Include detailed error information in the return message
                             return format!("Adjacent vertices retrieval failed - Primary error: {} | Fallback error: {} | Debug: Edge created successfully from {:?} to {:?} with type '{}'", 
                                 error_msg, edge_error_msg, vertex1.id, vertex2.id, edge.edge_type);
                         }
@@ -304,7 +283,6 @@ impl Guest for Component {
 
     /// test3 demonstrates transaction rollback and error handling
     fn test3() -> String {
-        println!("Starting test3: Transaction operations with {}", PROVIDER);
         
         let config = ConnectionConfig {
             hosts: vec![get_test_host()],
@@ -312,8 +290,8 @@ impl Guest for Component {
             database_name: Some(TEST_DATABASE.to_string()),
             username: if TEST_USERNAME.is_empty() { None } else { Some(TEST_USERNAME.to_string()) },
             password: if TEST_PASSWORD.is_empty() { None } else { Some(TEST_PASSWORD.to_string()) },
-            timeout_seconds: None,  // Simplified to avoid serialization issues
-            max_connections: None,  // Simplified to avoid serialization issues
+            timeout_seconds: None, 
+            max_connections: None, 
             provider_config: vec![],
         };
 
@@ -354,7 +332,6 @@ impl Guest for Component {
             Err(error) => return format!("Vertex creation failed: {:?}", error),
         };
 
-        // Check if transaction is active
         let is_active_before = transaction.is_active();
         
         // Intentionally rollback the transaction
@@ -386,8 +363,8 @@ impl Guest for Component {
             database_name: Some(TEST_DATABASE.to_string()),
             username: if TEST_USERNAME.is_empty() { None } else { Some(TEST_USERNAME.to_string()) },
             password: if TEST_PASSWORD.is_empty() { None } else { Some(TEST_PASSWORD.to_string()) },
-            timeout_seconds: None,  // Simplified to avoid serialization issues
-            max_connections: None,  // Simplified to avoid serialization issues
+            timeout_seconds: None,  
+            max_connections: None,  
             provider_config: vec![],
         };
 
@@ -451,7 +428,6 @@ impl Guest for Component {
                 let error_msg = format!("{:?}", error);
                 if error_msg.contains("Invalid response from Gremlin") && PROVIDER == "janusgraph" {
                     println!("INFO: JanusGraph batch creation failed, falling back to individual vertex creation");
-                    // Fallback: create vertices individually for JanusGraph
                     let mut individual_vertices = Vec::new();
                     for spec in &vertex_specs {
                         match transaction.create_vertex(&spec.vertex_type, &spec.properties) {
@@ -471,8 +447,8 @@ impl Guest for Component {
             let edge_specs = vec![
                 transactions::EdgeSpec {
                     edge_type: "WORKS_FOR".to_string(),
-                    from_vertex: vertices[2].id.clone(), // Employee
-                    to_vertex: vertices[0].id.clone(), // TechCorp
+                    from_vertex: vertices[2].id.clone(),
+                    to_vertex: vertices[0].id.clone(), 
                     properties: vec![
                         ("start_date".to_string(), PropertyValue::StringValue("2022-01-01".to_string())),
                         ("position".to_string(), PropertyValue::StringValue("Senior Developer".to_string())),
@@ -485,7 +461,6 @@ impl Guest for Component {
                 Err(error) => {
                     let error_msg = format!("{:?}", error);
                     if (error_msg.contains("The child traversal") || error_msg.contains("was not spawned anonymously")) && PROVIDER == "janusgraph" {
-                        println!("INFO: JanusGraph batch edge creation failed, falling back to individual edge creation");
                         // Fallback: create edges individually for JanusGraph
                         let mut individual_edges = Vec::new();
                         for spec in &edge_specs {
@@ -529,8 +504,8 @@ impl Guest for Component {
             database_name: Some(TEST_DATABASE.to_string()),
             username: if TEST_USERNAME.is_empty() { None } else { Some(TEST_USERNAME.to_string()) },
             password: if TEST_PASSWORD.is_empty() { None } else { Some(TEST_PASSWORD.to_string()) },
-            timeout_seconds: None,  // Simplified to avoid serialization issues
-            max_connections: None,  // Simplified to avoid serialization issues
+            timeout_seconds: None, 
+            max_connections: None, 
             provider_config: vec![],
         };
 
@@ -602,7 +577,6 @@ impl Guest for Component {
             Err(error) => {
                 let error_msg = format!("{:?}", error);
                 if error_msg.contains("No signature of method") && PROVIDER == "janusgraph" {
-                    println!("INFO: JanusGraph path traversal with edge types failed, trying without edge type filter");
                     // Fallback: try without edge types for JanusGraph
                     match traversal::path_exists(
                         &transaction,
@@ -610,7 +584,7 @@ impl Guest for Component {
                         &vertex_c.id.clone(),
                         Some(&traversal::PathOptions {
                             max_depth: Some(3),
-                            edge_types: None, // Remove edge type filter
+                            edge_types: None,
                             vertex_types: None,
                             vertex_filters: None,
                             edge_filters: None,
@@ -651,8 +625,8 @@ impl Guest for Component {
             database_name: Some(TEST_DATABASE.to_string()),
             username: if TEST_USERNAME.is_empty() { None } else { Some(TEST_USERNAME.to_string()) },
             password: if TEST_PASSWORD.is_empty() { None } else { Some(TEST_PASSWORD.to_string()) },
-            timeout_seconds: None,  // Simplified to avoid serialization issues
-            max_connections: None,  // Simplified to avoid serialization issues
+            timeout_seconds: None,  
+            max_connections: None, 
             provider_config: vec![],
         };
 
@@ -705,8 +679,6 @@ impl Guest for Component {
             Err(error) => {
                 let error_msg = format!("{:?}", error);
                 if error_msg.contains("GraphSON") && PROVIDER == "janusgraph" {
-                    // For JanusGraph, try a simpler query that returns basic data
-                    println!("INFO: JanusGraph complex query failed due to GraphSON conversion, trying simpler query");
                     match query::execute_query(
                         &transaction,
                         "g.V().hasLabel('Product').count()",
@@ -753,13 +725,6 @@ impl Guest for Component {
     fn test7() -> String {
         println!("Starting test7: Schema operations with {}", PROVIDER);
         
-        // Debug: Log environment variables to see what's available
-        println!("DEBUG test7: Provider = {}", PROVIDER);
-        println!("DEBUG test7: JANUSGRAPH_HOST = {:?}", std::env::var("JANUSGRAPH_HOST"));
-        println!("DEBUG test7: JANUSGRAPH_PORT = {:?}", std::env::var("JANUSGRAPH_PORT"));
-        println!("DEBUG test7: ARANGO_HOST = {:?}", std::env::var("ARANGO_HOST"));
-        println!("DEBUG test7: ARANGODB_HOST = {:?}", std::env::var("ARANGODB_HOST"));
-        
         // Test schema manager creation
         let schema_manager = match schema::get_schema_manager() {
             Ok(manager) => manager,
@@ -778,7 +743,6 @@ impl Guest for Component {
         let mut edge_count = 0;
         let mut index_count = 0;
 
-        // Try to list vertex labels - if this fails, we'll catch and handle it
         match schema_manager.list_vertex_labels() {
             Ok(labels) => {
                 vertex_count = labels.len();
@@ -789,7 +753,6 @@ impl Guest for Component {
             }
         }
 
-        // Try to list edge labels
         match schema_manager.list_edge_labels() {
             Ok(labels) => {
                 edge_count = labels.len();

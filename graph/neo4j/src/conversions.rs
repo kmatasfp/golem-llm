@@ -285,7 +285,6 @@ pub(crate) fn from_json_value(value: Value) -> Result<PropertyValue, GraphError>
                 }
             }
 
-            // If it's not valid GeoJSON, try to convert to a string representation
             // This handles cases where Neo4j returns complex objects that aren't GeoJSON
             Ok(PropertyValue::StringValue(
                 serde_json::to_string(&Value::Object(map)).unwrap_or_else(|_| "{}".to_string()),

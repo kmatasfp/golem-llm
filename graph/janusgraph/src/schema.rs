@@ -72,7 +72,6 @@ impl GuestSchemaManager for SchemaManager {
         &self,
         label: String,
     ) -> Result<Option<VertexLabelSchema>, GraphError> {
-        // Use a more robust approach: get all vertex labels and check if our label is in the list
         let script = "mgmt.getVertexLabels().collect{ it.name() }";
         let result = self.execute_management_query(script)?;
 
@@ -95,10 +94,6 @@ impl GuestSchemaManager for SchemaManager {
         let script = format!("mgmt.getEdgeLabel('{}') != null", label);
         let result = self.execute_management_query(&script)?;
 
-        // Debug: Print the result to understand what we're getting
-        // eprintln!("[DEBUG] Edge label existence check result: {:?}", result);
-
-        // Handle GraphSON format: {"@type": "g:List", "@value": [true/false]}
         let exists = if let Some(graphson_obj) = result.as_object() {
             if let Some(value_array) = graphson_obj.get("@value").and_then(|v| v.as_array()) {
                 value_array
@@ -109,7 +104,6 @@ impl GuestSchemaManager for SchemaManager {
                 false
             }
         } else {
-            // Fallback to old parsing logic for compatibility
             result
                 .as_array()
                 .and_then(|arr| arr.first())
@@ -117,7 +111,6 @@ impl GuestSchemaManager for SchemaManager {
                 .unwrap_or(false)
         };
 
-        // eprintln!("[DEBUG] Edge label '{}' exists: {}", label, exists);
 
         if exists {
             Ok(Some(EdgeLabelSchema {
@@ -182,7 +175,6 @@ impl GuestSchemaManager for SchemaManager {
 
         index_builder.push_str(".indexOnly(label).buildCompositeIndex();");
 
-        // Wrap the index creation in a try-catch to handle duplicate index errors
         let wrapped_index_builder = format!("try {{ {} }} catch (Exception e) {{ if (!e.message.contains('already been defined')) throw e; }}", index_builder);
         script_parts.push(wrapped_index_builder);
 
@@ -193,9 +185,6 @@ impl GuestSchemaManager for SchemaManager {
     }
 
     fn drop_index(&self, name: String) -> Result<(), GraphError> {
-        // Dropping an index in JanusGraph is a multi-step async process.
-        // A simple synchronous version is not readily available.
-        // We can, however, disable it. For now, we return unsupported.
         let _ = name;
         Err(GraphError::UnsupportedOperation(
             "Dropping an index is not supported in this version.".to_string(),
@@ -229,7 +218,6 @@ impl GuestSchemaManager for SchemaManager {
         ";
 
         let result = self.execute_management_query(script)?;
-        // eprintln!("[DEBUG] Raw list_indexes result: {:?}", result);
         self.parse_index_list_from_result(result)
     }
 
@@ -285,7 +273,6 @@ impl GuestSchemaManager for SchemaManager {
 
 impl SchemaManager {
     fn execute_management_query(&self, script: &str) -> Result<Value, GraphError> {
-        // Use a more robust management transaction pattern
         let full_script = format!(
             "
             try {{
@@ -328,7 +315,6 @@ impl SchemaManager {
     }
 
     fn parse_string_list_from_result(&self, result: Value) -> Result<Vec<String>, GraphError> {
-        // Handle GraphSON format: {"@type": "g:List", "@value": [...]}
         if let Some(graphson_obj) = result.as_object() {
             if let Some(value_array) = graphson_obj.get("@value").and_then(|v| v.as_array()) {
                 return value_array
@@ -342,7 +328,6 @@ impl SchemaManager {
             }
         }
 
-        // Fallback to old parsing logic for compatibility
         result
             .as_array()
             .and_then(|arr| arr.first())
@@ -365,7 +350,6 @@ impl SchemaManager {
     ) -> Result<Vec<IndexDefinition>, GraphError> {
         let mut indexes = Vec::new();
 
-        // Handle GraphSON format: {"@type": "g:List", "@value": [...]}
         let items = if let Some(graphson_obj) = result.as_object() {
             if let Some(value_array) = graphson_obj.get("@value").and_then(|v| v.as_array()) {
                 value_array
@@ -379,10 +363,9 @@ impl SchemaManager {
         };
 
         for item in items {
-            // Handle GraphSON map format: {"@type": "g:Map", "@value": [key1, value1, key2, value2, ...]}
+            // Handling GraphSON map format: {"@type": "g:Map", "@value": [key1, value1, key2, value2, ...]}
             let map_data = if let Some(graphson_map) = item.as_object() {
                 if let Some(map_array) = graphson_map.get("@value").and_then(|v| v.as_array()) {
-                    // Convert array format [key1, value1, key2, value2, ...] to a map
                     let mut map = std::collections::HashMap::new();
                     let mut i = 0;
                     while i + 1 < map_array.len() {
@@ -396,7 +379,6 @@ impl SchemaManager {
                     continue;
                 }
             } else if let Some(map) = item.as_object() {
-                // Direct object format
                 map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
             } else {
                 continue;
@@ -417,7 +399,6 @@ impl SchemaManager {
                 .unwrap_or_default()
                 .to_string();
 
-            // Handle properties which might be in GraphSON list format
             let properties = map_data
                 .get("properties")
                 .and_then(|v| {
