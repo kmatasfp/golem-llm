@@ -16,7 +16,7 @@ default = ["durability"]
 durability = ["golem-rust/durability", "golem-graph/durability"]
 
 [dependencies]
-golem-graph = { path = "../graph", version = "0.0.0", default-features = false }
+golem-graph = {workspace = true }
 
 golem-rust = { workspace = true }
 log = { workspace = true }

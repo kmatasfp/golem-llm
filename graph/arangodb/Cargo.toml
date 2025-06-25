@@ -1,11 +1,11 @@
 [package]
-name = "golem-graph-neo4j"
+name = "golem-graph-arangodb"
 version = "0.0.0"
 edition = "2021"
 license = "Apache-2.0"
 homepage = "https://golem.cloud"
 repository = "https://github.com/golemcloud/golem-llm"
-description = "WebAssembly component for working with Neo4j APIs, with special support for Golem Cloud"
+description = "WebAssembly component for working with ArangoDB APIs, with special support for Golem Cloud"
 
 [lib]
 path = "src/lib.rs"
@@ -16,7 +16,7 @@ default = ["durability"]
 durability = ["golem-rust/durability", "golem-graph/durability"]
 
 [dependencies]
-golem-graph = { path = "../graph", version = "0.0.0", default-features = false }
+golem-graph = { workspace = true }
 
 golem-rust = { workspace = true }
 log = { workspace = true }
@@ -24,11 +24,11 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 wit-bindgen-rt = { workspace = true }
 base64 = { workspace = true }
-futures = "0.3"
-reqwest = { workspace = true}
+reqwest = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
 
 [package.metadata.component]
-package = "golem:graph-neo4j"
+package = "golem:graph-arangodb"
 
 [package.metadata.component.bindings]
 generate_unused_types = true
@@ -48,4 +48,4 @@ path = "wit"
 
 [package.metadata.component.target.dependencies]
 "golem:graph" = { path = "wit/deps/golem-graph" }
-"wasi:io" = { path = "wit/deps/wasi:io"}
+"wasi:io" = { path = "wit/deps/wasi:io"} 

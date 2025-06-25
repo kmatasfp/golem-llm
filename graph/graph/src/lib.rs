@@ -4,7 +4,7 @@ pub mod error;
 pub mod query_utils;
 
 wit_bindgen::generate!({
-    path: "../wit-graph",
+    path: "../wit",
     world: "graph-library",
     generate_all,
     generate_unused_types: true,
