@@ -8,45 +8,20 @@ use crate::golem::graph::{
     transactions::{self, Guest as TransactionGuest, GuestTransaction},
     traversal::{Guest as TraversalGuest, Path, PathOptions, Subgraph},
 };
-use golem_rust::bindings::golem::durability::durability::WrappedFunctionType;
-use golem_rust::durability::Durability;
-use golem_rust::{with_persistence_level, FromValueAndType, IntoValue, PersistenceLevel};
 use std::marker::PhantomData;
 
 pub trait TransactionBorrowExt<'a, T> {
     fn get(&self) -> &'a T;
 }
 
-#[derive(Debug, Clone, FromValueAndType, IntoValue)]
-struct Unit;
-
-// --- Durable Wrappers ---
-
+/// Wraps a graph implementation with custom durability
 pub struct DurableGraph<Impl> {
     _phantom: PhantomData<Impl>,
 }
 
-/// A durable wrapper for a `Graph` resource.
-#[derive(Debug)]
-pub struct DurableGraphResource<G> {
-    graph: G,
-}
-
-/// A durable wrapper for a `Transaction` resource.
-#[derive(Debug)]
-pub struct DurableTransaction<T: GuestTransaction> {
-    pub inner: T,
-}
-
-impl<T: GuestTransaction> DurableTransaction<T> {
-    pub fn new(inner: T) -> Self {
-        Self { inner }
-    }
-}
-
 // --- Guest Trait for Providers ---
 
-// must be implemented
+/// Must be implemented by graph providers to be wrapped with durability
 pub trait ExtendedGuest: 'static
 where
     Self::Graph: ProviderGraph + 'static,
@@ -60,265 +35,397 @@ pub trait ProviderGraph: connection::GuestGraph {
     type Transaction: transactions::GuestTransaction;
 }
 
-impl<Impl: ExtendedGuest> connection::Guest for DurableGraph<Impl>
-where
-    Impl::Graph: ProviderGraph + 'static,
-{
-    type Graph = DurableGraphResource<Impl::Graph>;
-    fn connect(config: ConnectionConfig) -> Result<connection::Graph, GraphError> {
-        let durability = Durability::<Unit, GraphError>::new(
-            "golem_graph",
-            "connect",
-            WrappedFunctionType::WriteRemote,
-        );
-        if durability.is_live() {
-            let result = Impl::connect_internal(&config);
-            let persist_result = result.as_ref().map(|_| Unit).map_err(|e| e.clone());
-            durability.persist(config.clone(), persist_result)?;
-            result.map(|g| connection::Graph::new(DurableGraphResource::new(g)))
-        } else {
-            let _unit: Unit = durability.replay::<Unit, GraphError>()?;
+/// When the durability feature flag is off, wrapping with `DurableGraph` is just a passthrough
+#[cfg(not(feature = "durability"))]
+mod passthrough_impl {
+    use super::*;
+
+    impl<Impl: ExtendedGuest> connection::Guest for DurableGraph<Impl>
+    where
+        Impl::Graph: ProviderGraph + 'static,
+    {
+        type Graph = Impl::Graph;
+        
+        fn connect(config: ConnectionConfig) -> Result<connection::Graph, GraphError> {
             let graph = Impl::connect_internal(&config)?;
-            Ok(connection::Graph::new(DurableGraphResource::new(graph)))
+            Ok(connection::Graph::new(graph))
+        }
+    }
+
+    impl<Impl: ExtendedGuest + TransactionGuest> TransactionGuest for DurableGraph<Impl>
+    where
+        Impl::Graph: ProviderGraph + 'static,
+    {
+        type Transaction = Impl::Transaction;
+    }
+
+    impl<Impl: ExtendedGuest + SchemaGuest> SchemaGuest for DurableGraph<Impl>
+    where
+        Impl::Graph: ProviderGraph + 'static,
+    {
+        type SchemaManager = Impl::SchemaManager;
+
+        fn get_schema_manager() -> Result<SchemaManager, GraphError> {
+            Impl::get_schema_manager()
+        }
+    }
+
+    impl<Impl: ExtendedGuest + TraversalGuest> TraversalGuest for DurableGraph<Impl>
+    where
+        Impl::Graph: ProviderGraph + 'static,
+    {
+        fn find_shortest_path(
+            transaction: transactions::TransactionBorrow<'_>,
+            from_vertex: crate::golem::graph::types::ElementId,
+            to_vertex: crate::golem::graph::types::ElementId,
+            options: Option<PathOptions>,
+        ) -> Result<Option<Path>, GraphError> {
+            Impl::find_shortest_path(transaction, from_vertex, to_vertex, options)
+        }
+
+        fn find_all_paths(
+            transaction: transactions::TransactionBorrow<'_>,
+            from_vertex: crate::golem::graph::types::ElementId,
+            to_vertex: crate::golem::graph::types::ElementId,
+            options: Option<PathOptions>,
+            limit: Option<u32>,
+        ) -> Result<Vec<Path>, GraphError> {
+            Impl::find_all_paths(transaction, from_vertex, to_vertex, options, limit)
+        }
+
+        fn get_neighborhood(
+            transaction: transactions::TransactionBorrow<'_>,
+            center: crate::golem::graph::types::ElementId,
+            options: crate::golem::graph::traversal::NeighborhoodOptions,
+        ) -> Result<Subgraph, GraphError> {
+            Impl::get_neighborhood(transaction, center, options)
+        }
+
+        fn path_exists(
+            transaction: transactions::TransactionBorrow<'_>,
+            from_vertex: crate::golem::graph::types::ElementId,
+            to_vertex: crate::golem::graph::types::ElementId,
+            options: Option<PathOptions>,
+        ) -> Result<bool, GraphError> {
+            Impl::path_exists(transaction, from_vertex, to_vertex, options)
+        }
+
+        fn get_vertices_at_distance(
+            transaction: transactions::TransactionBorrow<'_>,
+            source: crate::golem::graph::types::ElementId,
+            distance: u32,
+            direction: crate::golem::graph::types::Direction,
+            edge_types: Option<Vec<String>>,
+        ) -> Result<Vec<crate::golem::graph::types::Vertex>, GraphError> {
+            Impl::get_vertices_at_distance(transaction, source, distance, direction, edge_types)
+        }
+    }
+
+    impl<Impl: ExtendedGuest + QueryGuest> QueryGuest for DurableGraph<Impl>
+    where
+        Impl::Graph: ProviderGraph + 'static,
+    {
+        fn execute_query(
+            transaction: transactions::TransactionBorrow<'_>,
+            query: String,
+            parameters: Option<Vec<(String, crate::golem::graph::types::PropertyValue)>>,
+            options: Option<QueryOptions>,
+        ) -> Result<QueryExecutionResult, GraphError> {
+            Impl::execute_query(transaction, query, parameters, options)
         }
     }
 }
 
-impl<Impl: ExtendedGuest + TransactionGuest> TransactionGuest for DurableGraph<Impl>
-where
-    Impl::Graph: ProviderGraph + 'static,
-{
-    type Transaction = Impl::Transaction;
-}
+/// When the durability feature flag is on, wrapping with `DurableGraph` adds custom durability
+/// on top of the provider-specific graph implementation using Golem's special host functions and
+/// the `golem-rust` helper library.
+#[cfg(feature = "durability")]
+mod durable_impl {
+    use super::*;
+    use golem_rust::bindings::golem::durability::durability::WrappedFunctionType;
+    use golem_rust::durability::Durability;
+    use golem_rust::{with_persistence_level, FromValueAndType, IntoValue, PersistenceLevel};
 
-impl<Impl: ExtendedGuest + SchemaGuest> SchemaGuest for DurableGraph<Impl>
-where
-    Impl::Graph: ProviderGraph + 'static,
-{
-    type SchemaManager = Impl::SchemaManager;
+    #[derive(Debug, Clone, FromValueAndType, IntoValue)]
+    pub(super) struct Unit;
 
-    fn get_schema_manager() -> Result<SchemaManager, GraphError> {
-        Impl::get_schema_manager()
-    }
-}
-
-impl<Impl: ExtendedGuest + TraversalGuest> TraversalGuest for DurableGraph<Impl>
-where
-    Impl::Graph: ProviderGraph + 'static,
-{
-    fn find_shortest_path(
-        transaction: transactions::TransactionBorrow<'_>,
-        from_vertex: crate::golem::graph::types::ElementId,
-        to_vertex: crate::golem::graph::types::ElementId,
-        options: Option<PathOptions>,
-    ) -> Result<Option<Path>, GraphError> {
-        Impl::find_shortest_path(transaction, from_vertex, to_vertex, options)
+    /// A durable wrapper for a `Graph` resource.
+    #[derive(Debug)]
+    pub struct DurableGraphResource<G> {
+        graph: G,
     }
 
-    fn find_all_paths(
-        transaction: transactions::TransactionBorrow<'_>,
-        from_vertex: crate::golem::graph::types::ElementId,
-        to_vertex: crate::golem::graph::types::ElementId,
-        options: Option<PathOptions>,
-        limit: Option<u32>,
-    ) -> Result<Vec<Path>, GraphError> {
-        Impl::find_all_paths(transaction, from_vertex, to_vertex, options, limit)
+    /// A durable wrapper for a `Transaction` resource.
+    #[derive(Debug)]
+    pub struct DurableTransaction<T: GuestTransaction> {
+        pub inner: T,
     }
 
-    fn get_neighborhood(
-        transaction: transactions::TransactionBorrow<'_>,
-        center: crate::golem::graph::types::ElementId,
-        options: crate::golem::graph::traversal::NeighborhoodOptions,
-    ) -> Result<Subgraph, GraphError> {
-        Impl::get_neighborhood(transaction, center, options)
-    }
-
-    fn path_exists(
-        transaction: transactions::TransactionBorrow<'_>,
-        from_vertex: crate::golem::graph::types::ElementId,
-        to_vertex: crate::golem::graph::types::ElementId,
-        options: Option<PathOptions>,
-    ) -> Result<bool, GraphError> {
-        Impl::path_exists(transaction, from_vertex, to_vertex, options)
-    }
-
-    fn get_vertices_at_distance(
-        transaction: transactions::TransactionBorrow<'_>,
-        source: crate::golem::graph::types::ElementId,
-        distance: u32,
-        direction: crate::golem::graph::types::Direction,
-        edge_types: Option<Vec<String>>,
-    ) -> Result<Vec<crate::golem::graph::types::Vertex>, GraphError> {
-        Impl::get_vertices_at_distance(transaction, source, distance, direction, edge_types)
-    }
-}
-
-impl<Impl: ExtendedGuest + QueryGuest> QueryGuest for DurableGraph<Impl>
-where
-    Impl::Graph: ProviderGraph + 'static,
-{
-    fn execute_query(
-        transaction: transactions::TransactionBorrow<'_>,
-        query: String,
-        parameters: Option<Vec<(String, crate::golem::graph::types::PropertyValue)>>,
-        options: Option<QueryOptions>,
-    ) -> Result<QueryExecutionResult, GraphError> {
-        let durability: Durability<QueryExecutionResult, GraphError> = Durability::new(
-            "golem_graph_query",
-            "execute_query",
-            WrappedFunctionType::WriteRemote, // Assuming queries can be write ops
-        );
-
-        if durability.is_live() {
-            let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                Impl::execute_query(transaction, query.clone(), parameters.clone(), options)
-            });
-            durability.persist(
-                ExecuteQueryParams {
-                    query,
-                    parameters,
-                    options,
-                },
-                result,
-            )
-        } else {
-            durability.replay()
-        }
-    }
-}
-
-// --- Durable `GuestGraph` Implementation ---
-impl<G: ProviderGraph + 'static> connection::GuestGraph for DurableGraphResource<G> {
-    fn begin_transaction(&self) -> Result<transactions::Transaction, GraphError> {
-        self.graph.begin_transaction().map(|tx_wrapper| {
-            let provider_transaction = tx_wrapper.into_inner::<G::Transaction>();
-            transactions::Transaction::new(provider_transaction)
-        })
-    }
-
-    fn begin_read_transaction(&self) -> Result<transactions::Transaction, GraphError> {
-        self.graph.begin_read_transaction().map(|tx_wrapper| {
-            let provider_transaction = tx_wrapper.into_inner::<G::Transaction>();
-            transactions::Transaction::new(provider_transaction)
-        })
-    }
-
-    fn ping(&self) -> Result<(), GraphError> {
-        self.graph.ping()
-    }
-
-    fn get_statistics(
-        &self,
-    ) -> Result<crate::golem::graph::connection::GraphStatistics, GraphError> {
-        self.graph.get_statistics()
-    }
-
-    fn close(&self) -> Result<(), GraphError> {
-        self.graph.close()
-    }
-}
-
-impl<G: GuestGraph> DurableGraphResource<G> {
-    pub fn new(graph: G) -> Self {
-        Self { graph }
-    }
-}
-
-impl<T: GuestTransaction> GuestTransaction for DurableTransaction<T> {
-    fn commit(&self) -> Result<(), GraphError> {
-        let durability = Durability::<Unit, GraphError>::new(
-            "golem_graph_transaction",
-            "commit",
-            WrappedFunctionType::WriteRemote,
-        );
-        if durability.is_live() {
-            let result = with_persistence_level(
-                PersistenceLevel::PersistNothing,
-                || self.inner.commit(), // <-- now this calls the provider's commit
-            );
-            durability.persist(Unit, result.map(|_| Unit))?;
-            Ok(())
-        } else {
-            durability.replay::<Unit, GraphError>()?;
-            Ok(())
+    impl<T: GuestTransaction> DurableTransaction<T> {
+        pub fn new(inner: T) -> Self {
+            Self { inner }
         }
     }
 
-    fn rollback(&self) -> Result<(), GraphError> {
-        let durability = Durability::<Unit, GraphError>::new(
-            "golem_graph_transaction",
-            "rollback",
-            WrappedFunctionType::WriteRemote,
-        );
-        if durability.is_live() {
-            let result =
-                with_persistence_level(PersistenceLevel::PersistNothing, || self.inner.rollback());
-            durability.persist(Unit, result.map(|_| Unit))?;
-            Ok(())
-        } else {
-            durability.replay::<Unit, GraphError>()?;
-            Ok(())
-        }
-    }
-
-    fn create_vertex(
-        &self,
-        vertex_type: String,
-        properties: crate::golem::graph::types::PropertyMap,
-    ) -> Result<crate::golem::graph::types::Vertex, GraphError> {
-        let durability: Durability<crate::golem::graph::types::Vertex, GraphError> =
-            Durability::new(
-                "golem_graph_transaction",
-                "create_vertex",
+    impl<Impl: ExtendedGuest> connection::Guest for DurableGraph<Impl>
+    where
+        Impl::Graph: ProviderGraph + 'static,
+    {
+        type Graph = DurableGraphResource<Impl::Graph>;
+        fn connect(config: ConnectionConfig) -> Result<connection::Graph, GraphError> {
+            let durability = Durability::<Unit, GraphError>::new(
+                "golem_graph",
+                "connect",
                 WrappedFunctionType::WriteRemote,
             );
-        if durability.is_live() {
-            let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                self.inner
-                    .create_vertex(vertex_type.clone(), properties.clone())
-            });
-            durability.persist((vertex_type, properties), result)
-        } else {
-            durability.replay()
+            if durability.is_live() {
+                let result = Impl::connect_internal(&config);
+                let persist_result = result.as_ref().map(|_| Unit).map_err(|e| e.clone());
+                durability.persist(config.clone(), persist_result)?;
+                result.map(|g| connection::Graph::new(DurableGraphResource::new(g)))
+            } else {
+                let _unit: Unit = durability.replay::<Unit, GraphError>()?;
+                let graph = Impl::connect_internal(&config)?;
+                Ok(connection::Graph::new(DurableGraphResource::new(graph)))
+            }
         }
     }
 
-    fn is_active(&self) -> bool {
-        self.inner.is_active()
+    impl<Impl: ExtendedGuest + TransactionGuest> TransactionGuest for DurableGraph<Impl>
+    where
+        Impl::Graph: ProviderGraph + 'static,
+    {
+        type Transaction = DurableTransaction<Impl::Transaction>;
     }
 
-    fn get_vertex(
-        &self,
-        id: crate::golem::graph::types::ElementId,
-    ) -> Result<Option<crate::golem::graph::types::Vertex>, GraphError> {
-        self.inner.get_vertex(id)
+    impl<Impl: ExtendedGuest + SchemaGuest> SchemaGuest for DurableGraph<Impl>
+    where
+        Impl::Graph: ProviderGraph + 'static,
+    {
+        type SchemaManager = Impl::SchemaManager;
+
+        fn get_schema_manager() -> Result<SchemaManager, GraphError> {
+            Impl::get_schema_manager()
+        }
     }
 
-    fn create_vertex_with_labels(
-        &self,
-        vertex_type: String,
-        additional_labels: Vec<String>,
-        properties: crate::golem::graph::types::PropertyMap,
-    ) -> Result<crate::golem::graph::types::Vertex, GraphError> {
-        let durability: Durability<crate::golem::graph::types::Vertex, GraphError> =
-            Durability::new(
-                "golem_graph_transaction",
-                "create_vertex_with_labels",
+    impl<Impl: ExtendedGuest + TraversalGuest> TraversalGuest for DurableGraph<Impl>
+    where
+        Impl::Graph: ProviderGraph + 'static,
+    {
+        fn find_shortest_path(
+            transaction: transactions::TransactionBorrow<'_>,
+            from_vertex: crate::golem::graph::types::ElementId,
+            to_vertex: crate::golem::graph::types::ElementId,
+            options: Option<PathOptions>,
+        ) -> Result<Option<Path>, GraphError> {
+            Impl::find_shortest_path(transaction, from_vertex, to_vertex, options)
+        }
+
+        fn find_all_paths(
+            transaction: transactions::TransactionBorrow<'_>,
+            from_vertex: crate::golem::graph::types::ElementId,
+            to_vertex: crate::golem::graph::types::ElementId,
+            options: Option<PathOptions>,
+            limit: Option<u32>,
+        ) -> Result<Vec<Path>, GraphError> {
+            Impl::find_all_paths(transaction, from_vertex, to_vertex, options, limit)
+        }
+
+        fn get_neighborhood(
+            transaction: transactions::TransactionBorrow<'_>,
+            center: crate::golem::graph::types::ElementId,
+            options: crate::golem::graph::traversal::NeighborhoodOptions,
+        ) -> Result<Subgraph, GraphError> {
+            Impl::get_neighborhood(transaction, center, options)
+        }
+
+        fn path_exists(
+            transaction: transactions::TransactionBorrow<'_>,
+            from_vertex: crate::golem::graph::types::ElementId,
+            to_vertex: crate::golem::graph::types::ElementId,
+            options: Option<PathOptions>,
+        ) -> Result<bool, GraphError> {
+            Impl::path_exists(transaction, from_vertex, to_vertex, options)
+        }
+
+        fn get_vertices_at_distance(
+            transaction: transactions::TransactionBorrow<'_>,
+            source: crate::golem::graph::types::ElementId,
+            distance: u32,
+            direction: crate::golem::graph::types::Direction,
+            edge_types: Option<Vec<String>>,
+        ) -> Result<Vec<crate::golem::graph::types::Vertex>, GraphError> {
+            Impl::get_vertices_at_distance(transaction, source, distance, direction, edge_types)
+        }
+    }
+
+    impl<Impl: ExtendedGuest + QueryGuest> QueryGuest for DurableGraph<Impl>
+    where
+        Impl::Graph: ProviderGraph + 'static,
+    {
+        fn execute_query(
+            transaction: transactions::TransactionBorrow<'_>,
+            query: String,
+            parameters: Option<Vec<(String, crate::golem::graph::types::PropertyValue)>>,
+            options: Option<QueryOptions>,
+        ) -> Result<QueryExecutionResult, GraphError> {
+            let durability: Durability<QueryExecutionResult, GraphError> = Durability::new(
+                "golem_graph_query",
+                "execute_query",
                 WrappedFunctionType::WriteRemote,
             );
-        if durability.is_live() {
-            let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                self.inner.create_vertex_with_labels(
-                    vertex_type.clone(),
-                    additional_labels.clone(),
-                    properties.clone(),
+
+            if durability.is_live() {
+                let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
+                    Impl::execute_query(transaction, query.clone(), parameters.clone(), options)
+                });
+                durability.persist(
+                    ExecuteQueryParams {
+                        query,
+                        parameters,
+                        options,
+                    },
+                    result,
                 )
-            });
-            durability.persist((vertex_type, additional_labels, properties), result)
-        } else {
-            durability.replay()
+            } else {
+                durability.replay()
+            }
         }
     }
+
+    // --- Durable `GuestGraph` Implementation ---
+    impl<G: ProviderGraph + 'static> connection::GuestGraph for DurableGraphResource<G> {
+        fn begin_transaction(&self) -> Result<transactions::Transaction, GraphError> {
+            self.graph.begin_transaction().map(|tx_wrapper| {
+                let provider_transaction = tx_wrapper.into_inner::<G::Transaction>();
+                transactions::Transaction::new(DurableTransaction::new(provider_transaction))
+            })
+        }
+
+        fn begin_read_transaction(&self) -> Result<transactions::Transaction, GraphError> {
+            self.graph.begin_read_transaction().map(|tx_wrapper| {
+                let provider_transaction = tx_wrapper.into_inner::<G::Transaction>();
+                transactions::Transaction::new(DurableTransaction::new(provider_transaction))
+            })
+        }
+
+        fn ping(&self) -> Result<(), GraphError> {
+            self.graph.ping()
+        }
+
+        fn get_statistics(
+            &self,
+        ) -> Result<crate::golem::graph::connection::GraphStatistics, GraphError> {
+            self.graph.get_statistics()
+        }
+
+        fn close(&self) -> Result<(), GraphError> {
+            self.graph.close()
+        }
+    }
+
+    impl<G: GuestGraph> DurableGraphResource<G> {
+        pub fn new(graph: G) -> Self {
+            Self { graph }
+        }
+    }
+
+    impl<T: GuestTransaction> GuestTransaction for DurableTransaction<T> {
+        fn commit(&self) -> Result<(), GraphError> {
+            let durability = Durability::<Unit, GraphError>::new(
+                "golem_graph_transaction",
+                "commit",
+                WrappedFunctionType::WriteRemote,
+            );
+            if durability.is_live() {
+                let result = with_persistence_level(
+                    PersistenceLevel::PersistNothing,
+                    || self.inner.commit(),
+                );
+                durability.persist(Unit, result.map(|_| Unit))?;
+                Ok(())
+            } else {
+                durability.replay::<Unit, GraphError>()?;
+                Ok(())
+            }
+        }
+
+        fn rollback(&self) -> Result<(), GraphError> {
+            let durability = Durability::<Unit, GraphError>::new(
+                "golem_graph_transaction",
+                "rollback",
+                WrappedFunctionType::WriteRemote,
+            );
+            if durability.is_live() {
+                let result =
+                    with_persistence_level(PersistenceLevel::PersistNothing, || self.inner.rollback());
+                durability.persist(Unit, result.map(|_| Unit))?;
+                Ok(())
+            } else {
+                durability.replay::<Unit, GraphError>()?;
+                Ok(())
+            }
+        }
+
+        fn create_vertex(
+            &self,
+            vertex_type: String,
+            properties: crate::golem::graph::types::PropertyMap,
+        ) -> Result<crate::golem::graph::types::Vertex, GraphError> {
+            let durability: Durability<crate::golem::graph::types::Vertex, GraphError> =
+                Durability::new(
+                    "golem_graph_transaction",
+                    "create_vertex",
+                    WrappedFunctionType::WriteRemote,
+                );
+            if durability.is_live() {
+                let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
+                    self.inner
+                        .create_vertex(vertex_type.clone(), properties.clone())
+                });
+                durability.persist((vertex_type, properties), result)
+            } else {
+                durability.replay()
+            }
+        }
+
+        fn is_active(&self) -> bool {
+            self.inner.is_active()
+        }
+
+        fn get_vertex(
+            &self,
+            id: crate::golem::graph::types::ElementId,
+        ) -> Result<Option<crate::golem::graph::types::Vertex>, GraphError> {
+            self.inner.get_vertex(id)
+        }
+
+        fn create_vertex_with_labels(
+            &self,
+            vertex_type: String,
+            additional_labels: Vec<String>,
+            properties: crate::golem::graph::types::PropertyMap,
+        ) -> Result<crate::golem::graph::types::Vertex, GraphError> {
+            let durability: Durability<crate::golem::graph::types::Vertex, GraphError> =
+                Durability::new(
+                    "golem_graph_transaction",
+                    "create_vertex_with_labels",
+                    WrappedFunctionType::WriteRemote,
+                );
+            if durability.is_live() {
+                let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
+                    self.inner.create_vertex_with_labels(
+                        vertex_type.clone(),
+                        additional_labels.clone(),
+                        properties.clone(),
+                    )
+                });
+                durability.persist((vertex_type, additional_labels, properties), result)
+            } else {
+                durability.replay()
+            }
+        }
 
     fn update_vertex(
         &self,
@@ -634,37 +741,37 @@ impl<T: GuestTransaction> GuestTransaction for DurableTransaction<T> {
     }
 }
 
-#[derive(Debug, Clone, FromValueAndType, IntoValue, PartialEq)]
-struct CreateEdgeParams {
-    edge_type: String,
-    from_vertex: crate::golem::graph::types::ElementId,
-    to_vertex: crate::golem::graph::types::ElementId,
-    properties: crate::golem::graph::types::PropertyMap,
-}
+    #[derive(Debug, Clone, FromValueAndType, IntoValue, PartialEq)]
+    struct CreateEdgeParams {
+        edge_type: String,
+        from_vertex: crate::golem::graph::types::ElementId,
+        to_vertex: crate::golem::graph::types::ElementId,
+        properties: crate::golem::graph::types::PropertyMap,
+    }
 
-#[derive(Debug, Clone, FromValueAndType, IntoValue, PartialEq)]
-struct UpsertEdgeParams {
-    id: Option<crate::golem::graph::types::ElementId>,
-    edge_type: String,
-    from_vertex: crate::golem::graph::types::ElementId,
-    to_vertex: crate::golem::graph::types::ElementId,
-    properties: crate::golem::graph::types::PropertyMap,
-}
+    #[derive(Debug, Clone, FromValueAndType, IntoValue, PartialEq)]
+    struct UpsertEdgeParams {
+        id: Option<crate::golem::graph::types::ElementId>,
+        edge_type: String,
+        from_vertex: crate::golem::graph::types::ElementId,
+        to_vertex: crate::golem::graph::types::ElementId,
+        properties: crate::golem::graph::types::PropertyMap,
+    }
 
-#[derive(Debug, Clone, FromValueAndType, IntoValue, PartialEq)]
-struct ExecuteQueryParams {
-    query: String,
-    parameters: Option<Vec<(String, crate::golem::graph::types::PropertyValue)>>,
-    options: Option<QueryOptions>,
+    #[derive(Debug, Clone, FromValueAndType, IntoValue, PartialEq)]
+    struct ExecuteQueryParams {
+        query: String,
+        parameters: Option<Vec<(String, crate::golem::graph::types::PropertyValue)>>,
+        options: Option<QueryOptions>,
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::golem::graph::{
         connection::ConnectionConfig,
         errors::GraphError,
-        query::{QueryExecutionResult, QueryOptions, QueryResult},
+        query::{QueryExecutionResult, QueryResult},
         transactions::{EdgeSpec, VertexSpec},
         types::{Edge, ElementId, Path, PropertyValue, Vertex},
     };
@@ -704,50 +811,6 @@ mod tests {
         roundtrip_test(PropertyValue::Float64Value(123.456789012345));
         roundtrip_test(PropertyValue::StringValue("hello world".to_string()));
         roundtrip_test(PropertyValue::Bytes(vec![1, 2, 3, 4, 5]));
-    }
-
-    #[test]
-    fn create_edge_params_roundtrip() {
-        let params = CreateEdgeParams {
-            edge_type: "knows".to_string(),
-            from_vertex: ElementId::Int64(1),
-            to_vertex: ElementId::Int64(2),
-            properties: vec![("weight".to_string(), PropertyValue::Float32Value(0.9))],
-        };
-        roundtrip_test(params);
-    }
-
-    #[test]
-    fn upsert_edge_params_roundtrip() {
-        let params = UpsertEdgeParams {
-            id: Some(ElementId::StringValue("edge-1".to_string())),
-            edge_type: "likes".to_string(),
-            from_vertex: ElementId::Int64(10),
-            to_vertex: ElementId::Int64(12),
-            properties: vec![(
-                "reason".to_string(),
-                PropertyValue::StringValue("good-person".to_string()),
-            )],
-        };
-        roundtrip_test(params);
-    }
-
-    #[test]
-    fn execute_query_params_roundtrip() {
-        let params = ExecuteQueryParams {
-            query: "MATCH (n) RETURN n".to_string(),
-            parameters: Some(vec![(
-                "name".to_string(),
-                PropertyValue::StringValue("Alice".to_string()),
-            )]),
-            options: Some(QueryOptions {
-                timeout_seconds: Some(1000),
-                max_results: Some(100),
-                explain: false,
-                profile: false,
-            }),
-        };
-        roundtrip_test(params);
     }
 
     #[test]
