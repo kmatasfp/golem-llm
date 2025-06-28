@@ -8,6 +8,8 @@ members = [
     "llm/ollama",
     "llm/openai",
     "llm/openrouter",
+    "stt/stt",
+    "stt/whisper",
 ]
 
 [profile.release]
@@ -19,8 +21,10 @@ opt-level = 's'
 golem-rust = "1.6.0"
 log = "0.4.27"
 golem-llm = { path = "llm/llm", version = "0.0.0", default-features = false }
-reqwest = { git = "https://github.com/golemcloud/reqwest", branch = "update-may-2025", features = [
+golem-stt = { path = "stt/stt", version = "0.0.0" }
+reqwest = { git = "https://github.com/golemcloud/reqwest", rev = "a2ed3d983e868976c3453814f981015a19727422", features = [
     "json",
+    "multipart",
 ] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }

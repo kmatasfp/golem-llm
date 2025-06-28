@@ -1,0 +1,16 @@
+[package]
+name = "golem-stt"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+homepage = "https://golem.cloud"
+repository = "https://github.com/golemcloud/golem-llm"
+description = "WebAssembly components for working with STT APIs, with special support for Golem Cloud"
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+golem-rust = { workspace = true }
+wit-bindgen = { version = "0.40.0" }
