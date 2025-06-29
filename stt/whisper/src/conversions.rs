@@ -9,8 +9,7 @@ use golem_stt::golem::stt::transcription::{
 };
 
 use crate::client::{
-    AudioFormat, Error, TranscriptionConfig, TranscriptionResponse, TranscriptionsApi,
-    WhisperTranscription,
+    AudioFormat, Error, TranscriptionConfig, TranscriptionResponse, WhisperTranscription,
 };
 
 use serde_json::to_string;
@@ -40,7 +39,7 @@ impl TryFrom<WitTranscribeOptions> for TranscriptionConfig {
         let prompt = options.speech_context.map(|c| c.join(", "));
 
         if let Some(language_code) = &options.language {
-            if TranscriptionsApi::SUPPORTED_LANGUAGES
+            if crate::client::WHISPER_SUPPORTED_LANGUAGES
                 .iter()
                 .find(|lang| lang.code == language_code)
                 .is_none()

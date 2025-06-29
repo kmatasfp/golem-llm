@@ -892,7 +892,7 @@ dependencies = [
 [[package]]
 name = "reqwest"
 version = "0.12.15"
-source = "git+https://github.com/golemcloud/reqwest?rev=a2ed3d983e868976c3453814f981015a19727422#a2ed3d983e868976c3453814f981015a19727422"
+source = "git+https://github.com/golemcloud/reqwest?branch=update-may-2025#5a27461fdd49f7a4bdbe97326cc7e10fd776a090"
 dependencies = [
  "base64 0.22.1",
  "bytes",

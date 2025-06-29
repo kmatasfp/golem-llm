@@ -4,6 +4,7 @@ mod languages;
 
 use crate::client::{AudioConfig, TranscriptionConfig, TranscriptionRequest, TranscriptionsApi};
 
+use client::ReqwestHttpClient;
 use golem_stt::golem::stt::types::{
     AudioConfig as WitAudioConfig, SttError, TranscriptAlternative,
 };
@@ -26,10 +27,10 @@ struct Component;
 
 thread_local! {
     // Compile time: create empty container
-    static CLIENT_CACHE: RefCell<Option<Rc<TranscriptionsApi>>> = const { RefCell::new(None) };
+    static CLIENT_CACHE: RefCell<Option<Rc<TranscriptionsApi<ReqwestHttpClient>>>> = const { RefCell::new(None) };
 }
 
-fn get_client() -> Result<Rc<TranscriptionsApi>, String> {
+fn get_client() -> Result<Rc<TranscriptionsApi<ReqwestHttpClient>>, String> {
     CLIENT_CACHE.with(|cache| {
         let mut cache_ref = cache.borrow_mut();
 
@@ -40,7 +41,7 @@ fn get_client() -> Result<Rc<TranscriptionsApi>, String> {
 
                 let client = Rc::new({
                     let openai_api_key = api_key;
-                    TranscriptionsApi::new(openai_api_key)
+                    TranscriptionsApi::live(openai_api_key)
                 });
                 *cache_ref = Some(client.clone());
                 Ok(client)

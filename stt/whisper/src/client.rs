@@ -2,12 +2,72 @@ use std::rc::Rc;
 
 use derive_more::From;
 use log::trace;
-use reqwest::Client;
+use reqwest::{Client, IntoUrl, Method, Request, RequestBuilder, Response};
 use serde::{Deserialize, Serialize};
 
 use crate::languages::Language;
 
 const BASE_URL: &str = "https://api.openai.com";
+
+pub const WHISPER_SUPPORTED_LANGUAGES: [Language; 57] = [
+    Language::new("af", "Afrikaans", "Afrikaans"),
+    Language::new("ar", "Arabic", "العربية"),
+    Language::new("hy", "Armenian", "հայերեն"),
+    Language::new("az", "Azerbaijani", "azərbaycan dili"),
+    Language::new("be", "Belarusian", "беларуская мова"),
+    Language::new("bs", "Bosnian", "bosanski jezik"),
+    Language::new("bg", "Bulgarian", "български език"),
+    Language::new("ca", "Catalan", "català"),
+    Language::new("zh", "Chinese", "中文"),
+    Language::new("hr", "Croatian", "hrvatski jezik"),
+    Language::new("cs", "Czech", "čeština"),
+    Language::new("da", "Danish", "dansk"),
+    Language::new("nl", "Dutch", "Nederlands"),
+    Language::new("en", "English", "English"),
+    Language::new("et", "Estonian", "eesti keel"),
+    Language::new("fi", "Finnish", "suomi"),
+    Language::new("fr", "French", "français"),
+    Language::new("gl", "Galician", "galego"),
+    Language::new("de", "German", "Deutsch"),
+    Language::new("el", "Greek", "ελληνικά"),
+    Language::new("he", "Hebrew", "עברית"),
+    Language::new("hi", "Hindi", "हिन्दी"),
+    Language::new("hu", "Hungarian", "magyar"),
+    Language::new("is", "Icelandic", "íslenska"),
+    Language::new("id", "Indonesian", "Bahasa Indonesia"),
+    Language::new("it", "Italian", "italiano"),
+    Language::new("ja", "Japanese", "日本語"),
+    Language::new("kn", "Kannada", "ಕನ್ನಡ"),
+    Language::new("kk", "Kazakh", "қазақ тілі"),
+    Language::new("ko", "Korean", "한국어"),
+    Language::new("lv", "Latvian", "latviešu valoda"),
+    Language::new("lt", "Lithuanian", "lietuvių kalba"),
+    Language::new("mk", "Macedonian", "македонски јазик"),
+    Language::new("ms", "Malay", "Bahasa Melayu"),
+    Language::new("mr", "Marathi", "मराठी"),
+    Language::new("mi", "Maori", "te reo Māori"),
+    Language::new("ne", "Nepali", "नेपाली"),
+    Language::new("no", "Norwegian", "norsk"),
+    Language::new("fa", "Persian", "فارسی"),
+    Language::new("pl", "Polish", "polski"),
+    Language::new("pt", "Portuguese", "português"),
+    Language::new("ro", "Romanian", "română"),
+    Language::new("ru", "Russian", "русский язык"),
+    Language::new("sr", "Serbian", "српски језик"),
+    Language::new("sk", "Slovak", "slovenčina"),
+    Language::new("sl", "Slovenian", "slovenščina"),
+    Language::new("es", "Spanish", "español"),
+    Language::new("sw", "Swahili", "Kiswahili"),
+    Language::new("sv", "Swedish", "svenska"),
+    Language::new("tl", "Tagalog", "Tagalog"),
+    Language::new("ta", "Tamil", "தமிழ்"),
+    Language::new("th", "Thai", "ไทย"),
+    Language::new("tr", "Turkish", "Türkçe"),
+    Language::new("uk", "Ukrainian", "українська мова"),
+    Language::new("ur", "Urdu", "اردو"),
+    Language::new("vi", "Vietnamese", "Tiếng Việt"),
+    Language::new("cy", "Welsh", "Cymraeg"),
+];
 
 #[allow(unused)]
 #[derive(Debug, From)]
@@ -88,90 +148,55 @@ pub struct TranscriptionConfig {
     pub prompt: Option<String>,
 }
 
-/// The OpenAI API client for transcribing audio into the input language powered by their open source Whisper V2 model
-///
-/// https://platform.openai.com/docs/api-reference/audio/createTranscription
-pub struct TranscriptionsApi {
-    openai_api_token: Rc<str>,
-    openai_api_base_url: Rc<str>,
+pub trait HttpClient {
+    fn request<U: IntoUrl>(&self, method: Method, url: U) -> RequestBuilder;
+    fn execute(&self, request: Request) -> Result<Response, reqwest::Error>;
+}
+
+pub struct ReqwestHttpClient {
     client: Client,
 }
 
-#[allow(unused)]
-impl TranscriptionsApi {
-    pub const SUPPORTED_LANGUAGES: [Language; 57] = [
-        Language::new("af", "Afrikaans", "Afrikaans"),
-        Language::new("ar", "Arabic", "العربية"),
-        Language::new("hy", "Armenian", "հայերեն"),
-        Language::new("az", "Azerbaijani", "azərbaycan dili"),
-        Language::new("be", "Belarusian", "беларуская мова"),
-        Language::new("bs", "Bosnian", "bosanski jezik"),
-        Language::new("bg", "Bulgarian", "български език"),
-        Language::new("ca", "Catalan", "català"),
-        Language::new("zh", "Chinese", "中文"),
-        Language::new("hr", "Croatian", "hrvatski jezik"),
-        Language::new("cs", "Czech", "čeština"),
-        Language::new("da", "Danish", "dansk"),
-        Language::new("nl", "Dutch", "Nederlands"),
-        Language::new("en", "English", "English"),
-        Language::new("et", "Estonian", "eesti keel"),
-        Language::new("fi", "Finnish", "suomi"),
-        Language::new("fr", "French", "français"),
-        Language::new("gl", "Galician", "galego"),
-        Language::new("de", "German", "Deutsch"),
-        Language::new("el", "Greek", "ελληνικά"),
-        Language::new("he", "Hebrew", "עברית"),
-        Language::new("hi", "Hindi", "हिन्दी"),
-        Language::new("hu", "Hungarian", "magyar"),
-        Language::new("is", "Icelandic", "íslenska"),
-        Language::new("id", "Indonesian", "Bahasa Indonesia"),
-        Language::new("it", "Italian", "italiano"),
-        Language::new("ja", "Japanese", "日本語"),
-        Language::new("kn", "Kannada", "ಕನ್ನಡ"),
-        Language::new("kk", "Kazakh", "қазақ тілі"),
-        Language::new("ko", "Korean", "한국어"),
-        Language::new("lv", "Latvian", "latviešu valoda"),
-        Language::new("lt", "Lithuanian", "lietuvių kalba"),
-        Language::new("mk", "Macedonian", "македонски јазик"),
-        Language::new("ms", "Malay", "Bahasa Melayu"),
-        Language::new("mr", "Marathi", "मराठी"),
-        Language::new("mi", "Maori", "te reo Māori"),
-        Language::new("ne", "Nepali", "नेपाली"),
-        Language::new("no", "Norwegian", "norsk"),
-        Language::new("fa", "Persian", "فارسی"),
-        Language::new("pl", "Polish", "polski"),
-        Language::new("pt", "Portuguese", "português"),
-        Language::new("ro", "Romanian", "română"),
-        Language::new("ru", "Russian", "русский язык"),
-        Language::new("sr", "Serbian", "српски језик"),
-        Language::new("sk", "Slovak", "slovenčina"),
-        Language::new("sl", "Slovenian", "slovenščina"),
-        Language::new("es", "Spanish", "español"),
-        Language::new("sw", "Swahili", "Kiswahili"),
-        Language::new("sv", "Swedish", "svenska"),
-        Language::new("tl", "Tagalog", "Tagalog"),
-        Language::new("ta", "Tamil", "தமிழ்"),
-        Language::new("th", "Thai", "ไทย"),
-        Language::new("tr", "Turkish", "Türkçe"),
-        Language::new("uk", "Ukrainian", "українська мова"),
-        Language::new("ur", "Urdu", "اردو"),
-        Language::new("vi", "Vietnamese", "Tiếng Việt"),
-        Language::new("cy", "Welsh", "Cymraeg"),
-    ];
-
-    pub fn new(openai_api_key: String) -> Self {
+impl ReqwestHttpClient {
+    pub fn new() -> Self {
         let client = Client::builder()
             .build()
             .expect("Failed to initialize HTTP client");
+        Self { client }
+    }
+}
+
+impl HttpClient for ReqwestHttpClient {
+    fn execute(&self, request: Request) -> Result<Response, reqwest::Error> {
+        self.client.execute(request)
+    }
+
+    fn request<U: IntoUrl>(&self, method: Method, url: U) -> RequestBuilder {
+        self.client.request(method, url)
+    }
+}
+
+/// The OpenAI API client for transcribing audio into the input language powered by their open source Whisper V2 model
+///
+/// https://platform.openai.com/docs/api-reference/audio/createTranscription
+pub struct TranscriptionsApi<HC: HttpClient> {
+    openai_api_token: Rc<str>,
+    openai_api_base_url: Rc<str>,
+    http_client: HC,
+}
+
+#[allow(unused)]
+impl<HC: HttpClient> TranscriptionsApi<HC> {
+    pub fn new(openai_api_key: String, http_client: HC) -> Self {
         Self {
             openai_api_token: Rc::from(format!("Bearer {}", openai_api_key)),
             openai_api_base_url: Rc::from(BASE_URL),
-            client,
+            http_client,
         }
     }
 
     pub fn get_supported_languages(&self) -> &[Language] {
-        &Self::SUPPORTED_LANGUAGES
+        &WHISPER_SUPPORTED_LANGUAGES
     }
 
     pub fn transcribe_audio(
@@ -208,15 +233,17 @@ impl TranscriptionsApi {
             }
         }
 
-        let response = self
-            .client
-            .post(format!(
-                "{}/v1/audio/transcriptions",
-                self.openai_api_base_url
-            ))
+        let req = self
+            .http_client
+            .request(
+                Method::POST,
+                format!("{}/v1/audio/transcriptions", self.openai_api_base_url),
+            )
             .header("Authorization", &*self.openai_api_token)
             .multipart(form)
-            .send()?;
+            .build()?;
+
+        let response = self.http_client.execute(req)?;
 
         // match what official OpenAI SDK does https://github.com/openai/openai-python/blob/0673da62f2f2476a3e5791122e75ec0cbfd03442/src/openai/_client.py#L343
         match response.status() {
@@ -260,6 +287,12 @@ impl TranscriptionsApi {
                 body: response.json()?,
             }),
         }
+    }
+}
+
+impl TranscriptionsApi<ReqwestHttpClient> {
+    pub fn live(openai_api_key: String) -> Self {
+        Self::new(openai_api_key, ReqwestHttpClient::new())
     }
 }
 
@@ -350,4 +383,11 @@ pub struct ErrorBody {
     pub r#type: String,
     pub param: Option<String>,
     pub code: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_API_KEY: &str = "test-api-key";
 }
