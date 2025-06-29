@@ -21,6 +21,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 wit-bindgen-rt = { workspace = true }
 derive_more = { version = "2.0.1", features = ["from"] }
+bytes = "1.2"
+
+[dev-dependencies]
+multipart = "=0.18.0"
 
 [package.metadata.component]
 package = "golem:stt-whisper"
