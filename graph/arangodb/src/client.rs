@@ -1,4 +1,8 @@
 use base64::{engine::general_purpose, Engine as _};
+use golem_graph::error::mapping::map_http_status;
+use golem_graph::error::{
+    enhance_error_with_element_id, from_arangodb_error_code, from_reqwest_error,
+};
 use golem_graph::golem::graph::errors::GraphError;
 use golem_graph::golem::graph::schema::{
     ContainerInfo, ContainerType, EdgeTypeDefinition, IndexDefinition, IndexType,
@@ -56,9 +60,9 @@ impl ArangoDbApi {
                 .body(body_string);
         }
 
-        let response = request_builder.send().map_err(|e| {
-            GraphError::ConnectionFailed(e.to_string() + " - Failed to send request")
-        })?;
+        let response = request_builder
+            .send()
+            .map_err(|e| from_reqwest_error("Request failed", e))?;
 
         self.handle_response(response)
     }
@@ -96,17 +100,20 @@ impl ArangoDbApi {
                 .get("errorMessage")
                 .and_then(|v| v.as_str())
                 .unwrap_or("Unknown error");
-            Err(self.map_error(status_code, error_msg))
-        }
-    }
 
-    fn map_error(&self, status: u16, message: &str) -> GraphError {
-        match status {
-            401 => GraphError::AuthenticationFailed(message.to_string()),
-            403 => GraphError::AuthorizationFailed(message.to_string()),
-            404 => GraphError::InternalError(format!("Endpoint not found: {}", message)),
-            409 => GraphError::TransactionConflict,
-            _ => GraphError::InternalError(format!("ArangoDB error: {} - {}", status, message)),
+            let error_num = error_body.get("errorNum").and_then(|v| v.as_i64());
+
+            // Use centralized error mapping
+            let mut error = if let Some(code) = error_num {
+                from_arangodb_error_code(code, error_msg)
+            } else {
+                map_http_status(status_code, error_msg, &error_body)
+            };
+
+            // Post-process to extract element IDs when possible
+            error = enhance_error_with_element_id(error, &error_body);
+
+            Err(error)
         }
     }
 
@@ -191,7 +198,7 @@ impl ArangoDbApi {
             .header("x-arango-trx-id", transaction_id)
             .body(body_string)
             .send()
-            .map_err(|e| GraphError::ConnectionFailed(e.to_string()))?;
+            .map_err(|e| from_reqwest_error("Transaction query failed", e))?;
 
         self.handle_response(response)
     }

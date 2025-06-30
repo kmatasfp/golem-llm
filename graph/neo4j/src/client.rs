@@ -1,4 +1,6 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use golem_graph::error::from_reqwest_error;
+use golem_graph::error::mapping::map_http_status;
 use golem_graph::golem::graph::errors::GraphError;
 use reqwest::{Client, Response};
 use serde_json::Value;
@@ -45,7 +47,7 @@ impl Neo4jApi {
             .post(&url)
             .header("Authorization", &self.auth_header)
             .send()
-            .map_err(|e| GraphError::ConnectionFailed(e.to_string()))?;
+            .map_err(|e| from_reqwest_error("Neo4j begin transaction failed", e))?;
         Self::ensure_success_and_get_location(resp)
     }
 
@@ -62,7 +64,7 @@ impl Neo4jApi {
             .header("Content-Type", "application/json")
             .body(statements.to_string())
             .send()
-            .map_err(|e| GraphError::ConnectionFailed(e.to_string()))?;
+            .map_err(|e| from_reqwest_error("Neo4j execute in transaction failed", e))?;
         let json = Self::ensure_success_and_json(resp)?;
         println!("[Neo4jApi] Cypher response: {}", json);
         Ok(json)
@@ -75,7 +77,7 @@ impl Neo4jApi {
             .post(&commit_url)
             .header("Authorization", &self.auth_header)
             .send()
-            .map_err(|e| GraphError::ConnectionFailed(e.to_string()))?;
+            .map_err(|e| from_reqwest_error("Neo4j commit transaction failed", e))?;
         Self::ensure_success(resp).map(|_| ())
     }
 
@@ -85,7 +87,7 @@ impl Neo4jApi {
             .delete(tx_url)
             .header("Authorization", &self.auth_header)
             .send()
-            .map_err(|e| GraphError::ConnectionFailed(e.to_string()))?;
+            .map_err(|e| from_reqwest_error("Neo4j rollback transaction failed", e))?;
         Self::ensure_success(resp).map(|_| ())
     }
 
@@ -95,7 +97,7 @@ impl Neo4jApi {
             .get(tx_url)
             .header("Authorization", &self.auth_header)
             .send()
-            .map_err(|e| GraphError::ConnectionFailed(e.to_string()))?;
+            .map_err(|e| from_reqwest_error("Neo4j get transaction status failed", e))?;
 
         if resp.status().is_success() {
             Ok("running".to_string())
@@ -110,12 +112,19 @@ impl Neo4jApi {
         if response.status().is_success() {
             Ok(response)
         } else {
+            let status_code = response.status().as_u16();
             let text = response
                 .text()
-                .map_err(|e| GraphError::InternalError(e.to_string()))?;
-            let err: Value = serde_json::from_str(&text)
-                .map_err(|e| GraphError::InternalError(e.to_string()))?;
-            Err(GraphError::TransactionFailed(err.to_string()))
+                .map_err(|e| from_reqwest_error("Failed to read Neo4j response body", e))?;
+            let error_body: Value = serde_json::from_str(&text)
+                .unwrap_or_else(|_| serde_json::json!({"message": text}));
+
+            let error_msg = error_body
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown Neo4j error");
+
+            Err(map_http_status(status_code, error_msg, &error_body))
         }
     }
 
@@ -123,14 +132,21 @@ impl Neo4jApi {
         if response.status().is_success() {
             response
                 .json()
-                .map_err(|e| GraphError::InternalError(e.to_string()))
+                .map_err(|e| from_reqwest_error("Failed to parse Neo4j response JSON", e))
         } else {
+            let status_code = response.status().as_u16();
             let text = response
                 .text()
-                .map_err(|e| GraphError::InternalError(e.to_string()))?;
-            let err: Value = serde_json::from_str(&text)
-                .map_err(|e| GraphError::InternalError(e.to_string()))?;
-            Err(GraphError::TransactionFailed(err.to_string()))
+                .map_err(|e| from_reqwest_error("Failed to read Neo4j response body", e))?;
+            let error_body: Value = serde_json::from_str(&text)
+                .unwrap_or_else(|_| serde_json::json!({"message": text}));
+
+            let error_msg = error_body
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown Neo4j error");
+
+            Err(map_http_status(status_code, error_msg, &error_body))
         }
     }
 
@@ -143,12 +159,19 @@ impl Neo4jApi {
                 .map(|s| s.to_string())
                 .ok_or_else(|| GraphError::InternalError("Missing Location header".into()))
         } else {
+            let status_code = response.status().as_u16();
             let text = response
                 .text()
-                .map_err(|e| GraphError::InternalError(e.to_string()))?;
-            let err: Value = serde_json::from_str(&text)
-                .map_err(|e| GraphError::InternalError(e.to_string()))?;
-            Err(GraphError::TransactionFailed(err.to_string()))
+                .map_err(|e| from_reqwest_error("Failed to read Neo4j response body", e))?;
+            let error_body: Value = serde_json::from_str(&text)
+                .unwrap_or_else(|_| serde_json::json!({"message": text}));
+
+            let error_msg = error_body
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown Neo4j error");
+
+            Err(map_http_status(status_code, error_msg, &error_body))
         }
     }
 }

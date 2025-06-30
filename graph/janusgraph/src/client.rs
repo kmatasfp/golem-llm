@@ -1,3 +1,5 @@
+use golem_graph::error::from_reqwest_error;
+use golem_graph::error::mapping::map_http_status;
 use golem_graph::golem::graph::errors::GraphError;
 use reqwest::{Client, Response};
 use serde_json::{json, Value};
@@ -92,7 +94,7 @@ impl JanusGraphApi {
             .send()
             .map_err(|e| {
                 eprintln!("[JanusGraphApi] ERROR - Request failed: {}", e);
-                GraphError::ConnectionFailed(format!("reqwest error: {}", e))
+                from_reqwest_error("JanusGraph request failed", e)
             })?;
 
         eprintln!(
@@ -120,7 +122,7 @@ impl JanusGraphApi {
             .header("Content-Length", body_string.len().to_string())
             .body(body_string)
             .send()
-            .map_err(|e| GraphError::ConnectionFailed(e.to_string()))?;
+            .map_err(|e| from_reqwest_error("JanusGraph read request failed", e))?;
         Self::handle_response(response)
     }
 
@@ -142,7 +144,7 @@ impl JanusGraphApi {
             .header("Content-Length", body_string.len().to_string())
             .body(body_string)
             .send()
-            .map_err(|e| GraphError::ConnectionFailed(e.to_string()))?;
+            .map_err(|e| from_reqwest_error("JanusGraph close session failed", e))?;
         Self::handle_response(response).map(|_| ())
     }
 
@@ -168,10 +170,9 @@ impl JanusGraphApi {
                 .get("message")
                 .and_then(|v| v.as_str())
                 .unwrap_or("Unknown error");
-            Err(GraphError::InvalidQuery(format!(
-                "{}: {}",
-                status_code, error_msg
-            )))
+
+            // Use centralized error mapping
+            Err(map_http_status(status_code, error_msg, &error_body))
         }
     }
 }
