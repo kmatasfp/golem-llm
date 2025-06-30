@@ -1,3 +1,7 @@
+pub mod error;
+pub mod http_client;
+pub mod languages;
+
 wit_bindgen::generate!({
     path: "../wit",
     world: "stt-library",

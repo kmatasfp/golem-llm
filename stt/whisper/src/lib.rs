@@ -1,13 +1,12 @@
 mod client;
 mod conversions;
-mod languages;
 
 use crate::client::{AudioConfig, TranscriptionConfig, TranscriptionRequest, TranscriptionsApi};
 
-use client::ReqwestHttpClient;
 use golem_stt::golem::stt::types::{
     AudioConfig as WitAudioConfig, SttError, TranscriptAlternative,
 };
+use golem_stt::http_client::ReqwestHttpClient;
 
 use golem_stt::golem::stt::transcription::{
     Guest as TranscriptionGuest, GuestTranscriptionStream,

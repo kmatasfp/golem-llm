@@ -9,10 +9,8 @@ use golem_stt::golem::stt::transcription::{
 };
 
 use crate::client::{
-    AudioFormat, Error, TranscriptionConfig, TranscriptionResponse, WhisperTranscription,
+    AudioFormat, TranscriptionConfig, TranscriptionResponse, WhisperTranscription,
 };
-
-use serde_json::to_string;
 
 impl TryFrom<WitAudioFormat> for AudioFormat {
     type Error = SttError;
@@ -53,32 +51,6 @@ impl TryFrom<WitTranscribeOptions> for TranscriptionConfig {
             language: options.language,
             prompt,
         })
-    }
-}
-
-impl From<Error> for SttError {
-    fn from(error: Error) -> Self {
-        match error {
-            Error::Reqwest(error) => SttError::NetworkError(format!("Failed to call API: {error}")),
-            Error::SerdeJson(error) => {
-                SttError::InternalError(format!("API returned unexpected JSON: {error}"))
-            }
-            Error::APIBadRequest { body } => SttError::InvalidAudio(to_string(&body).unwrap()),
-            Error::APIUnauthorized { body } => SttError::AccessDenied(to_string(&body).unwrap()),
-            Error::APIForbidden { body } => SttError::Unauthorized(to_string(&body).unwrap()),
-            Error::APINotFound { body } => {
-                SttError::UnsupportedOperation(to_string(&body).unwrap())
-            }
-            Error::APIConflict { body } => SttError::ServiceUnavailable(to_string(&body).unwrap()),
-            Error::APIUnprocessableEntity { body } => {
-                SttError::ServiceUnavailable(to_string(&body).unwrap())
-            }
-            Error::APIRateLimit { body } => SttError::RateLimited(to_string(&body).unwrap()),
-            Error::APIInternalServerError { body } => {
-                SttError::ServiceUnavailable(to_string(&body).unwrap())
-            }
-            Error::APIUnknown { body } => SttError::InternalError(to_string(&body).unwrap()),
-        }
     }
 }
 

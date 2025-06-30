@@ -1,12 +1,12 @@
 use std::rc::Rc;
 
-use bytes::Bytes;
-use derive_more::From;
+use golem_stt::http_client::{HttpClient, ReqwestHttpClient};
 use log::trace;
-use reqwest::{Client, IntoUrl, Method, Request, RequestBuilder};
+use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
-use crate::languages::Language;
+use golem_stt::error::Error;
+use golem_stt::languages::Language;
 
 const BASE_URL: &str = "https://api.openai.com";
 
@@ -70,51 +70,6 @@ pub const WHISPER_SUPPORTED_LANGUAGES: [Language; 57] = [
     Language::new("cy", "Welsh", "Cymraeg"),
 ];
 
-#[allow(unused)]
-#[derive(Debug, From)]
-pub enum Error {
-    #[from]
-    Reqwest(reqwest::Error),
-    #[from]
-    SerdeJson(serde_json::Error),
-    APIBadRequest {
-        body: ApiError,
-    },
-    APIUnauthorized {
-        body: ApiError,
-    },
-    APIForbidden {
-        body: ApiError,
-    },
-    APINotFound {
-        body: ApiError,
-    },
-    APIConflict {
-        body: ApiError,
-    },
-    APIUnprocessableEntity {
-        body: ApiError,
-    },
-    APIRateLimit {
-        body: ApiError,
-    },
-    #[allow(clippy::enum_variant_names)]
-    APIInternalServerError {
-        body: ApiError,
-    },
-    APIUnknown {
-        body: ApiError,
-    },
-}
-
-impl core::fmt::Display for Error {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(fmt, "{self:?}")
-    }
-}
-
-impl std::error::Error for Error {}
-
 #[allow(non_camel_case_types)]
 #[allow(unused)]
 #[derive(Debug, Clone)]
@@ -147,65 +102,6 @@ pub struct TranscriptionConfig {
     pub language: Option<String>,
     pub enable_timestamps: bool,
     pub prompt: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct HttpResponse {
-    pub status: u16,
-    pub body: Bytes,
-}
-
-#[allow(unused)]
-impl HttpResponse {
-    pub fn new(status: u16, body: impl Into<Bytes>) -> Self {
-        Self {
-            status,
-            body: body.into(),
-        }
-    }
-
-    pub fn status(&self) -> u16 {
-        self.status
-    }
-
-    pub fn bytes(self) -> Bytes {
-        self.body
-    }
-
-    pub fn json<T: serde::de::DeserializeOwned>(self) -> Result<T, serde_json::Error> {
-        serde_json::from_slice(&self.body)
-    }
-}
-
-pub trait HttpClient {
-    fn request<U: IntoUrl>(&self, method: Method, url: U) -> RequestBuilder;
-    fn execute(&self, request: Request) -> Result<HttpResponse, Error>;
-}
-
-pub struct ReqwestHttpClient {
-    client: Client,
-}
-
-impl ReqwestHttpClient {
-    pub fn new() -> Self {
-        let client = Client::builder()
-            .build()
-            .expect("Failed to initialize HTTP client");
-        Self { client }
-    }
-}
-
-impl HttpClient for ReqwestHttpClient {
-    fn execute(&self, request: Request) -> Result<HttpResponse, Error> {
-        let response = self.client.execute(request)?;
-        let status = response.status().as_u16();
-        let body = response.bytes()?;
-        Ok(HttpResponse { status, body })
-    }
-
-    fn request<U: IntoUrl>(&self, method: Method, url: U) -> RequestBuilder {
-        self.client.request(method, url)
-    }
 }
 
 /// The OpenAI API client for transcribing audio into the input language powered by their open source Whisper V2 model
@@ -288,31 +184,31 @@ impl<HC: HttpClient> TranscriptionsApi<HC> {
                 })
             }
             400 => Err(Error::APIBadRequest {
-                body: response.json()?,
+                provider_error: response.text()?,
             }),
             401 => Err(Error::APIUnauthorized {
-                body: response.json()?,
+                provider_error: response.text()?,
             }),
             403 => Err(Error::APIForbidden {
-                body: response.json()?,
+                provider_error: response.text()?,
             }),
             404 => Err(Error::APINotFound {
-                body: response.json()?,
+                provider_error: response.text()?,
             }),
             409 => Err(Error::APIConflict {
-                body: response.json()?,
+                provider_error: response.text()?,
             }),
             422 => Err(Error::APIUnprocessableEntity {
-                body: response.json()?,
+                provider_error: response.text()?,
             }),
             429 => Err(Error::APIRateLimit {
-                body: response.json()?,
+                provider_error: response.text()?,
             }),
             status if status >= 500 => Err(Error::APIInternalServerError {
-                body: response.json()?,
+                provider_error: response.text()?,
             }),
             _ => Err(Error::APIUnknown {
-                body: response.json()?,
+                provider_error: response.text()?,
             }),
         }
     }
@@ -400,12 +296,6 @@ pub struct Usage {
 
 #[allow(unused)]
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct ApiError {
-    pub error: ErrorBody,
-}
-
-#[allow(unused)]
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct ErrorBody {
     pub message: String,
     pub r#type: String,
@@ -415,10 +305,11 @@ pub struct ErrorBody {
 
 #[cfg(test)]
 mod tests {
+    use golem_stt::http_client::HttpResponse;
+    use reqwest::{Client, IntoUrl, Method, Request, RequestBuilder};
     use std::cell::Ref;
     use std::collections::HashMap;
     use std::io::{Cursor, Read};
-    use std::rc::Rc;
 
     use multipart::server::Multipart;
 
@@ -476,14 +367,7 @@ mod tests {
                 .borrow_mut()
                 .pop_front()
                 .unwrap_or(Err(Error::APIUnknown {
-                    body: ApiError {
-                        error: ErrorBody {
-                            message: "unexpected error".to_string(),
-                            r#type: "unknown".to_string(),
-                            param: None,
-                            code: None,
-                        },
-                    },
+                    provider_error: "unexpected error".to_string(),
                 }))
         }
 
@@ -784,8 +668,6 @@ mod tests {
         while let Ok(Some(mut field)) = multipart.read_entry() {
             let field_name = field.headers.name.clone();
 
-            println!("Field name: {}", field_name);
-
             let mut data = Vec::new();
             field.data.read_to_end(&mut data).unwrap();
 
@@ -920,12 +802,10 @@ mod tests {
         let result = api.transcribe_audio(request);
 
         assert!(result.is_err());
+
         match result.unwrap_err() {
-            Error::APIBadRequest { body } => {
-                assert_eq!(body.error.message, "[{'type': 'enum', 'loc': ('body', 'timestamp_granularities[]', 0), 'msg': \"Input should be 'segment' or 'word'\", 'input': 'word,segments', 'ctx': {'expected': \"'segment' or 'word'\"}}]");
-                assert_eq!(body.error.r#type, "invalid_request_error");
-                assert_eq!(body.error.param, None);
-                assert_eq!(body.error.code, None);
+            Error::APIBadRequest { provider_error } => {
+                assert_eq!(provider_error, error_response);
             }
             _ => panic!("Expected APIBadRequest error"),
         }
@@ -963,11 +843,8 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::APIUnauthorized { body } => {
-                assert_eq!(body.error.message, "Incorrect API key provided");
-                assert_eq!(body.error.r#type, "invalid_request_error");
-                assert_eq!(body.error.param, None);
-                assert_eq!(body.error.code, Some("invalid_api_key".to_string()));
+            Error::APIUnauthorized { provider_error } => {
+                assert_eq!(provider_error, error_response);
             }
             _ => panic!("Expected APIUnauthorized error"),
         }
@@ -1005,14 +882,8 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::APIForbidden { body } => {
-                assert_eq!(
-                    body.error.message,
-                    "Your account does not have access to this resource"
-                );
-                assert_eq!(body.error.r#type, "insufficient_quota");
-                assert_eq!(body.error.param, None);
-                assert_eq!(body.error.code, Some("insufficient_quota".to_string()));
+            Error::APIForbidden { provider_error } => {
+                assert_eq!(provider_error, error_response);
             }
             _ => panic!("Expected APIForbidden error"),
         }
@@ -1050,11 +921,8 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::APINotFound { body } => {
-                assert_eq!(body.error.message, "The model 'xxxxxxx-2' does not exist");
-                assert_eq!(body.error.r#type, "invalid_request_error");
-                assert_eq!(body.error.param, Some("model".to_string()));
-                assert_eq!(body.error.code, None);
+            Error::APINotFound { provider_error } => {
+                assert_eq!(provider_error, error_response);
             }
             _ => panic!("Expected APINotFound error"),
         }
@@ -1092,14 +960,8 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::APIUnprocessableEntity { body } => {
-                assert_eq!(
-                    body.error.message,
-                    "The audio file is too large. Maximum size is 25MB."
-                );
-                assert_eq!(body.error.r#type, "invalid_request_error");
-                assert_eq!(body.error.param, Some("file".to_string()));
-                assert_eq!(body.error.code, Some("file_too_large".to_string()));
+            Error::APIUnprocessableEntity { provider_error } => {
+                assert_eq!(provider_error, error_response);
             }
             _ => panic!("Expected APIUnprocessableEntity error"),
         }
@@ -1137,14 +999,8 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::APIRateLimit { body } => {
-                assert_eq!(
-                    body.error.message,
-                    "Rate limit exceeded. Please try again later."
-                );
-                assert_eq!(body.error.r#type, "requests");
-                assert_eq!(body.error.param, None);
-                assert_eq!(body.error.code, Some("rate_limit_exceeded".to_string()));
+            Error::APIRateLimit { provider_error } => {
+                assert_eq!(provider_error, error_response);
             }
             _ => panic!("Expected APIRateLimit error"),
         }
@@ -1182,11 +1038,8 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::APIInternalServerError { body } => {
-                assert_eq!(body.error.message, "The server encountered an internal error and was unable to complete your request.");
-                assert_eq!(body.error.r#type, "server_error");
-                assert_eq!(body.error.param, None);
-                assert_eq!(body.error.code, None);
+            Error::APIInternalServerError { provider_error } => {
+                assert_eq!(provider_error, error_response);
             }
             _ => panic!("Expected APIInternalServerError error"),
         }
@@ -1224,11 +1077,8 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::APIUnknown { body } => {
-                assert_eq!(body.error.message, "Unknown error occurred");
-                assert_eq!(body.error.r#type, "unknown_error");
-                assert_eq!(body.error.param, None);
-                assert_eq!(body.error.code, Some("unknown".to_string()));
+            Error::APIUnknown { provider_error } => {
+                assert_eq!(provider_error, error_response);
             }
             _ => panic!("Expected APIUnknown error"),
         }

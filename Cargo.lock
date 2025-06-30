@@ -572,8 +572,29 @@ dependencies = [
 name = "golem-stt"
 version = "0.0.0"
 dependencies = [
+ "bytes",
+ "derive_more",
  "golem-rust",
+ "reqwest",
+ "serde",
+ "serde_json",
  "wit-bindgen 0.40.0",
+]
+
+[[package]]
+name = "golem-stt-deepgram"
+version = "0.0.0"
+dependencies = [
+ "bytes",
+ "derive_more",
+ "golem-rust",
+ "golem-stt",
+ "log 0.4.27",
+ "multipart",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "wit-bindgen-rt 0.40.0",
 ]
 
 [[package]]

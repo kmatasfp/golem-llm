@@ -4,16 +4,19 @@ default_to_workspace = false
 skip_core_tasks = true
 
 [tasks.build]
-run_task = { name = ["build-whisper"] }
+run_task = { name = ["build-whisper", "build-deepgram"] }
 
 [tasks.build-portable]
-run_task = { name = ["build-whisper-portable"] }
+run_task = { name = ["build-whisper-portable", "build-deepgram-portable"] }
 
 [tasks.release-build]
-run_task = { name = ["release-build-whisper"] }
+run_task = { name = ["release-build-whisper", "release-build-deepgram"] }
 
 [tasks.release-build-portable]
-run_task = { name = ["release-build-whisper-portable"] }
+run_task = { name = [
+    "release-build-whisper-portable",
+    "release-build-deepgram-portable",
+] }
 
 [tasks.build-whisper]
 install_crate = { crate_name = "cargo-component", version = "0.20.0" }
@@ -25,6 +28,17 @@ args = ["build", "-p", "golem-stt-whisper"]
 install_crate = { crate_name = "cargo-component", version = "0.20.0" }
 command = "cargo-component"
 args = ["build", "-p", "golem-stt-whisper", "--no-default-features"]
+
+
+[tasks.build-deepgram]
+install_crate = { crate_name = "cargo-component", version = "0.20.0" }
+command = "cargo-component"
+args = ["build", "-p", "golem-stt-deepgram"]
+
+[tasks.build-deepgram-portable]
+install_crate = { crate_name = "cargo-component", version = "0.20.0" }
+command = "cargo-component"
+args = ["build", "-p", "golem-stt-deepgram", "--no-default-features"]
 
 [tasks.release-build-whisper]
 install_crate = { crate_name = "cargo-component", version = "0.20.0" }
@@ -42,6 +56,22 @@ args = [
     "--no-default-features",
 ]
 
+[tasks.release-build-deepgram]
+install_crate = { crate_name = "cargo-component", version = "0.20.0" }
+command = "cargo-component"
+args = ["build", "-p", "golem-stt-deepgram", "--release"]
+
+[tasks.release-build-deepgram-portable]
+install_crate = { crate_name = "cargo-component", version = "0.20.0" }
+command = "cargo-component"
+args = [
+    "build",
+    "-p",
+    "golem-stt-deepgram",
+    "--release",
+    "--no-default-features",
+]
+
 [tasks.wit-update]
 install_crate = { crate_name = "wit-deps-cli" }
 command = "wit-deps"
@@ -52,7 +82,7 @@ dependencies = ["wit-update"]
 
 script_runner = "@duckscript"
 script = """
-modules = array stt whisper
+modules = array stt whisper deepgram
 
 for module in ${modules}
     rm -r ${module}/wit/deps

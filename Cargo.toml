@@ -10,6 +10,7 @@ members = [
     "llm/openrouter",
     "stt/stt",
     "stt/whisper",
+    "stt/deepgram",
 ]
 
 [profile.release]
