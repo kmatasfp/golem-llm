@@ -24,6 +24,9 @@ pub enum Error {
     APIForbidden {
         provider_error: String,
     },
+    APIAccessDenied {
+        provider_error: String,
+    },
     APINotFound {
         provider_error: String,
     },
@@ -69,6 +72,7 @@ impl From<Error> for SttError {
             Error::APIBadRequest { provider_error } => SttError::InvalidAudio(provider_error),
             Error::APIUnauthorized { provider_error } => SttError::AccessDenied(provider_error),
             Error::APIForbidden { provider_error } => SttError::Unauthorized(provider_error),
+            Error::APIAccessDenied { provider_error } => SttError::AccessDenied(provider_error),
             Error::APINotFound { provider_error } => SttError::UnsupportedOperation(provider_error),
             Error::APIConflict { provider_error } => SttError::ServiceUnavailable(provider_error),
             Error::APIUnprocessableEntity { provider_error } => {
