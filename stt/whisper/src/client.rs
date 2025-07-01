@@ -307,8 +307,8 @@ pub struct ErrorBody {
 mod tests {
     use golem_stt::http_client::HttpResponse;
     use reqwest::{Client, IntoUrl, Method, Request, RequestBuilder};
-    use std::cell::Ref;
-    use std::collections::HashMap;
+    use std::cell::{Ref, RefCell};
+    use std::collections::{HashMap, VecDeque};
     use std::io::{Cursor, Read};
 
     use multipart::server::Multipart;
@@ -318,16 +318,16 @@ mod tests {
     const TEST_API_KEY: &str = "test-api-key";
 
     struct MockHttpClient {
-        pub responses: std::cell::RefCell<std::collections::VecDeque<Result<HttpResponse, Error>>>,
-        pub captured_requests: std::cell::RefCell<Vec<reqwest::Request>>,
+        pub responses: RefCell<VecDeque<Result<HttpResponse, Error>>>,
+        pub captured_requests: RefCell<Vec<reqwest::Request>>,
     }
 
     #[allow(unused)]
     impl MockHttpClient {
         pub fn new() -> Self {
             Self {
-                responses: std::cell::RefCell::new(std::collections::VecDeque::new()),
-                captured_requests: std::cell::RefCell::new(Vec::new()),
+                responses: RefCell::new(VecDeque::new()),
+                captured_requests: RefCell::new(Vec::new()),
             }
         }
 
@@ -435,17 +435,15 @@ mod tests {
         let captured_request = mock_client.last_captured_request().unwrap();
 
         assert_eq!(captured_request.method(), &Method::POST);
-        assert!(captured_request
-            .url()
-            .path()
-            .contains("/v1/audio/transcriptions"));
 
-        assert!(captured_request
+        assert_eq!(captured_request.url().path(), "/v1/audio/transcriptions");
+
+        let auth_header = captured_request
             .headers()
-            .iter()
-            .find(|(name, value)| *name == "authorization"
-                && value.to_str().unwrap() == format!("Bearer {}", TEST_API_KEY))
-            .is_some());
+            .get("Authorization")
+            .and_then(|h| h.to_str().ok());
+
+        assert_eq!(auth_header, Some("Bearer test-api-key"));
 
         assert_eq!(mock_client.captured_request_count(), 1);
     }
@@ -773,7 +771,7 @@ mod tests {
 
     #[test]
     fn test_transcribe_audio_error_bad_request() {
-        let error_response = r#"
+        let error_body = r#"
                 {
                     "error": {
                         "message": "[{'type': 'enum', 'loc': ('body', 'timestamp_granularities[]', 0), 'msg': \"Input should be 'segment' or 'word'\", 'input': 'word,segments', 'ctx': {'expected': \"'segment' or 'word'\"}}]",
@@ -785,7 +783,7 @@ mod tests {
             "#;
 
         let mock_client = MockHttpClient::new();
-        mock_client.expect_response(HttpResponse::new(400, error_response));
+        mock_client.expect_response(HttpResponse::new(400, error_body));
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
@@ -805,7 +803,7 @@ mod tests {
 
         match result.unwrap_err() {
             Error::APIBadRequest { provider_error } => {
-                assert_eq!(provider_error, error_response);
+                assert_eq!(provider_error, error_body);
             }
             _ => panic!("Expected APIBadRequest error"),
         }
@@ -813,7 +811,7 @@ mod tests {
 
     #[test]
     fn test_transcribe_audio_error_unauthorized() {
-        let error_response = r#"
+        let error_body = r#"
                 {
                     "error": {
                         "message": "Incorrect API key provided",
@@ -825,7 +823,7 @@ mod tests {
             "#;
 
         let mock_client = MockHttpClient::new();
-        mock_client.expect_response(HttpResponse::new(401, error_response));
+        mock_client.expect_response(HttpResponse::new(401, error_body));
 
         let api = TranscriptionsApi::new("invalid_key".to_string(), mock_client);
 
@@ -844,7 +842,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::APIUnauthorized { provider_error } => {
-                assert_eq!(provider_error, error_response);
+                assert_eq!(provider_error, error_body);
             }
             _ => panic!("Expected APIUnauthorized error"),
         }
@@ -852,7 +850,7 @@ mod tests {
 
     #[test]
     fn test_transcribe_audio_error_forbidden() {
-        let error_response = r#"
+        let error_body = r#"
                 {
                     "error": {
                         "message": "Your account does not have access to this resource",
@@ -864,7 +862,7 @@ mod tests {
             "#;
 
         let mock_client = MockHttpClient::new();
-        mock_client.expect_response(HttpResponse::new(403, error_response));
+        mock_client.expect_response(HttpResponse::new(403, error_body));
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
@@ -883,7 +881,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::APIForbidden { provider_error } => {
-                assert_eq!(provider_error, error_response);
+                assert_eq!(provider_error, error_body);
             }
             _ => panic!("Expected APIForbidden error"),
         }
@@ -891,7 +889,7 @@ mod tests {
 
     #[test]
     fn test_transcribe_audio_error_not_found() {
-        let error_response = r#"
+        let error_body = r#"
                 {
                     "error": {
                         "message": "The model 'xxxxxxx-2' does not exist",
@@ -903,7 +901,7 @@ mod tests {
             "#;
 
         let mock_client = MockHttpClient::new();
-        mock_client.expect_response(HttpResponse::new(404, error_response));
+        mock_client.expect_response(HttpResponse::new(404, error_body));
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
@@ -922,7 +920,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::APINotFound { provider_error } => {
-                assert_eq!(provider_error, error_response);
+                assert_eq!(provider_error, error_body);
             }
             _ => panic!("Expected APINotFound error"),
         }
@@ -930,7 +928,7 @@ mod tests {
 
     #[test]
     fn test_transcribe_audio_error_unprocessable_entity() {
-        let error_response = r#"
+        let error_body = r#"
                 {
                     "error": {
                         "message": "The audio file is too large. Maximum size is 25MB.",
@@ -942,7 +940,7 @@ mod tests {
             "#;
 
         let mock_client = MockHttpClient::new();
-        mock_client.expect_response(HttpResponse::new(422, error_response));
+        mock_client.expect_response(HttpResponse::new(422, error_body));
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
@@ -961,7 +959,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::APIUnprocessableEntity { provider_error } => {
-                assert_eq!(provider_error, error_response);
+                assert_eq!(provider_error, error_body);
             }
             _ => panic!("Expected APIUnprocessableEntity error"),
         }
@@ -969,7 +967,7 @@ mod tests {
 
     #[test]
     fn test_transcribe_audio_error_rate_limit() {
-        let error_response = r#"
+        let error_body = r#"
                 {
                     "error": {
                         "message": "Rate limit exceeded. Please try again later.",
@@ -981,7 +979,7 @@ mod tests {
             "#;
 
         let mock_client = MockHttpClient::new();
-        mock_client.expect_response(HttpResponse::new(429, error_response));
+        mock_client.expect_response(HttpResponse::new(429, error_body));
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
@@ -1000,7 +998,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::APIRateLimit { provider_error } => {
-                assert_eq!(provider_error, error_response);
+                assert_eq!(provider_error, error_body);
             }
             _ => panic!("Expected APIRateLimit error"),
         }
@@ -1008,7 +1006,7 @@ mod tests {
 
     #[test]
     fn test_transcribe_audio_error_internal_server_error() {
-        let error_response = r#"
+        let error_body = r#"
                 {
                     "error": {
                         "message": "The server encountered an internal error and was unable to complete your request.",
@@ -1020,7 +1018,7 @@ mod tests {
             "#;
 
         let mock_client = MockHttpClient::new();
-        mock_client.expect_response(HttpResponse::new(500, error_response));
+        mock_client.expect_response(HttpResponse::new(500, error_body));
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
@@ -1039,7 +1037,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::APIInternalServerError { provider_error } => {
-                assert_eq!(provider_error, error_response);
+                assert_eq!(provider_error, error_body);
             }
             _ => panic!("Expected APIInternalServerError error"),
         }
@@ -1047,7 +1045,7 @@ mod tests {
 
     #[test]
     fn test_transcribe_audio_error_unknown_status() {
-        let error_response = r#"
+        let error_body = r#"
                 {
                     "error": {
                         "message": "Unknown error occurred",
@@ -1059,7 +1057,7 @@ mod tests {
             "#;
 
         let mock_client = MockHttpClient::new();
-        mock_client.expect_response(HttpResponse::new(418, error_response));
+        mock_client.expect_response(HttpResponse::new(418, error_body));
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
@@ -1078,7 +1076,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::APIUnknown { provider_error } => {
-                assert_eq!(provider_error, error_response);
+                assert_eq!(provider_error, error_body);
             }
             _ => panic!("Expected APIUnknown error"),
         }
