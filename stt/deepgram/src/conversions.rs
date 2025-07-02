@@ -49,11 +49,7 @@ impl TryFrom<WitTranscribeOptions> for TranscriptionConfig {
         }
 
         if let Some(language_code) = &options.language {
-            if crate::client::DEEPGRAM_SUPPORTED_LANGUAGES
-                .iter()
-                .find(|lang| lang.code == language_code)
-                .is_none()
-            {
+            if crate::client::is_supported_language(language_code) {
                 return Err(SttError::UnsupportedLanguage(language_code.to_owned()));
             }
         }

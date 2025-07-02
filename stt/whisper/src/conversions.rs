@@ -37,11 +37,7 @@ impl TryFrom<WitTranscribeOptions> for TranscriptionConfig {
         let prompt = options.speech_context.map(|c| c.join(", "));
 
         if let Some(language_code) = &options.language {
-            if crate::client::WHISPER_SUPPORTED_LANGUAGES
-                .iter()
-                .find(|lang| lang.code == language_code)
-                .is_none()
-            {
+            if crate::client::is_supported_language(language_code) {
                 return Err(SttError::UnsupportedLanguage(language_code.to_owned()));
             }
         }

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 const BASE_URL: &str = "https://api.deepgram.com";
 
-pub const DEEPGRAM_SUPPORTED_LANGUAGES: [Language; 56] = [
+const DEEPGRAM_SUPPORTED_LANGUAGES: [Language; 56] = [
     Language::new("multi", "Multilingual", "Multi"),
     Language::new("bg", "Bulgarian", "български"),
     Language::new("ca", "Catalan", "català"),
@@ -81,6 +81,12 @@ pub const DEEPGRAM_SUPPORTED_LANGUAGES: [Language; 56] = [
     Language::new("uk", "Ukrainian", "українська"),
     Language::new("vi", "Vietnamese", "Tiếng Việt"),
 ];
+
+pub fn is_supported_language(language_code: &str) -> bool {
+    DEEPGRAM_SUPPORTED_LANGUAGES
+        .iter()
+        .any(|lang| lang.code == language_code)
+}
 
 #[allow(non_camel_case_types)]
 #[allow(unused)]

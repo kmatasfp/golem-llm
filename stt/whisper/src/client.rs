@@ -10,7 +10,7 @@ use golem_stt::languages::Language;
 
 const BASE_URL: &str = "https://api.openai.com";
 
-pub const WHISPER_SUPPORTED_LANGUAGES: [Language; 57] = [
+const WHISPER_SUPPORTED_LANGUAGES: [Language; 57] = [
     Language::new("af", "Afrikaans", "Afrikaans"),
     Language::new("ar", "Arabic", "العربية"),
     Language::new("hy", "Armenian", "հայերեն"),
@@ -69,6 +69,12 @@ pub const WHISPER_SUPPORTED_LANGUAGES: [Language; 57] = [
     Language::new("vi", "Vietnamese", "Tiếng Việt"),
     Language::new("cy", "Welsh", "Cymraeg"),
 ];
+
+pub fn is_supported_language(language_code: &str) -> bool {
+    WHISPER_SUPPORTED_LANGUAGES
+        .iter()
+        .any(|lang| lang.code == language_code)
+}
 
 #[allow(non_camel_case_types)]
 #[allow(unused)]
