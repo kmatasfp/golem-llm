@@ -1,11 +1,86 @@
 use std::{collections::HashMap, rc::Rc};
 
-use golem_stt::{error::Error, http_client::HttpClient};
+use golem_stt::{
+    error::Error,
+    http_client::{HttpClient, ReqwestHttpClient},
+    languages::Language,
+};
 use log::trace;
 use reqwest::Method;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 const BASE_URL: &str = "https://api.deepgram.com";
+
+pub const DEEPGRAM_SUPPORTED_LANGUAGES: [Language; 56] = [
+    Language::new("multi", "Multilingual", "Multi"),
+    Language::new("bg", "Bulgarian", "български"),
+    Language::new("ca", "Catalan", "català"),
+    Language::new("zh", "Chinese (Simplified)", "中文（简体）"),
+    Language::new("zh-CN", "Chinese (China)", "中文（中国）"),
+    Language::new("zh-Hans", "Chinese (Simplified Han)", "中文（简体字）"),
+    Language::new("zh-TW", "Chinese (Taiwan)", "中文（台灣）"),
+    Language::new("zh-Hant", "Chinese (Traditional Han)", "中文（繁體字）"),
+    Language::new("zh-HK", "Chinese (Hong Kong)", "中文（香港）"),
+    Language::new("cs", "Czech", "čeština"),
+    Language::new("da", "Danish", "dansk"),
+    Language::new("da-DK", "Danish (Denmark)", "dansk (Danmark)"),
+    Language::new("nl", "Dutch", "Nederlands"),
+    Language::new("nl-BE", "Flemish", "Vlaams"),
+    Language::new("en", "English", "English"),
+    Language::new(
+        "en-US",
+        "English (United States)",
+        "English (United States)",
+    ),
+    Language::new("en-AU", "English (Australia)", "English (Australia)"),
+    Language::new(
+        "en-GB",
+        "English (United Kingdom)",
+        "English (United Kingdom)",
+    ),
+    Language::new("en-NZ", "English (New Zealand)", "English (New Zealand)"),
+    Language::new("en-IN", "English (India)", "English (India)"),
+    Language::new("et", "Estonian", "eesti"),
+    Language::new("fi", "Finnish", "suomi"),
+    Language::new("nl-BE", "Flemish", "Vlaams"),
+    Language::new("fr", "French", "français"),
+    Language::new("fr-CA", "French (Canada)", "français (Canada)"),
+    Language::new("de", "German", "Deutsch"),
+    Language::new("de-CH", "German (Switzerland)", "Deutsch (Schweiz)"),
+    Language::new("el", "Greek", "ελληνικά"),
+    Language::new("hi", "Hindi", "हिन्दी"),
+    Language::new("hi-Latn", "Hindi (Roman Script)", "Hindi"),
+    Language::new("hu", "Hungarian", "magyar"),
+    Language::new("id", "Indonesian", "Bahasa Indonesia"),
+    Language::new("it", "Italian", "italiano"),
+    Language::new("ja", "Japanese", "日本語"),
+    Language::new("ko", "Korean", "한국어"),
+    Language::new("ko-KR", "Korean (South Korea)", "한국어 (대한민국)"),
+    Language::new("lv", "Latvian", "latviešu"),
+    Language::new("lt", "Lithuanian", "lietuvių"),
+    Language::new("ms", "Malay", "Bahasa Melayu"),
+    Language::new("no", "Norwegian", "norsk"),
+    Language::new("pl", "Polish", "polski"),
+    Language::new("pt", "Portuguese", "português"),
+    Language::new("pt-BR", "Portuguese (Brazil)", "português (Brasil)"),
+    Language::new("pt-PT", "Portuguese (Portugal)", "português (Portugal)"),
+    Language::new("ro", "Romanian", "română"),
+    Language::new("ru", "Russian", "русский"),
+    Language::new("sk", "Slovak", "slovenčina"),
+    Language::new("es", "Spanish", "español"),
+    Language::new(
+        "es-419",
+        "Spanish (Latin America)",
+        "español (Latinoamérica)",
+    ),
+    Language::new("sv", "Swedish", "svenska"),
+    Language::new("sv-SE", "Swedish (Sweden)", "svenska (Sverige)"),
+    Language::new("th", "Thai", "ไทย"),
+    Language::new("th-TH", "Thai (Thailand)", "ไทย (ประเทศไทย)"),
+    Language::new("tr", "Turkish", "Türkçe"),
+    Language::new("uk", "Ukrainian", "українська"),
+    Language::new("vi", "Vietnamese", "Tiếng Việt"),
+];
 
 #[allow(non_camel_case_types)]
 #[allow(unused)]
@@ -40,12 +115,19 @@ pub struct AudioConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct Keyword {
+    pub value: String,
+    pub boost: Option<f32>,
+}
+
+#[derive(Debug, Clone)]
 pub struct TranscriptionConfig {
     pub language: Option<String>,
     pub model: Option<String>,
     pub enable_profanity_filter: bool,
     pub enable_speaker_diarization: bool,
-    pub keyterm: Option<String>, // only nova-3
+    pub keywords: Vec<Keyword>,
+    pub keyterms: Vec<String>, // only nova-3
 }
 
 /// The Deepgram Speech-to-Text API client for transcribing audio into the input language
@@ -65,6 +147,10 @@ impl<HC: HttpClient> PreRecordedAudioApi<HC> {
         }
     }
 
+    pub fn get_supported_languages(&self) -> &[Language] {
+        &DEEPGRAM_SUPPORTED_LANGUAGES
+    }
+
     pub fn transcribe_audio(
         &self,
         request: TranscriptionRequest,
@@ -74,6 +160,10 @@ impl<HC: HttpClient> PreRecordedAudioApi<HC> {
         let mime_type = format!("audio/{}", request.audio_config.format);
 
         let audio_size_bytes = request.audio.len();
+        let req_language = request
+            .transcription_config
+            .as_ref()
+            .and_then(|config| config.language.clone());
 
         let mut query: Vec<(&str, String)> = vec![];
 
@@ -96,8 +186,39 @@ impl<HC: HttpClient> PreRecordedAudioApi<HC> {
                 query.push(("diarize", "true".to_string()));
             }
 
-            if let Some(keyterm) = transcription_config.keyterm {
-                query.push(("keyterm", keyterm));
+            if transcription_config
+                .model
+                .as_ref()
+                .filter(|model| *model == "nova-3")
+                .is_some()
+            {
+                transcription_config.keyterms.iter().for_each(|keyterm| {
+                    let encoded = keyterm.replace(" ", "+");
+                    query.push(("keyterm", encoded));
+                });
+            }
+
+            //Nova-2, Nova-1, Enhanced, and Base
+
+            if transcription_config
+                .model
+                .as_ref()
+                .filter(|model| {
+                    *model == "nova-2"
+                        || *model == "nova-1"
+                        || *model == "enhanced"
+                        || *model == "base"
+                })
+                .is_some()
+            {
+                transcription_config.keywords.iter().for_each(|keyword| {
+                    let encoded = keyword.value.replace(" ", "+");
+                    if let Some(boost) = keyword.boost {
+                        query.push(("keyword", format!("{}:{}", encoded, boost)));
+                    } else {
+                        query.push(("keyword", encoded));
+                    }
+                });
             }
 
             if let Some(model) = transcription_config.model {
@@ -121,6 +242,7 @@ impl<HC: HttpClient> PreRecordedAudioApi<HC> {
                 let deepgram_transcription: DeepgramTranscription = response.json()?;
 
                 Ok(TranscriptionResponse {
+                    language: req_language.unwrap_or_default(),
                     audio_size_bytes,
                     deepgram_transcription,
                 })
@@ -147,6 +269,12 @@ impl<HC: HttpClient> PreRecordedAudioApi<HC> {
     }
 }
 
+impl PreRecordedAudioApi<ReqwestHttpClient> {
+    pub fn live(deepgram_api_key: String) -> Self {
+        Self::new(deepgram_api_key, ReqwestHttpClient::new())
+    }
+}
+
 pub struct TranscriptionRequest {
     pub audio: Vec<u8>,
     pub audio_config: AudioConfig,
@@ -167,6 +295,7 @@ impl std::fmt::Debug for TranscriptionRequest {
 #[derive(Debug, PartialEq)]
 pub struct TranscriptionResponse {
     pub audio_size_bytes: usize,
+    pub language: String,
     pub deepgram_transcription: DeepgramTranscription,
 }
 
@@ -188,7 +317,7 @@ pub struct Metadata {
     pub model_info: HashMap<String, ModelInfo>,
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct ModelInfo {
     pub name: String,
     pub version: String,
@@ -414,7 +543,7 @@ mod tests {
     }
 
     #[test]
-    fn test_query_parameters_set_correctly() {
+    fn test_query_parameters_other_than_keywords_and_keyterms_set_correctly() {
         let mock_client = Rc::new(MockHttpClient::new());
 
         mock_client.expect_response(create_mock_success_response());
@@ -433,7 +562,8 @@ mod tests {
                 model: Some("nova-2".to_string()),
                 enable_profanity_filter: true,
                 enable_speaker_diarization: true,
-                keyterm: Some("hello".to_string()),
+                keywords: vec![],
+                keyterms: vec![],
             }),
         };
 
@@ -451,7 +581,109 @@ mod tests {
             Some(&"true".to_string())
         );
         assert_eq!(query_pairs.get("diarize"), Some(&"true".to_string()));
-        assert_eq!(query_pairs.get("keyterm"), Some(&"hello".to_string()));
+    }
+
+    #[test]
+    fn test_query_keyterms_params_set_correctly_in_case_of_nova3_model() {
+        let mock_client = Rc::new(MockHttpClient::new());
+
+        mock_client.expect_response(create_mock_success_response());
+
+        let api: PreRecordedAudioApi<MockHttpClient> =
+            PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client.clone());
+
+        let request = TranscriptionRequest {
+            audio: b"fake audio data".to_vec(),
+            audio_config: AudioConfig {
+                format: AudioFormat::wav,
+                channels: Some(2), // Should add multichannel=true
+            },
+            transcription_config: Some(TranscriptionConfig {
+                language: Some("en".to_string()),
+                model: Some("nova-3".to_string()),
+                enable_profanity_filter: true,
+                enable_speaker_diarization: true,
+                keywords: vec![],
+                keyterms: vec!["foo".to_string(), "bar".to_string(), "baz baz".to_string()],
+            }),
+        };
+
+        api.transcribe_audio(request).unwrap();
+
+        let captured_request = mock_client.last_captured_request().unwrap();
+        let url = captured_request.url();
+        let keyterm_query_pairs: Vec<(String, String)> = url
+            .query_pairs()
+            .into_owned()
+            .filter(|(key, _)| key == "keyterm")
+            .collect();
+
+        assert_eq!(
+            keyterm_query_pairs,
+            vec![
+                ("keyterm".to_string(), "foo".to_string()),
+                ("keyterm".to_string(), "bar".to_string()),
+                ("keyterm".to_string(), "baz+baz".to_string()),
+            ]
+        )
+    }
+
+    #[test]
+    fn test_query_keyterms_params_set_correctly_in_case_of_nova2_nova1_enhanced_and_base_model() {
+        let mock_client = Rc::new(MockHttpClient::new());
+
+        mock_client.expect_response(create_mock_success_response());
+
+        let api: PreRecordedAudioApi<MockHttpClient> =
+            PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client.clone());
+
+        let request = TranscriptionRequest {
+            audio: b"fake audio data".to_vec(),
+            audio_config: AudioConfig {
+                format: AudioFormat::wav,
+                channels: Some(2), // Should add multichannel=true
+            },
+            transcription_config: Some(TranscriptionConfig {
+                language: Some("en".to_string()),
+                model: Some("nova-2".to_string()),
+                enable_profanity_filter: true,
+                enable_speaker_diarization: true,
+                keywords: vec![
+                    Keyword {
+                        value: "foo".to_string(),
+                        boost: None,
+                    },
+                    Keyword {
+                        value: "bar".to_string(),
+                        boost: Some(1.0),
+                    },
+                    Keyword {
+                        value: "baz baz".to_string(),
+                        boost: Some(2.5),
+                    },
+                ],
+                keyterms: vec![],
+            }),
+        };
+
+        api.transcribe_audio(request).unwrap();
+
+        let captured_request = mock_client.last_captured_request().unwrap();
+        let url = captured_request.url();
+        let keyterm_query_pairs: Vec<(String, String)> = url
+            .query_pairs()
+            .into_owned()
+            .filter(|(key, _)| key == "keyword")
+            .collect();
+
+        assert_eq!(
+            keyterm_query_pairs,
+            vec![
+                ("keyword".to_string(), "foo".to_string()),
+                ("keyword".to_string(), "bar:1".to_string()),
+                ("keyword".to_string(), "baz+baz:2.5".to_string()),
+            ]
+        )
     }
 
     #[test]
@@ -474,7 +706,8 @@ mod tests {
                 model: None,
                 enable_profanity_filter: false,
                 enable_speaker_diarization: false,
-                keyterm: None,
+                keywords: vec![],
+                keyterms: vec![],
             }),
         };
 
@@ -552,6 +785,7 @@ mod tests {
         let response = api.transcribe_audio(request).unwrap();
 
         let expected_response = TranscriptionResponse {
+            language: String::new(),
             audio_size_bytes: audio_data.len(),
             deepgram_transcription: DeepgramTranscription {
                 metadata: Metadata {
@@ -667,6 +901,7 @@ mod tests {
         let response = api.transcribe_audio(request).unwrap();
 
         let expected_response = TranscriptionResponse {
+            language: String::new(),
             audio_size_bytes: audio_data.len(),
             deepgram_transcription: DeepgramTranscription {
                 metadata: Metadata {

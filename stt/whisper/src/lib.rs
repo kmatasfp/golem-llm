@@ -4,7 +4,7 @@ mod conversions;
 use crate::client::{AudioConfig, TranscriptionConfig, TranscriptionRequest, TranscriptionsApi};
 
 use golem_stt::golem::stt::types::{
-    AudioConfig as WitAudioConfig, SttError, TranscriptAlternative,
+    AudioConfig as WitAudioConfig, SttError as WitSttError, TranscriptAlternative,
 };
 use golem_stt::http_client::ReqwestHttpClient;
 
@@ -25,7 +25,6 @@ use std::rc::Rc;
 struct Component;
 
 thread_local! {
-    // Compile time: create empty container
     static CLIENT_CACHE: RefCell<Option<Rc<TranscriptionsApi<ReqwestHttpClient>>>> = const { RefCell::new(None) };
 }
 
@@ -50,9 +49,10 @@ fn get_client() -> Result<Rc<TranscriptionsApi<ReqwestHttpClient>>, String> {
 }
 
 impl LanguageGuest for Component {
-    fn list_languages() -> Result<Vec<LanguageInfo>, SttError> {
-        let api_client = get_client()
-            .map_err(|_| SttError::InternalError("Api client should be available".to_string()))?;
+    fn list_languages() -> Result<Vec<LanguageInfo>, WitSttError> {
+        let api_client = get_client().map_err(|_| {
+            WitSttError::InternalError("Api client should be available".to_string())
+        })?;
 
         let supported_languages = api_client.get_supported_languages();
         Ok(supported_languages
@@ -69,15 +69,15 @@ impl LanguageGuest for Component {
 struct WhisperTranscriptionStream {}
 
 impl GuestTranscriptionStream for WhisperTranscriptionStream {
-    fn send_audio(&self, _: Vec<u8>) -> Result<(), SttError> {
+    fn send_audio(&self, _: Vec<u8>) -> Result<(), WitSttError> {
         Ok(())
     }
 
-    fn finish(&self) -> Result<(), SttError> {
+    fn finish(&self) -> Result<(), WitSttError> {
         Ok(())
     }
 
-    fn receive_alternative(&self) -> Result<Option<TranscriptAlternative>, SttError> {
+    fn receive_alternative(&self) -> Result<Option<TranscriptAlternative>, WitSttError> {
         Ok(None)
     }
 
@@ -93,7 +93,7 @@ impl TranscriptionGuest for Component {
         audio: Vec<u8>,
         config: WitAudioConfig,
         options: Option<WitTranscribeOptions>,
-    ) -> Result<WitTranscriptionResult, SttError> {
+    ) -> Result<WitTranscriptionResult, WitSttError> {
         let api_client = get_client().expect("api client should be available"); // Fixme: handle error
 
         let transcription_config: Option<TranscriptionConfig> = if let Some(options) = options {
@@ -118,8 +118,8 @@ impl TranscriptionGuest for Component {
     fn transcribe_stream(
         _: WitAudioConfig,
         _: Option<WitTranscribeOptions>,
-    ) -> Result<WitTranscriptionStream, SttError> {
-        Err(SttError::UnsupportedOperation(
+    ) -> Result<WitTranscriptionStream, WitSttError> {
+        Err(WitSttError::UnsupportedOperation(
             "Whisper model does not support streaming".to_string(),
         ))
     }

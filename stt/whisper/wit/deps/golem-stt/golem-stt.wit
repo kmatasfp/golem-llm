@@ -106,12 +106,22 @@ interface transcription {
     transcript-alternative,
   };
 
+  record phrase {
+     value: string,
+     boost: option<f32>
+  }
+
+  record vocabulary {
+     phrases: list<phrase>
+  }
+
   record transcribe-options {
     enable-timestamps: option<bool>,
     enable-speaker-diarization: option<bool>,
     language: option<language-code>,
     model: option<string>,
     profanity-filter: option<bool>,
+    vocabulary: option<vocabulary>,
     speech-context: option<list<string>>,
     enable-word-confidence: option<bool>,
     enable-timing-detail: option<bool>,
