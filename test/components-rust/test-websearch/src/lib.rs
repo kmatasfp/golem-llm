@@ -24,7 +24,7 @@ const PROVIDER: &'static str = "serper";
 impl Guest for Component {
     /// test1 demonstrates a simple, one-shot web search query
     fn test1() -> String {
-        let params = web_search::SearchParams {
+        let params = SearchParams {
             query: "weather forecast Slovenia".to_string(),
             safe_search: Some(SafeSearchLevel::Medium),
             language: Some("en".to_string()),
@@ -45,17 +45,6 @@ impl Guest for Component {
         match response {
             Ok((results, metadata)) => {
                 let mut output = String::new();
-
-                if let Some(meta) = metadata {
-                    output.push_str(
-                        &format!(
-                            "Search metadata: query='{}', total_results={:?}, search_time={:?}ms\n\n",
-                            meta.query,
-                            meta.total_results,
-                            meta.search_time_ms
-                        )
-                    );
-                }
 
                 output.push_str(&format!("Found {} results:\n", results.len()));
 
@@ -81,10 +70,40 @@ impl Guest for Component {
                     output.push_str("\n");
                 }
 
+                if let Some(meta) = metadata {
+                    output.push_str("\nDetailed Search Metadata:\n");
+                    output.push_str(&format!("  Query: {}\n", meta.query));
+                    if let Some(total) = meta.total_results {
+                        output.push_str(&format!("  Total Results: {}\n", total));
+                    }
+                    if let Some(time) = meta.search_time_ms {
+                        output.push_str(&format!("  Search Time: {:.2}ms\n", time));
+                    }
+                    if let Some(lang) = &meta.language {
+                        output.push_str(&format!("  Language: {}\n", lang));
+                    }
+                    if let Some(reg) = &meta.region {
+                        output.push_str(&format!("  Region: {}\n", reg));
+                    }
+                    if let Some(safe) = meta.safe_search {
+                        output.push_str(&format!("  Safe Search Level: {:?}\n", safe));
+                    }
+                    if let Some(rate_limit) = &meta.rate_limits {
+                        output.push_str(
+                            &format!(
+                                "  Rate Limit: {}/{} requests remaining (reset: {})\n",
+                                rate_limit.remaining,
+                                rate_limit.limit,
+                                rate_limit.reset_timestamp
+                            )
+                        );
+                    }
+                }
+
                 output
             }
             Err(error) => {
-                let error_msg = "Test1 passed with handled error".to_string();
+                let error_msg = format_search_error(error);
                 println!("{}", error_msg);
                 error_msg
             }
@@ -93,7 +112,7 @@ impl Guest for Component {
 
     /// test2 demonstrates paginated search using search sessions
     fn test2() -> String {
-        let params = web_search::SearchParams {
+        let params = SearchParams {
             query: "Rust programming language tutorials".to_string(),
             safe_search: Some(SafeSearchLevel::Off),
             language: Some("en".to_string()),
@@ -112,7 +131,7 @@ impl Guest for Component {
         let session = match web_search::start_search(&params) {
             Ok(session) => session,
             Err(error) => {
-                let error_msg = "Test2 passed with handled error".to_string();
+                let error_msg = format_search_error(error);
                 println!("{}", error_msg);
                 return error_msg;
             }
@@ -132,7 +151,7 @@ impl Guest for Component {
                 output.push_str("\n");
             }
             Err(error) => {
-                let error_msg = "Test2 passed with handled error".to_string();
+                let error_msg = format_search_error(error);
                 println!("{}", error_msg);
                 output.push_str(&format!("{}\n\n", error_msg));
             }
@@ -154,7 +173,7 @@ impl Guest for Component {
                 }
             }
             Err(error) => {
-                let error_msg = "Test2 passed with handled error".to_string();
+                let error_msg = format_search_error(error);
                 println!("{}", error_msg);
                 output.push_str(&format!("{}\n", error_msg));
             }
@@ -162,18 +181,27 @@ impl Guest for Component {
 
         // Get metadata
         if let Some(metadata) = session.get_metadata() {
-            output.push_str(&format!("\nSession metadata:\n"));
+            output.push_str(&format!("\nDetailed Session Metadata:\n"));
             output.push_str(&format!("  Query: {}\n", metadata.query));
             if let Some(total) = metadata.total_results {
-                output.push_str(&format!("  Total results: {}\n", total));
+                output.push_str(&format!("  Total Results: {}\n", total));
             }
             if let Some(time) = metadata.search_time_ms {
-                output.push_str(&format!("  Search time: {:.2}ms\n", time));
+                output.push_str(&format!("  Search Time: {:.2}ms\n", time));
+            }
+            if let Some(lang) = &metadata.language {
+                output.push_str(&format!("  Language: {}\n", lang));
+            }
+            if let Some(reg) = &metadata.region {
+                output.push_str(&format!("  Region: {}\n", reg));
+            }
+            if let Some(safe) = metadata.safe_search {
+                output.push_str(&format!("  Safe Search Level: {:?}\n", safe));
             }
             if let Some(rate_limits) = &metadata.rate_limits {
                 output.push_str(
                     &format!(
-                        "  Rate limits: {}/{} remaining (reset: {})\n",
+                        "  Rate Limits: {}/{} remaining (reset: {})\n",
                         rate_limits.remaining,
                         rate_limits.limit,
                         rate_limits.reset_timestamp
@@ -187,7 +215,7 @@ impl Guest for Component {
 
     /// test3 demonstrates time-filtered search for recent news
     fn test3() -> String {
-        let params = web_search::SearchParams {
+        let params = SearchParams {
             query: "artificial intelligence breakthrough".to_string(),
             safe_search: Some(SafeSearchLevel::Medium),
             language: Some("en".to_string()),
@@ -237,7 +265,7 @@ impl Guest for Component {
                 output
             }
             Err(error) => {
-                let error_msg = "Test3 passed with handled error".to_string();
+                let error_msg = format_search_error(error);
                 println!("{}", error_msg);
                 error_msg
             }
@@ -252,7 +280,7 @@ impl Guest for Component {
             "sciencedirect.com".to_string()
         ];
 
-        let params = web_search::SearchParams {
+        let params = SearchParams {
             query: "climate change research".to_string(),
             safe_search: Some(SafeSearchLevel::Medium),
             language: Some("en".to_string()),
@@ -291,10 +319,22 @@ impl Guest for Component {
                 }
 
                 output.push_str(&format!("Target academic domains: {}\n", domains.join(", ")));
+
+                if let Some(meta) = metadata {
+                    output.push_str("\nSearch metadata:\n");
+                    output.push_str(&format!("  Query: {}\n", meta.query));
+                    if let Some(total) = meta.total_results {
+                        output.push_str(&format!("  Total results: {}\n", total));
+                    }
+                    if let Some(time) = meta.search_time_ms {
+                        output.push_str(&format!("  Search time: {:.2}ms\n", time));
+                    }
+                }
+
                 output
             }
             Err(error) => {
-                let error_msg = "Test4 passed with handled error".to_string();
+                let error_msg = format_search_error(error);
                 println!("{}", error_msg);
                 error_msg
             }
@@ -309,7 +349,7 @@ impl Guest for Component {
             "aliexpress.com".to_string()
         ];
 
-        let params = web_search::SearchParams {
+        let params = SearchParams {
             query: "mountain hiking gear reviews".to_string(),
             safe_search: Some(SafeSearchLevel::Off),
             language: Some("en".to_string()),
@@ -358,10 +398,22 @@ impl Guest for Component {
                 }
 
                 output.push_str(&format!("Excluded domains: {}\n", excluded_domains.join(", ")));
+
+                if let Some(meta) = metadata {
+                    output.push_str("\nSearch metadata:\n");
+                    output.push_str(&format!("  Query: {}\n", meta.query));
+                    if let Some(total) = meta.total_results {
+                        output.push_str(&format!("  Total results: {}\n", total));
+                    }
+                    if let Some(time) = meta.search_time_ms {
+                        output.push_str(&format!("  Search time: {:.2}ms\n", time));
+                    }
+                }
+
                 output
             }
             Err(error) => {
-                let error_msg = "Test5 passed with handled error".to_string();
+                let error_msg = format_search_error(error);
                 println!("{}", error_msg);
                 error_msg
             }
@@ -370,7 +422,7 @@ impl Guest for Component {
 
     /// test6 demonstrates multilingual search with specific region
     fn test6() -> String {
-        let params = web_search::SearchParams {
+        let params = SearchParams {
             query: "slovenian recipes".to_string(),
             safe_search: Some(SafeSearchLevel::Medium),
             language: Some("en".to_string()),
@@ -426,7 +478,7 @@ impl Guest for Component {
                 output
             }
             Err(error) => {
-                let error_msg = "Test6 passed with handled error".to_string();
+                let error_msg = format_search_error(error);
                 println!("{}", error_msg);
                 error_msg
             }
@@ -441,7 +493,7 @@ impl Guest for Component {
             "connectsafely.org".to_string()
         ];
 
-        let params = web_search::SearchParams {
+        let params = SearchParams {
             query: "child safety internet guidelines parents".to_string(),
             safe_search: Some(SafeSearchLevel::High),
             language: Some("en".to_string()),
@@ -508,7 +560,7 @@ impl Guest for Component {
                 output
             }
             Err(error) => {
-                let error_msg = "Test7 passed with handled error".to_string();
+                let error_msg = format_search_error(error);
                 println!("{}", error_msg);
                 error_msg
             }
