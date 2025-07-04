@@ -1,7 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use client::PreRecordedAudioApi;
-use golem_stt::http_client::{ReqwestHttpClient, SttProviderClient};
+use golem_stt::client::{ReqwestHttpClient, SttProviderClient};
 
 use golem_stt::golem::stt::languages::{Guest as LanguageGuest, LanguageInfo};
 

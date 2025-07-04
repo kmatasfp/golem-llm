@@ -3,8 +3,8 @@ mod conversions;
 
 use crate::client::TranscriptionsApi;
 
+use golem_stt::client::{ReqwestHttpClient, SttProviderClient};
 use golem_stt::golem::stt::types::SttError as WitSttError;
-use golem_stt::http_client::{ReqwestHttpClient, SttProviderClient};
 
 use golem_stt::golem::stt::transcription::{
     Guest as TranscriptionGuest, GuestTranscriptionQueue,

@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use golem_stt::http_client::{HttpClient, ReqwestHttpClient, SttProviderClient};
+use golem_stt::client::{HttpClient, ReqwestHttpClient, SttProviderClient};
 use log::trace;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
@@ -315,7 +315,7 @@ pub struct ErrorBody {
 
 #[cfg(test)]
 mod tests {
-    use golem_stt::http_client::HttpResponse;
+    use golem_stt::client::HttpResponse;
     use reqwest::{Client, IntoUrl, Method, Request, RequestBuilder};
     use std::cell::{Ref, RefCell};
     use std::collections::{HashMap, VecDeque};

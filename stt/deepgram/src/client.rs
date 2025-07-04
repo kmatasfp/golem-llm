@@ -4,8 +4,8 @@ use std::{
 };
 
 use golem_stt::{
+    client::{HttpClient, ReqwestHttpClient, SttProviderClient},
     error::Error,
-    http_client::{HttpClient, ReqwestHttpClient, SttProviderClient},
     languages::Language,
 };
 use log::trace;
@@ -434,8 +434,8 @@ pub struct Word {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use golem_stt::http_client::HttpResponse;
-    use golem_stt::{error::Error, http_client::HttpClient};
+    use golem_stt::client::HttpResponse;
+    use golem_stt::{client::HttpClient, error::Error};
     use reqwest::{Client, IntoUrl, Method, Request, RequestBuilder};
     use std::collections::VecDeque;
     use std::{

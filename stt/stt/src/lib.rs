@@ -1,5 +1,5 @@
+pub mod client;
 pub mod error;
-pub mod http_client;
 pub mod languages;
 
 wit_bindgen::generate!({
