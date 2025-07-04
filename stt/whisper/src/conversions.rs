@@ -5,11 +5,13 @@ use golem_stt::golem::stt::types::{
 };
 
 use golem_stt::golem::stt::transcription::{
-    TranscribeOptions as WitTranscribeOptions, TranscriptionResult as WitTranscriptionResult,
+    TranscribeOptions as WitTranscribeOptions, TranscriptionRequest as WitTranscriptionRequest,
+    TranscriptionResult as WitTranscriptionResult,
 };
 
 use crate::client::{
-    AudioFormat, TranscriptionConfig, TranscriptionResponse, WhisperTranscription,
+    AudioConfig, AudioFormat, TranscriptionConfig, TranscriptionRequest, TranscriptionResponse,
+    WhisperTranscription,
 };
 
 impl TryFrom<WitAudioFormat> for AudioFormat {
@@ -46,6 +48,29 @@ impl TryFrom<WitTranscribeOptions> for TranscriptionConfig {
             enable_timestamps,
             language: options.language,
             prompt,
+        })
+    }
+}
+
+impl TryFrom<WitTranscriptionRequest> for TranscriptionRequest {
+    type Error = SttError;
+
+    fn try_from(request: WitTranscriptionRequest) -> Result<Self, Self::Error> {
+        let audio = request.audio;
+
+        let transcription_config: Option<TranscriptionConfig> =
+            if let Some(options) = request.options {
+                Some(options.try_into()?)
+            } else {
+                None
+            };
+
+        Ok(TranscriptionRequest {
+            audio,
+            audio_config: AudioConfig {
+                format: request.config.format.try_into()?,
+            },
+            transcription_config,
         })
     }
 }

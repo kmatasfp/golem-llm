@@ -127,22 +127,23 @@ interface transcription {
     enable-timing-detail: option<bool>,
   }
 
-  transcribe: func(
+  record transcription-request {
     audio: list<u8>,
     config: audio-config,
     options: option<transcribe-options>
+  }
+
+  transcribe: func(
+    request: transcription-request
   ) -> result<transcription-result, stt-error>;
 
-  transcribe-stream: func(
-    config: audio-config,
-    options: option<transcribe-options>
-  ) -> result<transcription-stream, stt-error>;
+  queue-transcription: func(
+    requests: list<transcription-request>
+  ) -> transcription-queue;
 
-  resource transcription-stream {
-    send-audio: func(chunk: list<u8>) -> result<_, stt-error>;
-    finish: func() -> result<_, stt-error>;
-    receive-alternative: func() -> result<option<transcript-alternative>, stt-error>;
-    close: func();
+  resource transcription-queue {
+    get-next: func() -> option<transcription-result>;
+    blocking-get-next: func() -> list<transcription-result>;
   }
 }
 

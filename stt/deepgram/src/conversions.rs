@@ -6,10 +6,14 @@ use golem_stt::golem::stt::types::{
 
 use golem_stt::golem::stt::transcription::{
     Phrase as WitPhrase, TranscribeOptions as WitTranscribeOptions,
-    TranscriptionResult as WitTranscriptionResult, Vocabulary as WitVocabulary,
+    TranscriptionRequest as WitTranscriptionRequest, TranscriptionResult as WitTranscriptionResult,
+    Vocabulary as WitVocabulary,
 };
 
-use crate::client::{AudioFormat, Keyword, TranscriptionConfig, TranscriptionResponse};
+use crate::client::{
+    AudioConfig, AudioFormat, Keyword, TranscriptionConfig, TranscriptionRequest,
+    TranscriptionResponse,
+};
 
 impl From<WitAudioFormat> for AudioFormat {
     fn from(wit_format: WitAudioFormat) -> Self {
@@ -85,6 +89,30 @@ impl TryFrom<WitTranscribeOptions> for TranscriptionConfig {
             enable_speaker_diarization: options.enable_speaker_diarization.unwrap_or(false),
             keywords,
             keyterms,
+        })
+    }
+}
+
+impl TryFrom<WitTranscriptionRequest> for TranscriptionRequest {
+    type Error = SttError;
+
+    fn try_from(request: WitTranscriptionRequest) -> Result<Self, Self::Error> {
+        let audio = request.audio;
+
+        let transcription_config: Option<TranscriptionConfig> =
+            if let Some(options) = request.options {
+                Some(options.try_into()?)
+            } else {
+                None
+            };
+
+        Ok(TranscriptionRequest {
+            audio,
+            audio_config: AudioConfig {
+                format: request.config.format.into(),
+                channels: request.config.channels,
+            },
+            transcription_config,
         })
     }
 }
