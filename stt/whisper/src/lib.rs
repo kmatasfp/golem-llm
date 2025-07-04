@@ -27,8 +27,8 @@ static CLIENT: OnceLock<TranscriptionsApi<ReqwestHttpClient>> = OnceLock::new();
 
 fn get_client() -> &'static TranscriptionsApi<ReqwestHttpClient> {
     CLIENT.get_or_init(|| {
-        let api_key = std::env::var("DEEPGRAM_API_TOKEN")
-            .expect("env variable DEEPGRAM_API_TOKEN was not set");
+        let api_key =
+            std::env::var("OPENAI_API_KEY").expect("env variable OPENAI_API_KEY was not set");
         TranscriptionsApi::live(api_key)
     })
 }
