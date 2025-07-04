@@ -4,7 +4,7 @@ mod conversions;
 use crate::client::TranscriptionsApi;
 
 use golem_stt::golem::stt::types::SttError as WitSttError;
-use golem_stt::http_client::ReqwestHttpClient;
+use golem_stt::http_client::{ReqwestHttpClient, SttProviderClient};
 
 use golem_stt::golem::stt::transcription::{
     Guest as TranscriptionGuest, GuestTranscriptionQueue,
@@ -87,7 +87,7 @@ impl TranscriptionGuest for Component {
         Ok(api_response.into())
     }
 
-    fn queue_transcription(requests: Vec<WitTranscriptionRequest>) -> WitTranscriptionQueue {
+    fn queue_transcription(_requests: Vec<WitTranscriptionRequest>) -> WitTranscriptionQueue {
         todo!()
     }
 }

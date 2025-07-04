@@ -1,7 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use client::PreRecordedAudioApi;
-use golem_stt::http_client::ReqwestHttpClient;
+use golem_stt::http_client::{ReqwestHttpClient, SttProviderClient};
 
 use golem_stt::golem::stt::languages::{Guest as LanguageGuest, LanguageInfo};
 
@@ -84,7 +84,7 @@ impl TranscriptionGuest for Component {
         Ok(api_response.into())
     }
 
-    fn queue_transcription(requests: Vec<WitTranscriptionRequest>) -> WitTranscriptionQueue {
+    fn queue_transcription(_requests: Vec<WitTranscriptionRequest>) -> WitTranscriptionQueue {
         todo!()
     }
 }

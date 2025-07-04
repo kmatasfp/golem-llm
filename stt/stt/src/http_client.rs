@@ -65,3 +65,7 @@ impl HttpClient for ReqwestHttpClient {
         self.client.request(method, url)
     }
 }
+
+pub trait SttProviderClient<Req, Res, Err: std::error::Error> {
+    fn transcribe_audio(&self, request: Req) -> Result<Res, Err>;
+}

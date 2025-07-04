@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use golem_stt::http_client::{HttpClient, ReqwestHttpClient};
+use golem_stt::http_client::{HttpClient, ReqwestHttpClient, SttProviderClient};
 use log::trace;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
@@ -132,8 +132,18 @@ impl<HC: HttpClient> TranscriptionsApi<HC> {
     pub fn get_supported_languages(&self) -> &[Language] {
         &WHISPER_SUPPORTED_LANGUAGES
     }
+}
 
-    pub fn transcribe_audio(
+impl TranscriptionsApi<ReqwestHttpClient> {
+    pub fn live(openai_api_key: String) -> Self {
+        Self::new(openai_api_key, ReqwestHttpClient::new())
+    }
+}
+
+impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionResponse, Error>
+    for TranscriptionsApi<HC>
+{
+    fn transcribe_audio(
         &self,
         request: TranscriptionRequest,
     ) -> Result<TranscriptionResponse, Error> {
@@ -217,12 +227,6 @@ impl<HC: HttpClient> TranscriptionsApi<HC> {
                 provider_error: response.text()?,
             }),
         }
-    }
-}
-
-impl TranscriptionsApi<ReqwestHttpClient> {
-    pub fn live(openai_api_key: String) -> Self {
-        Self::new(openai_api_key, ReqwestHttpClient::new())
     }
 }
 

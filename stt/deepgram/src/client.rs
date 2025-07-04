@@ -5,7 +5,7 @@ use std::{
 
 use golem_stt::{
     error::Error,
-    http_client::{HttpClient, ReqwestHttpClient},
+    http_client::{HttpClient, ReqwestHttpClient, SttProviderClient},
     languages::Language,
 };
 use log::trace;
@@ -220,7 +220,24 @@ impl<HC: HttpClient> PreRecordedAudioApi<HC> {
         &DEEPGRAM_SUPPORTED_LANGUAGES
     }
 
-    pub fn transcribe_audio(
+    pub fn queue_transcription(
+        &self,
+        requests: Vec<TranscriptionRequest>,
+    ) -> TranscriptionQueue<HC> {
+        TranscriptionQueue::new(self, requests)
+    }
+}
+
+impl PreRecordedAudioApi<ReqwestHttpClient> {
+    pub fn live(deepgram_api_key: String) -> Self {
+        Self::new(deepgram_api_key, ReqwestHttpClient::new())
+    }
+}
+
+impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionResponse, Error>
+    for PreRecordedAudioApi<HC>
+{
+    fn transcribe_audio(
         &self,
         request: TranscriptionRequest,
     ) -> Result<TranscriptionResponse, Error> {
@@ -335,19 +352,6 @@ impl<HC: HttpClient> PreRecordedAudioApi<HC> {
                 provider_error: response.text()?,
             }),
         }
-    }
-
-    pub fn queue_transcription(
-        &self,
-        requests: Vec<TranscriptionRequest>,
-    ) -> TranscriptionQueue<HC> {
-        TranscriptionQueue::new(self, requests)
-    }
-}
-
-impl PreRecordedAudioApi<ReqwestHttpClient> {
-    pub fn live(deepgram_api_key: String) -> Self {
-        Self::new(deepgram_api_key, ReqwestHttpClient::new())
     }
 }
 
