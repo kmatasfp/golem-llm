@@ -139,11 +139,11 @@ interface transcription {
 
   queue-transcription: func(
     requests: list<transcription-request>
-  ) -> transcription-queue;
+  ) -> result<transcription-queue, stt-error>;
 
   resource transcription-queue {
-    get-next: func() -> option<transcription-result>;
-    blocking-get-next: func() -> list<transcription-result>;
+    get-next: func() -> option<result<transcription-result, stt-error>>;
+    blocking-get-next: func() -> list<result<transcription-result, stt-error>>;
   }
 }
 

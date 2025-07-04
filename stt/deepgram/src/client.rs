@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, VecDeque},
-    rc::Rc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use golem_stt::{
     client::{HttpClient, ReqwestHttpClient, SttProviderClient},
@@ -139,92 +136,25 @@ pub struct TranscriptionConfig {
     pub keyterms: Vec<String>, // only nova-3
 }
 
-// Queue functionality for batch transcription processing
-pub type TranscriptionResult = Result<TranscriptionResponse, Error>;
-
-#[allow(unused)]
-pub struct TranscriptionQueue<'a, HC: HttpClient> {
-    api: &'a PreRecordedAudioApi<HC>,
-    requests: VecDeque<TranscriptionRequest>,
-    processed_results: VecDeque<TranscriptionResult>,
-}
-
-#[allow(unused)]
-impl<'a, HC: HttpClient> TranscriptionQueue<'a, HC> {
-    fn new(api: &'a PreRecordedAudioApi<HC>, requests: Vec<TranscriptionRequest>) -> Self {
-        Self {
-            api,
-            requests: requests.into(),
-            processed_results: VecDeque::new(),
-        }
-    }
-
-    fn process_next(&mut self) -> bool {
-        if let Some(request) = self.requests.pop_front() {
-            let result = self.api.transcribe_audio(request);
-            self.processed_results.push_back(result);
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn get_next(&mut self) -> Option<TranscriptionResult> {
-        if self.processed_results.is_empty() && !self.requests.is_empty() {
-            self.process_next();
-        }
-
-        self.processed_results.pop_front()
-    }
-
-    pub fn blocking_get_next(&mut self) -> Vec<TranscriptionResult> {
-        while !self.requests.is_empty() {
-            self.process_next();
-        }
-
-        let mut results = Vec::new();
-        while let Some(result) = self.processed_results.pop_front() {
-            results.push(result);
-        }
-
-        results
-    }
-
-    pub fn has_pending(&self) -> bool {
-        !self.requests.is_empty() || !self.processed_results.is_empty()
-    }
-
-    pub fn nr_remaining_requests(&self) -> usize {
-        self.requests.len()
-    }
-}
-
-/// The Deepgram Speech-to-Text API client for transcribing audio into the input language
+// The Deepgram Speech-to-Text API client for transcribing audio into the input language
 ///
 /// https://developers.deepgram.com/reference/speech-to-text-api/listen
 pub struct PreRecordedAudioApi<HC: HttpClient> {
-    deepgram_api_token: Rc<str>,
-    http_client: Rc<HC>,
+    deepgram_api_token: Arc<str>,
+    http_client: Arc<HC>,
 }
 
 #[allow(unused)]
 impl<HC: HttpClient> PreRecordedAudioApi<HC> {
-    pub fn new(deepgram_api_key: String, http_client: impl Into<Rc<HC>>) -> Self {
+    pub fn new(deepgram_api_key: String, http_client: impl Into<Arc<HC>>) -> Self {
         Self {
-            deepgram_api_token: Rc::from(format!("Token {}", deepgram_api_key)),
+            deepgram_api_token: format!("Token {}", deepgram_api_key).into(),
             http_client: http_client.into(),
         }
     }
 
     pub fn get_supported_languages(&self) -> &[Language] {
         &DEEPGRAM_SUPPORTED_LANGUAGES
-    }
-
-    pub fn queue_transcription(
-        &self,
-        requests: Vec<TranscriptionRequest>,
-    ) -> TranscriptionQueue<HC> {
-        TranscriptionQueue::new(self, requests)
     }
 }
 
@@ -437,11 +367,8 @@ mod tests {
     use golem_stt::client::HttpResponse;
     use golem_stt::{client::HttpClient, error::Error};
     use reqwest::{Client, IntoUrl, Method, Request, RequestBuilder};
+    use std::cell::{Ref, RefCell};
     use std::collections::VecDeque;
-    use std::{
-        cell::{Ref, RefCell},
-        rc::Rc,
-    };
 
     const TEST_API_KEY: &str = "test-deepgram-api-key";
 
@@ -555,7 +482,7 @@ mod tests {
 
     #[test]
     fn test_api_key_gets_passed_as_auth_header() {
-        let mock_client = Rc::new(MockHttpClient::new());
+        let mock_client = Arc::new(MockHttpClient::new());
 
         mock_client.expect_response(create_mock_success_response());
 
@@ -584,7 +511,7 @@ mod tests {
 
     #[test]
     fn test_request_gets_sent_with_correct_content_type_and_body() {
-        let mock_client = Rc::new(MockHttpClient::new());
+        let mock_client = Arc::new(MockHttpClient::new());
 
         mock_client.expect_response(create_mock_success_response());
 
@@ -624,7 +551,7 @@ mod tests {
 
     #[test]
     fn test_query_parameters_other_than_keywords_and_keyterms_set_correctly() {
-        let mock_client = Rc::new(MockHttpClient::new());
+        let mock_client = Arc::new(MockHttpClient::new());
 
         mock_client.expect_response(create_mock_success_response());
 
@@ -665,7 +592,7 @@ mod tests {
 
     #[test]
     fn test_query_keyterms_params_set_correctly_in_case_of_nova3_model() {
-        let mock_client = Rc::new(MockHttpClient::new());
+        let mock_client = Arc::new(MockHttpClient::new());
 
         mock_client.expect_response(create_mock_success_response());
 
@@ -710,7 +637,7 @@ mod tests {
 
     #[test]
     fn test_query_keyterms_params_set_correctly_in_case_of_nova2_nova1_enhanced_and_base_model() {
-        let mock_client = Rc::new(MockHttpClient::new());
+        let mock_client = Arc::new(MockHttpClient::new());
 
         mock_client.expect_response(create_mock_success_response());
 
@@ -768,7 +695,7 @@ mod tests {
 
     #[test]
     fn test_query_parameters_not_set_when_disabled() {
-        let mock_client = Rc::new(MockHttpClient::new());
+        let mock_client = Arc::new(MockHttpClient::new());
 
         mock_client.expect_response(create_mock_success_response());
 
@@ -1227,695 +1154,6 @@ mod tests {
                 assert_eq!(provider_error, error_body);
             }
             _ => panic!("Expected APIUnknown error"),
-        }
-    }
-
-    #[test]
-    fn test_queue_transcription_get_next_success() {
-        let mock_client = MockHttpClient::new();
-
-        let response_body_1 = r#"{
-                "metadata": {
-                    "transaction_key": "test-transaction-key-1",
-                    "request_id": "test-request-id-1",
-                    "sha256": "test-sha256-1",
-                    "created": "2023-01-01T00:00:00Z",
-                    "duration": 5.2,
-                    "channels": 1,
-                    "models": ["nova-2"],
-                    "model_info": {
-                        "nova-2": {
-                            "name": "nova-2",
-                            "version": "1.0.0",
-                            "arch": "transformer"
-                        }
-                    }
-                },
-                "results": {
-                    "channels": [{
-                        "alternatives": [{
-                            "transcript": "First audio transcription",
-                            "confidence": 0.92,
-                            "words": [{
-                                "word": "First",
-                                "start": 0.0,
-                                "end": 0.5,
-                                "confidence": 0.92
-                            }, {
-                                "word": "audio",
-                                "start": 0.6,
-                                "end": 1.0,
-                                "confidence": 0.92
-                            }]
-                        }]
-                    }]
-                }
-            }"#;
-
-        let response_body_2 = r#"{
-                "metadata": {
-                    "transaction_key": "test-transaction-key-2",
-                    "request_id": "test-request-id-2",
-                    "sha256": "test-sha256-2",
-                    "created": "2023-01-01T00:00:00Z",
-                    "duration": 3.8,
-                    "channels": 2,
-                    "models": ["nova-2"],
-                    "model_info": {
-                        "nova-2": {
-                            "name": "nova-2",
-                            "version": "1.0.0",
-                            "arch": "transformer"
-                        }
-                    }
-                },
-                "results": {
-                    "channels": [{
-                        "alternatives": [{
-                            "transcript": "Second audio transcription",
-                            "confidence": 0.88,
-                            "words": [{
-                                "word": "Second",
-                                "start": 0.0,
-                                "end": 0.6,
-                                "confidence": 0.88
-                            }]
-                        }]
-                    }]
-                }
-            }"#;
-
-        mock_client.expect_response(HttpResponse::new(200, response_body_1));
-        mock_client.expect_response(HttpResponse::new(200, response_body_2));
-
-        let api: PreRecordedAudioApi<MockHttpClient> =
-            PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
-
-        let audio_data_1 = b"first audio data".to_vec();
-        let audio_data_2 = b"second audio data".to_vec();
-
-        let requests = vec![
-            TranscriptionRequest {
-                audio: audio_data_1.clone(),
-                audio_config: AudioConfig {
-                    format: AudioFormat::wav,
-                    channels: Some(1),
-                },
-                transcription_config: Some(TranscriptionConfig {
-                    language: Some("en".to_string()),
-                    model: Some("nova-2".to_string()),
-                    enable_profanity_filter: false,
-                    enable_speaker_diarization: false,
-                    keywords: vec![],
-                    keyterms: vec![],
-                }),
-            },
-            TranscriptionRequest {
-                audio: audio_data_2.clone(),
-                audio_config: AudioConfig {
-                    format: AudioFormat::mp3,
-                    channels: Some(2),
-                },
-                transcription_config: None,
-            },
-        ];
-
-        let mut queue = api.queue_transcription(requests);
-
-        let result_1 = queue.get_next().unwrap().unwrap();
-        let expected_response_1 = TranscriptionResponse {
-            language: "en".to_string(),
-            audio_size_bytes: audio_data_1.len(),
-            deepgram_transcription: DeepgramTranscription {
-                metadata: Metadata {
-                    transaction_key: "test-transaction-key-1".to_string(),
-                    request_id: "test-request-id-1".to_string(),
-                    sha256: "test-sha256-1".to_string(),
-                    created: "2023-01-01T00:00:00Z".to_string(),
-                    duration: 5.2,
-                    channels: 1,
-                    models: vec!["nova-2".to_string()],
-                    model_info: HashMap::from([(
-                        "nova-2".to_string(),
-                        ModelInfo {
-                            name: "nova-2".to_string(),
-                            version: "1.0.0".to_string(),
-                            arch: "transformer".to_string(),
-                        },
-                    )]),
-                },
-                results: Results {
-                    channels: vec![Channel {
-                        alternatives: vec![Alternative {
-                            transcript: "First audio transcription".to_string(),
-                            confidence: 0.92,
-                            words: vec![
-                                Word {
-                                    word: "First".to_string(),
-                                    start: 0.0,
-                                    end: 0.5,
-                                    confidence: 0.92,
-                                    speaker: None,
-                                    speaker_confidence: None,
-                                },
-                                Word {
-                                    word: "audio".to_string(),
-                                    start: 0.6,
-                                    end: 1.0,
-                                    confidence: 0.92,
-                                    speaker: None,
-                                    speaker_confidence: None,
-                                },
-                            ],
-                        }],
-                    }],
-                },
-            },
-        };
-        assert_eq!(result_1, expected_response_1);
-
-        let result_2 = queue.get_next().unwrap().unwrap();
-        let expected_response_2 = TranscriptionResponse {
-            language: String::new(),
-            audio_size_bytes: audio_data_2.len(),
-            deepgram_transcription: DeepgramTranscription {
-                metadata: Metadata {
-                    transaction_key: "test-transaction-key-2".to_string(),
-                    request_id: "test-request-id-2".to_string(),
-                    sha256: "test-sha256-2".to_string(),
-                    created: "2023-01-01T00:00:00Z".to_string(),
-                    duration: 3.8,
-                    channels: 2,
-                    models: vec!["nova-2".to_string()],
-                    model_info: HashMap::from([(
-                        "nova-2".to_string(),
-                        ModelInfo {
-                            name: "nova-2".to_string(),
-                            version: "1.0.0".to_string(),
-                            arch: "transformer".to_string(),
-                        },
-                    )]),
-                },
-                results: Results {
-                    channels: vec![Channel {
-                        alternatives: vec![Alternative {
-                            transcript: "Second audio transcription".to_string(),
-                            confidence: 0.88,
-                            words: vec![Word {
-                                word: "Second".to_string(),
-                                start: 0.0,
-                                end: 0.6,
-                                confidence: 0.88,
-                                speaker: None,
-                                speaker_confidence: None,
-                            }],
-                        }],
-                    }],
-                },
-            },
-        };
-        assert_eq!(result_2, expected_response_2);
-
-        // No more results
-        let result_3 = queue.get_next();
-        assert!(result_3.is_none());
-    }
-
-    #[test]
-    fn test_queue_transcription_get_next_with_failure() {
-        let mock_client = MockHttpClient::new();
-
-        let success_response_body = r#"{
-               "metadata": {
-                   "transaction_key": "success-transaction",
-                   "request_id": "success-request",
-                   "sha256": "success-sha256",
-                   "created": "2023-01-01T00:00:00Z",
-                   "duration": 2.3,
-                   "channels": 1,
-                   "models": ["nova-2"],
-                   "model_info": {
-                       "nova-2": {
-                           "name": "nova-2",
-                           "version": "1.0.0",
-                           "arch": "transformer"
-                       }
-                   }
-               },
-               "results": {
-                   "channels": [{
-                       "alternatives": [{
-                           "transcript": "This worked fine",
-                           "confidence": 0.89,
-                           "words": [{
-                               "word": "This",
-                               "start": 0.0,
-                               "end": 0.3,
-                               "confidence": 0.89
-                           }, {
-                               "word": "worked",
-                               "start": 0.4,
-                               "end": 0.8,
-                               "confidence": 0.89
-                           }]
-                       }]
-                   }]
-               }
-           }"#;
-
-        mock_client.expect_response(HttpResponse::new(200, success_response_body));
-        mock_client.expect_response(HttpResponse::new(401, "Unauthorized: Invalid API key"));
-
-        let api: PreRecordedAudioApi<MockHttpClient> =
-            PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
-
-        let audio_data_1 = b"good audio data".to_vec();
-        let audio_data_2 = b"bad audio data".to_vec();
-
-        let requests = vec![
-            TranscriptionRequest {
-                audio: audio_data_1.clone(),
-                audio_config: AudioConfig {
-                    format: AudioFormat::wav,
-                    channels: Some(1),
-                },
-                transcription_config: Some(TranscriptionConfig {
-                    language: Some("en".to_string()),
-                    model: Some("nova-2".to_string()),
-                    enable_profanity_filter: false,
-                    enable_speaker_diarization: false,
-                    keywords: vec![],
-                    keyterms: vec![],
-                }),
-            },
-            TranscriptionRequest {
-                audio: audio_data_2.clone(),
-                audio_config: AudioConfig {
-                    format: AudioFormat::mp3,
-                    channels: Some(2),
-                },
-                transcription_config: None,
-            },
-        ];
-
-        let mut queue = api.queue_transcription(requests);
-
-        let result_1 = queue.get_next().unwrap().unwrap();
-        let expected_response_1 = TranscriptionResponse {
-            language: "en".to_string(),
-            audio_size_bytes: audio_data_1.len(),
-            deepgram_transcription: DeepgramTranscription {
-                metadata: Metadata {
-                    transaction_key: "success-transaction".to_string(),
-                    request_id: "success-request".to_string(),
-                    sha256: "success-sha256".to_string(),
-                    created: "2023-01-01T00:00:00Z".to_string(),
-                    duration: 2.3,
-                    channels: 1,
-                    models: vec!["nova-2".to_string()],
-                    model_info: HashMap::from([(
-                        "nova-2".to_string(),
-                        ModelInfo {
-                            name: "nova-2".to_string(),
-                            version: "1.0.0".to_string(),
-                            arch: "transformer".to_string(),
-                        },
-                    )]),
-                },
-                results: Results {
-                    channels: vec![Channel {
-                        alternatives: vec![Alternative {
-                            transcript: "This worked fine".to_string(),
-                            confidence: 0.89,
-                            words: vec![
-                                Word {
-                                    word: "This".to_string(),
-                                    start: 0.0,
-                                    end: 0.3,
-                                    confidence: 0.89,
-                                    speaker: None,
-                                    speaker_confidence: None,
-                                },
-                                Word {
-                                    word: "worked".to_string(),
-                                    start: 0.4,
-                                    end: 0.8,
-                                    confidence: 0.89,
-                                    speaker: None,
-                                    speaker_confidence: None,
-                                },
-                            ],
-                        }],
-                    }],
-                },
-            },
-        };
-        assert_eq!(result_1, expected_response_1);
-
-        let result_2 = queue.get_next().unwrap();
-        match result_2 {
-            Err(Error::APIUnauthorized { provider_error }) => {
-                assert_eq!(provider_error, "Unauthorized: Invalid API key");
-            }
-            _ => panic!("Expected APIUnauthorized error"),
-        }
-
-        // No more results
-        let result_3 = queue.get_next();
-        assert!(result_3.is_none());
-    }
-
-    #[test]
-    fn test_queue_transcription_blocking_get_next_success() {
-        let mock_client = MockHttpClient::new();
-
-        let response_body_1 = r#"{
-               "metadata": {
-                   "transaction_key": "batch-transaction-1",
-                   "request_id": "batch-request-1",
-                   "sha256": "batch-sha256-1",
-                   "created": "2023-01-01T00:00:00Z",
-                   "duration": 2.1,
-                   "channels": 1,
-                   "models": ["nova-2"],
-                   "model_info": {
-                       "nova-2": {
-                           "name": "nova-2",
-                           "version": "1.0.0",
-                           "arch": "transformer"
-                       }
-                   }
-               },
-               "results": {
-                   "channels": [{
-                       "alternatives": [{
-                           "transcript": "Batch first result",
-                           "confidence": 0.95,
-                           "words": [{
-                               "word": "Batch",
-                               "start": 0.0,
-                               "end": 0.5,
-                               "confidence": 0.95
-                           }]
-                       }]
-                   }]
-               }
-           }"#;
-
-        let response_body_2 = r#"{
-               "metadata": {
-                   "transaction_key": "batch-transaction-2",
-                   "request_id": "batch-request-2",
-                   "sha256": "batch-sha256-2",
-                   "created": "2023-01-01T00:00:00Z",
-                   "duration": 4.7,
-                   "channels": 1,
-                   "models": ["nova-2"],
-                   "model_info": {
-                       "nova-2": {
-                           "name": "nova-2",
-                           "version": "1.0.0",
-                           "arch": "transformer"
-                       }
-                   }
-               },
-               "results": {
-                   "channels": [{
-                       "alternatives": [{
-                           "transcript": "Batch second result",
-                           "confidence": 0.91,
-                           "words": [{
-                               "word": "Batch",
-                               "start": 0.0,
-                               "end": 0.5,
-                               "confidence": 0.91
-                           }, {
-                               "word": "second",
-                               "start": 0.6,
-                               "end": 1.0,
-                               "confidence": 0.91
-                           }]
-                       }]
-                   }]
-               }
-           }"#;
-
-        mock_client.expect_response(HttpResponse::new(200, response_body_1));
-        mock_client.expect_response(HttpResponse::new(200, response_body_2));
-
-        let api: PreRecordedAudioApi<MockHttpClient> =
-            PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
-
-        let audio_data_1 = b"batch audio 1".to_vec();
-        let audio_data_2 = b"batch audio 2".to_vec();
-
-        let requests = vec![
-            TranscriptionRequest {
-                audio: audio_data_1.clone(),
-                audio_config: AudioConfig {
-                    format: AudioFormat::wav,
-                    channels: Some(1),
-                },
-                transcription_config: Some(TranscriptionConfig {
-                    language: Some("fr".to_string()),
-                    model: Some("nova-2".to_string()),
-                    enable_profanity_filter: true,
-                    enable_speaker_diarization: false,
-                    keywords: vec![],
-                    keyterms: vec![],
-                }),
-            },
-            TranscriptionRequest {
-                audio: audio_data_2.clone(),
-                audio_config: AudioConfig {
-                    format: AudioFormat::flac,
-                    channels: None,
-                },
-                transcription_config: Some(TranscriptionConfig {
-                    language: Some("de".to_string()),
-                    model: Some("nova-2".to_string()),
-                    enable_profanity_filter: false,
-                    enable_speaker_diarization: true,
-                    keywords: vec![],
-                    keyterms: vec![],
-                }),
-            },
-        ];
-
-        let mut queue = api.queue_transcription(requests);
-        let results = queue.blocking_get_next();
-
-        // Verify first result
-        let expected_response_1 = TranscriptionResponse {
-            language: "fr".to_string(),
-            audio_size_bytes: audio_data_1.len(),
-            deepgram_transcription: DeepgramTranscription {
-                metadata: Metadata {
-                    transaction_key: "batch-transaction-1".to_string(),
-                    request_id: "batch-request-1".to_string(),
-                    sha256: "batch-sha256-1".to_string(),
-                    created: "2023-01-01T00:00:00Z".to_string(),
-                    duration: 2.1,
-                    channels: 1,
-                    models: vec!["nova-2".to_string()],
-                    model_info: HashMap::from([(
-                        "nova-2".to_string(),
-                        ModelInfo {
-                            name: "nova-2".to_string(),
-                            version: "1.0.0".to_string(),
-                            arch: "transformer".to_string(),
-                        },
-                    )]),
-                },
-                results: Results {
-                    channels: vec![Channel {
-                        alternatives: vec![Alternative {
-                            transcript: "Batch first result".to_string(),
-                            confidence: 0.95,
-                            words: vec![Word {
-                                word: "Batch".to_string(),
-                                start: 0.0,
-                                end: 0.5,
-                                confidence: 0.95,
-                                speaker: None,
-                                speaker_confidence: None,
-                            }],
-                        }],
-                    }],
-                },
-            },
-        };
-        assert_eq!(results[0].as_ref().unwrap(), &expected_response_1);
-
-        // Verify second result
-        let expected_response_2 = TranscriptionResponse {
-            language: "de".to_string(),
-            audio_size_bytes: audio_data_2.len(),
-            deepgram_transcription: DeepgramTranscription {
-                metadata: Metadata {
-                    transaction_key: "batch-transaction-2".to_string(),
-                    request_id: "batch-request-2".to_string(),
-                    sha256: "batch-sha256-2".to_string(),
-                    created: "2023-01-01T00:00:00Z".to_string(),
-                    duration: 4.7,
-                    channels: 1,
-                    models: vec!["nova-2".to_string()],
-                    model_info: HashMap::from([(
-                        "nova-2".to_string(),
-                        ModelInfo {
-                            name: "nova-2".to_string(),
-                            version: "1.0.0".to_string(),
-                            arch: "transformer".to_string(),
-                        },
-                    )]),
-                },
-                results: Results {
-                    channels: vec![Channel {
-                        alternatives: vec![Alternative {
-                            transcript: "Batch second result".to_string(),
-                            confidence: 0.91,
-                            words: vec![
-                                Word {
-                                    word: "Batch".to_string(),
-                                    start: 0.0,
-                                    end: 0.5,
-                                    confidence: 0.91,
-                                    speaker: None,
-                                    speaker_confidence: None,
-                                },
-                                Word {
-                                    word: "second".to_string(),
-                                    start: 0.6,
-                                    end: 1.0,
-                                    confidence: 0.91,
-                                    speaker: None,
-                                    speaker_confidence: None,
-                                },
-                            ],
-                        }],
-                    }],
-                },
-            },
-        };
-        assert_eq!(results[1].as_ref().unwrap(), &expected_response_2);
-    }
-
-    #[test]
-    fn test_queue_transcription_blocking_get_next_with_failure() {
-        let mock_client = MockHttpClient::new();
-
-        let success_response_body = r#"{
-                "metadata": {
-                    "transaction_key": "success-transaction",
-                    "request_id": "success-request",
-                    "sha256": "success-sha256",
-                    "created": "2023-01-01T00:00:00Z",
-                    "duration": 1.5,
-                    "channels": 1,
-                    "models": ["nova-2"],
-                    "model_info": {
-                        "nova-2": {
-                            "name": "nova-2",
-                            "version": "1.0.0",
-                            "arch": "transformer"
-                        }
-                    }
-                },
-                "results": {
-                    "channels": [{
-                        "alternatives": [{
-                            "transcript": "Success transcription",
-                            "confidence": 0.97,
-                            "words": [{
-                                "word": "Success",
-                                "start": 0.0,
-                                "end": 0.7,
-                                "confidence": 0.97
-                            }]
-                        }]
-                    }]
-                }
-            }"#;
-
-        mock_client.expect_response(HttpResponse::new(200, success_response_body));
-        mock_client.expect_response(HttpResponse::new(400, "Invalid audio format"));
-
-        let api: PreRecordedAudioApi<MockHttpClient> =
-            PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
-
-        let audio_data_1 = b"valid audio".to_vec();
-        let audio_data_2 = b"invalid audio".to_vec();
-
-        let requests = vec![
-            TranscriptionRequest {
-                audio: audio_data_1.clone(),
-                audio_config: AudioConfig {
-                    format: AudioFormat::wav,
-                    channels: Some(1),
-                },
-                transcription_config: None,
-            },
-            TranscriptionRequest {
-                audio: audio_data_2.clone(),
-                audio_config: AudioConfig {
-                    format: AudioFormat::mp3,
-                    channels: Some(1),
-                },
-                transcription_config: None,
-            },
-        ];
-
-        let mut queue = api.queue_transcription(requests);
-        let results = queue.blocking_get_next();
-
-        assert_eq!(results.len(), 2);
-
-        let expected_response = TranscriptionResponse {
-            language: String::new(),
-            audio_size_bytes: audio_data_1.len(),
-            deepgram_transcription: DeepgramTranscription {
-                metadata: Metadata {
-                    transaction_key: "success-transaction".to_string(),
-                    request_id: "success-request".to_string(),
-                    sha256: "success-sha256".to_string(),
-                    created: "2023-01-01T00:00:00Z".to_string(),
-                    duration: 1.5,
-                    channels: 1,
-                    models: vec!["nova-2".to_string()],
-                    model_info: HashMap::from([(
-                        "nova-2".to_string(),
-                        ModelInfo {
-                            name: "nova-2".to_string(),
-                            version: "1.0.0".to_string(),
-                            arch: "transformer".to_string(),
-                        },
-                    )]),
-                },
-                results: Results {
-                    channels: vec![Channel {
-                        alternatives: vec![Alternative {
-                            transcript: "Success transcription".to_string(),
-                            confidence: 0.97,
-                            words: vec![Word {
-                                word: "Success".to_string(),
-                                start: 0.0,
-                                end: 0.7,
-                                confidence: 0.97,
-                                speaker: None,
-                                speaker_confidence: None,
-                            }],
-                        }],
-                    }],
-                },
-            },
-        };
-        assert_eq!(results[0].as_ref().unwrap(), &expected_response);
-
-        match &results[1] {
-            Err(Error::APIBadRequest { provider_error }) => {
-                assert_eq!(provider_error, "Invalid audio format");
-            }
-            _ => panic!("Expected APIBadRequest error"),
         }
     }
 }

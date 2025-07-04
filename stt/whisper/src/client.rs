@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use golem_stt::client::{HttpClient, ReqwestHttpClient, SttProviderClient};
 use log::trace;
@@ -114,17 +114,15 @@ pub struct TranscriptionConfig {
 ///
 /// https://platform.openai.com/docs/api-reference/audio/createTranscription
 pub struct TranscriptionsApi<HC: HttpClient> {
-    openai_api_token: Rc<str>,
-    openai_api_base_url: Rc<str>,
-    http_client: Rc<HC>,
+    openai_api_token: Arc<str>,
+    http_client: Arc<HC>,
 }
 
 #[allow(unused)]
 impl<HC: HttpClient> TranscriptionsApi<HC> {
-    pub fn new(openai_api_key: String, http_client: impl Into<Rc<HC>>) -> Self {
+    pub fn new(openai_api_key: String, http_client: impl Into<Arc<HC>>) -> Self {
         Self {
-            openai_api_token: Rc::from(format!("Bearer {}", openai_api_key)),
-            openai_api_base_url: Rc::from(BASE_URL),
+            openai_api_token: format!("Bearer {}", openai_api_key).into(),
             http_client: http_client.into(),
         }
     }
@@ -181,7 +179,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
             .http_client
             .request(
                 Method::POST,
-                format!("{}/v1/audio/transcriptions", self.openai_api_base_url),
+                format!("{}/v1/audio/transcriptions", BASE_URL),
             )
             .header("Authorization", &*self.openai_api_token)
             .multipart(form)
@@ -424,7 +422,7 @@ mod tests {
             }
         "#;
 
-        let mock_client = Rc::new(MockHttpClient::new());
+        let mock_client = Arc::new(MockHttpClient::new());
         mock_client.expect_response(HttpResponse::new(200, response_body));
 
         let api: TranscriptionsApi<MockHttpClient> =
@@ -486,7 +484,7 @@ mod tests {
             }
         "#;
 
-        let mock_client = Rc::new(MockHttpClient::new());
+        let mock_client = Arc::new(MockHttpClient::new());
         mock_client.expect_response(HttpResponse::new(200, response_body));
 
         let api: TranscriptionsApi<MockHttpClient> =
@@ -629,7 +627,7 @@ mod tests {
                }
            "#;
 
-        let mock_client = Rc::new(MockHttpClient::new());
+        let mock_client = Arc::new(MockHttpClient::new());
         mock_client.expect_response(HttpResponse::new(200, response_body));
 
         let api: TranscriptionsApi<MockHttpClient> =

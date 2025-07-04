@@ -1,7 +1,10 @@
-use std::{cell::RefCell, rc::Rc};
+use std::cell::RefCell;
+use std::sync::OnceLock;
 
-use client::PreRecordedAudioApi;
+use client::{PreRecordedAudioApi, TranscriptionRequest, TranscriptionResponse};
 use golem_stt::client::{ReqwestHttpClient, SttProviderClient};
+use golem_stt::error::Error;
+use golem_stt::transcription_queue::TranscriptionQueue;
 
 use golem_stt::golem::stt::languages::{Guest as LanguageGuest, LanguageInfo};
 
@@ -19,35 +22,19 @@ mod conversions;
 #[allow(unused)]
 struct Component;
 
-thread_local! {
-    static CLIENT_CACHE: RefCell<Option<Rc<PreRecordedAudioApi<ReqwestHttpClient>>>> = const { RefCell::new(None) };
-}
+static CLIENT: OnceLock<PreRecordedAudioApi<ReqwestHttpClient>> = OnceLock::new();
 
-fn get_client() -> Result<Rc<PreRecordedAudioApi<ReqwestHttpClient>>, String> {
-    CLIENT_CACHE.with(|cache| {
-        let mut cache_ref = cache.borrow_mut();
-
-        match cache_ref.as_ref() {
-            Some(client) => Ok(client.clone()),
-            None => {
-                let api_key = std::env::var("OPENAI_API_KEY").unwrap_or_else(|_| "".to_string());
-
-                let client = Rc::new({
-                    let openai_api_key = api_key;
-                    PreRecordedAudioApi::live(openai_api_key)
-                });
-                *cache_ref = Some(client.clone());
-                Ok(client)
-            }
-        }
+fn get_client() -> &'static PreRecordedAudioApi<ReqwestHttpClient> {
+    CLIENT.get_or_init(|| {
+        let api_key = std::env::var("DEEPGRAM_API_TOKEN")
+            .expect("env variable DEEPGRAM_API_TOKEN was not set");
+        PreRecordedAudioApi::live(api_key)
     })
 }
 
 impl LanguageGuest for Component {
     fn list_languages() -> Result<Vec<LanguageInfo>, WitSttError> {
-        let api_client = get_client().map_err(|_| {
-            WitSttError::InternalError("Api client should be available".to_string())
-        })?;
+        let api_client = get_client();
 
         let supported_languages = api_client.get_supported_languages();
         Ok(supported_languages
@@ -61,15 +48,38 @@ impl LanguageGuest for Component {
     }
 }
 
-struct DeepgramTranscriptionQueue {}
+struct DeepgramTranscriptionQueue {
+    queue: RefCell<
+        TranscriptionQueue<
+            'static,
+            PreRecordedAudioApi<ReqwestHttpClient>,
+            TranscriptionRequest,
+            TranscriptionResponse,
+            Error,
+        >,
+    >,
+}
 
 impl GuestTranscriptionQueue for DeepgramTranscriptionQueue {
-    fn get_next(&self) -> Option<WitTranscriptionResult> {
-        todo!()
+    fn get_next(&self) -> Option<Result<WitTranscriptionResult, WitSttError>> {
+        self.queue.borrow_mut().get_next().map(|result| {
+            result
+                .map(|transcription| transcription.into())
+                .map_err(|e| e.into())
+        })
     }
 
-    fn blocking_get_next(&self) -> Vec<WitTranscriptionResult> {
-        todo!()
+    fn blocking_get_next(&self) -> Vec<Result<WitTranscriptionResult, WitSttError>> {
+        self.queue
+            .borrow_mut()
+            .blocking_get_next()
+            .into_iter()
+            .map(|result| {
+                result
+                    .map(|transcription| transcription.into())
+                    .map_err(|e| e.into())
+            })
+            .collect()
     }
 }
 
@@ -77,15 +87,32 @@ impl TranscriptionGuest for Component {
     type TranscriptionQueue = DeepgramTranscriptionQueue;
 
     fn transcribe(req: WitTranscriptionRequest) -> Result<WitTranscriptionResult, WitSttError> {
-        let api_client = get_client().expect("api client should be available"); // Fixme: handle error
+        let api_client = get_client();
 
         let api_response = api_client.transcribe_audio(req.try_into()?)?;
 
         Ok(api_response.into())
     }
 
-    fn queue_transcription(_requests: Vec<WitTranscriptionRequest>) -> WitTranscriptionQueue {
-        todo!()
+    fn queue_transcription(
+        requests: Vec<WitTranscriptionRequest>,
+    ) -> Result<WitTranscriptionQueue, WitSttError> {
+        let api_client = get_client();
+
+        let reqs: Result<Vec<TranscriptionRequest>, WitSttError> = requests
+            .into_iter()
+            .map(|req| req.try_into())
+            .try_fold(Vec::new(), |mut acc, res| {
+                let item = res?;
+                acc.push(item);
+                Ok(acc)
+            });
+
+        let queue = TranscriptionQueue::new(api_client, reqs?);
+
+        Ok(WitTranscriptionQueue::new(DeepgramTranscriptionQueue {
+            queue: queue.into(),
+        }))
     }
 }
 

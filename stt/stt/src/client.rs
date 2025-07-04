@@ -66,6 +66,6 @@ impl HttpClient for ReqwestHttpClient {
     }
 }
 
-pub trait SttProviderClient<Req, Res, Err: std::error::Error> {
-    fn transcribe_audio(&self, request: Req) -> Result<Res, Err>;
+pub trait SttProviderClient<REQ, RES, ERR: std::error::Error> {
+    fn transcribe_audio(&self, request: REQ) -> Result<RES, ERR>;
 }
