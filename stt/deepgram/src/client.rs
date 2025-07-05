@@ -1,15 +1,18 @@
 use std::{collections::HashMap, sync::Arc};
 
+use bytes::Bytes;
 use golem_stt::{
-    client::{HttpClient, ReqwestHttpClient, SttProviderClient},
+    client::SttProviderClient,
+    client2::{HttpClient, ReqwestHttpClient2},
     error::Error,
     languages::Language,
 };
+use http::{Method, Request, StatusCode};
 use log::trace;
-use reqwest::Method;
 use serde::{Deserialize, Serialize};
+use url::Url;
 
-const BASE_URL: &str = "https://api.deepgram.com";
+const BASE_URL: &str = "https://api.deepgram.com/v1/listen";
 
 const DEEPGRAM_SUPPORTED_LANGUAGES: [Language; 56] = [
     Language::new("multi", "Multilingual", "Multi"),
@@ -158,9 +161,9 @@ impl<HC: HttpClient> PreRecordedAudioApi<HC> {
     }
 }
 
-impl PreRecordedAudioApi<ReqwestHttpClient> {
+impl PreRecordedAudioApi<ReqwestHttpClient2> {
     pub fn live(deepgram_api_key: String) -> Self {
-        Self::new(deepgram_api_key, ReqwestHttpClient::new())
+        Self::new(deepgram_api_key, ReqwestHttpClient2::new())
     }
 }
 
@@ -181,25 +184,25 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
             .as_ref()
             .and_then(|config| config.language.clone());
 
-        let mut query: Vec<(&str, String)> = vec![];
+        let mut query_params: Vec<(&str, String)> = vec![];
 
         if let Some(channels) = request.audio_config.channels {
             if channels > 1 {
-                query.push(("multichannel", "true".to_string()));
+                query_params.push(("multichannel", "true".to_string()));
             }
         }
 
         if let Some(transcription_config) = request.transcription_config {
             if let Some(language) = transcription_config.language {
-                query.push(("language", language));
+                query_params.push(("language", language));
             }
 
             if transcription_config.enable_profanity_filter {
-                query.push(("profanity_filter", "true".to_string()));
+                query_params.push(("profanity_filter", "true".to_string()));
             }
 
             if transcription_config.enable_speaker_diarization {
-                query.push(("diarize", "true".to_string()));
+                query_params.push(("diarize", "true".to_string()));
             }
 
             if transcription_config
@@ -210,7 +213,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
             {
                 transcription_config.keyterms.iter().for_each(|keyterm| {
                     let encoded = keyterm.replace(" ", "+");
-                    query.push(("keyterm", encoded));
+                    query_params.push(("keyterm", encoded));
                 });
             }
 
@@ -230,32 +233,38 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
                 transcription_config.keywords.iter().for_each(|keyword| {
                     let encoded = keyword.value.replace(" ", "+");
                     if let Some(boost) = keyword.boost {
-                        query.push(("keyword", format!("{}:{}", encoded, boost)));
+                        query_params.push(("keyword", format!("{}:{}", encoded, boost)));
                     } else {
-                        query.push(("keyword", encoded));
+                        query_params.push(("keyword", encoded));
                     }
                 });
             }
 
             if let Some(model) = transcription_config.model {
-                query.push(("model", model));
+                query_params.push(("model", model));
             }
         }
 
-        let req = self
-            .http_client
-            .request(Method::POST, format!("{}/v1/listen", BASE_URL))
+        let mut url =
+            Url::parse(BASE_URL).map_err(|_err| Error::UriParseError(BASE_URL.to_string()))?;
+
+        for (key, value) in query_params {
+            url.query_pairs_mut().append_pair(key, &value);
+        }
+
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(url.as_str())
             .header(reqwest::header::CONTENT_TYPE, mime_type)
             .header("Authorization", &*self.deepgram_api_token)
-            .query(query.as_slice())
-            .body(request.audio)
-            .build()?;
+            .body(Bytes::from(request.audio))?;
 
         let response = self.http_client.execute(req)?;
 
         match response.status() {
-            200 => {
-                let deepgram_transcription: DeepgramTranscription = response.json()?;
+            StatusCode::OK => {
+                let deepgram_transcription: DeepgramTranscription =
+                    serde_json::from_slice(response.body())?;
 
                 Ok(TranscriptionResponse {
                     language: req_language.unwrap_or_default(),
@@ -263,23 +272,23 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
                     deepgram_transcription,
                 })
             }
-            400 => Err(Error::APIBadRequest {
-                provider_error: response.text()?,
+            StatusCode::BAD_REQUEST => Err(Error::APIBadRequest {
+                provider_error: String::from_utf8(response.body().to_vec())?,
             }),
-            401 => Err(Error::APIUnauthorized {
-                provider_error: response.text()?,
+            StatusCode::UNAUTHORIZED => Err(Error::APIUnauthorized {
+                provider_error: String::from_utf8(response.body().to_vec())?,
             }),
-            402 => Err(Error::APIAccessDenied {
-                provider_error: response.text()?,
+            StatusCode::PAYMENT_REQUIRED => Err(Error::APIAccessDenied {
+                provider_error: String::from_utf8(response.body().to_vec())?,
             }),
-            403 => Err(Error::APIForbidden {
-                provider_error: response.text()?,
+            StatusCode::FORBIDDEN => Err(Error::APIForbidden {
+                provider_error: String::from_utf8(response.body().to_vec())?,
             }),
-            status if status >= 500 => Err(Error::APIInternalServerError {
-                provider_error: response.text()?,
+            status if status.is_server_error() => Err(Error::APIInternalServerError {
+                provider_error: String::from_utf8(response.body().to_vec())?,
             }),
             _ => Err(Error::APIUnknown {
-                provider_error: response.text()?,
+                provider_error: String::from_utf8(response.body().to_vec())?,
             }),
         }
     }
@@ -363,18 +372,18 @@ pub struct Word {
 
 #[cfg(test)]
 mod tests {
+
+    use http::Response;
+
     use super::*;
-    use golem_stt::client::HttpResponse;
-    use golem_stt::{client::HttpClient, error::Error};
-    use reqwest::{Client, IntoUrl, Method, Request, RequestBuilder};
     use std::cell::{Ref, RefCell};
     use std::collections::VecDeque;
 
     const TEST_API_KEY: &str = "test-deepgram-api-key";
 
     struct MockHttpClient {
-        pub responses: RefCell<VecDeque<Result<HttpResponse, Error>>>,
-        pub captured_requests: RefCell<Vec<reqwest::Request>>,
+        pub responses: RefCell<VecDeque<Result<Response<Bytes>, Error>>>,
+        pub captured_requests: RefCell<Vec<Request<Bytes>>>,
     }
 
     #[allow(unused)]
@@ -386,11 +395,11 @@ mod tests {
             }
         }
 
-        pub fn expect_response(&self, response: HttpResponse) {
+        pub fn expect_response(&self, response: Response<Bytes>) {
             self.responses.borrow_mut().push_back(Ok(response));
         }
 
-        pub fn get_captured_requests(&self) -> Ref<Vec<reqwest::Request>> {
+        pub fn get_captured_requests(&self) -> Ref<Vec<Request<Bytes>>> {
             self.captured_requests.borrow()
         }
 
@@ -402,7 +411,7 @@ mod tests {
             self.captured_requests.borrow().len()
         }
 
-        pub fn last_captured_request(&self) -> Option<Ref<reqwest::Request>> {
+        pub fn last_captured_request(&self) -> Option<Ref<Request<Bytes>>> {
             let borrow = self.captured_requests.borrow();
             if borrow.is_empty() {
                 None
@@ -413,10 +422,7 @@ mod tests {
     }
 
     impl HttpClient for MockHttpClient {
-        fn execute(&self, mut request: Request) -> Result<HttpResponse, Error> {
-            // consume the body so we can verify it later
-            request.body_mut().as_mut().unwrap().buffer().unwrap();
-
+        fn execute(&self, request: Request<Bytes>) -> Result<Response<Bytes>, Error> {
             self.captured_requests.borrow_mut().push(request);
             self.responses
                 .borrow_mut()
@@ -425,16 +431,9 @@ mod tests {
                     provider_error: "unexpected error".to_string(),
                 }))
         }
-
-        fn request<U: IntoUrl>(&self, method: Method, url: U) -> RequestBuilder {
-            Client::builder()
-                .build()
-                .expect("Failed to initialize HTTP client")
-                .request(method, url)
-        }
     }
 
-    fn create_mock_success_response() -> HttpResponse {
+    fn create_mock_success_response() -> Response<Bytes> {
         let response_body = r#"{
             "metadata": {
                 "transaction_key": "test-transaction-key",
@@ -477,7 +476,10 @@ mod tests {
             }
         }"#;
 
-        HttpResponse::new(200, response_body)
+        Response::builder()
+            .status(StatusCode::OK)
+            .body(Bytes::from_static(response_body.as_bytes()))
+            .unwrap()
     }
 
     #[test]
@@ -540,11 +542,11 @@ mod tests {
 
         assert_eq!(captured_request.method(), &Method::POST);
         assert!(captured_request
-            .url()
-            .as_str()
+            .uri()
+            .to_string()
             .starts_with("https://api.deepgram.com/v1/listen"));
 
-        let body_bytes = captured_request.body().unwrap().as_bytes().unwrap();
+        let body_bytes = captured_request.body().to_vec();
 
         assert_eq!(body_bytes, audio_data)
     }
@@ -577,8 +579,12 @@ mod tests {
         api.transcribe_audio(request).unwrap();
 
         let captured_request = mock_client.last_captured_request().unwrap();
-        let url = captured_request.url();
-        let query_pairs: HashMap<String, String> = url.query_pairs().into_owned().collect();
+        let uri = captured_request.uri();
+        let query_pairs: HashMap<String, String> = Url::parse(&uri.to_string())
+            .unwrap()
+            .query_pairs()
+            .into_owned()
+            .collect();
 
         assert_eq!(query_pairs.get("multichannel"), Some(&"true".to_string()));
         assert_eq!(query_pairs.get("language"), Some(&"en".to_string()));
@@ -618,8 +624,9 @@ mod tests {
         api.transcribe_audio(request).unwrap();
 
         let captured_request = mock_client.last_captured_request().unwrap();
-        let url = captured_request.url();
-        let keyterm_query_pairs: Vec<(String, String)> = url
+        let uri = captured_request.uri();
+        let keyterm_query_pairs: Vec<(String, String)> = Url::parse(&uri.to_string())
+            .unwrap()
             .query_pairs()
             .into_owned()
             .filter(|(key, _)| key == "keyterm")
@@ -676,8 +683,9 @@ mod tests {
         api.transcribe_audio(request).unwrap();
 
         let captured_request = mock_client.last_captured_request().unwrap();
-        let url = captured_request.url();
-        let keyterm_query_pairs: Vec<(String, String)> = url
+        let uri = captured_request.uri();
+        let keyterm_query_pairs: Vec<(String, String)> = Url::parse(&uri.to_string())
+            .unwrap()
             .query_pairs()
             .into_owned()
             .filter(|(key, _)| key == "keyword")
@@ -721,8 +729,12 @@ mod tests {
         api.transcribe_audio(request).unwrap();
 
         let captured_request = mock_client.last_captured_request().unwrap();
-        let url = captured_request.url();
-        let query_pairs: HashMap<String, String> = url.query_pairs().into_owned().collect();
+        let uri = captured_request.uri();
+        let query_pairs: HashMap<String, String> = Url::parse(&uri.to_string())
+            .unwrap()
+            .query_pairs()
+            .into_owned()
+            .collect();
 
         assert!(!query_pairs.contains_key("multichannel"));
         assert!(!query_pairs.contains_key("language"));
@@ -774,7 +786,12 @@ mod tests {
             }
         }"#;
 
-        mock_client.expect_response(HttpResponse::new(200, response_body));
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(Bytes::copy_from_slice(response_body.as_bytes()))
+                .unwrap(),
+        );
 
         let api: PreRecordedAudioApi<MockHttpClient> =
             PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
@@ -890,7 +907,12 @@ mod tests {
             }
         }"#;
 
-        mock_client.expect_response(HttpResponse::new(200, response_body));
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(Bytes::copy_from_slice(response_body.as_bytes()))
+                .unwrap(),
+        );
 
         let api: PreRecordedAudioApi<MockHttpClient> =
             PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
@@ -969,7 +991,12 @@ mod tests {
           "err_msg": "Invalid audio format.",
           "request_id": "32313879-0783-4b57-871d-69124a18373a"
         }"#;
-        mock_client.expect_response(HttpResponse::new(400, error_body));
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(Bytes::from_static(error_body.as_bytes()))
+                .unwrap(),
+        );
 
         let api: PreRecordedAudioApi<MockHttpClient> =
             PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
@@ -1004,7 +1031,12 @@ mod tests {
           "request_id": "32313879-0783-4b57-871d-69124a18373a"
         }"#;
 
-        mock_client.expect_response(HttpResponse::new(401, error_body));
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::UNAUTHORIZED)
+                .body(Bytes::from_static(error_body.as_bytes()))
+                .unwrap(),
+        );
 
         let api: PreRecordedAudioApi<MockHttpClient> =
             PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
@@ -1038,7 +1070,12 @@ mod tests {
           "err_msg": "Not enough credits.",
           "request_id": "32313879-0783-4b57-871d-69124a18373a"
         }"#;
-        mock_client.expect_response(HttpResponse::new(402, error_body));
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::PAYMENT_REQUIRED)
+                .body(Bytes::from_static(error_body.as_bytes()))
+                .unwrap(),
+        );
 
         let api: PreRecordedAudioApi<MockHttpClient> =
             PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
@@ -1072,7 +1109,13 @@ mod tests {
           "err_msg": "Access denied.",
           "request_id": "32313879-0783-4b57-871d-69124a18373a"
         }"#;
-        mock_client.expect_response(HttpResponse::new(403, error_body));
+
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::FORBIDDEN)
+                .body(Bytes::from_static(error_body.as_bytes()))
+                .unwrap(),
+        );
 
         let api: PreRecordedAudioApi<MockHttpClient> =
             PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
@@ -1102,7 +1145,12 @@ mod tests {
         let mock_client = MockHttpClient::new();
 
         let error_body = r#"{"error": "Internal server error"}"#;
-        mock_client.expect_response(HttpResponse::new(500, error_body));
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Bytes::from_static(error_body.as_bytes()))
+                .unwrap(),
+        );
 
         let api: PreRecordedAudioApi<MockHttpClient> =
             PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
@@ -1132,7 +1180,12 @@ mod tests {
         let mock_client = MockHttpClient::new();
 
         let error_body = r#"{"error": "Unknown error"}"#;
-        mock_client.expect_response(HttpResponse::new(418, error_body));
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::IM_A_TEAPOT)
+                .body(Bytes::from_static(error_body.as_bytes()))
+                .unwrap(),
+        );
 
         let api: PreRecordedAudioApi<MockHttpClient> =
             PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);

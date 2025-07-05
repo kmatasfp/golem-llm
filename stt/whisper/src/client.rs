@@ -1,14 +1,19 @@
+use std::ffi::OsStr;
+use std::io::Cursor;
 use std::sync::Arc;
 
-use golem_stt::client::{HttpClient, ReqwestHttpClient, SttProviderClient};
+use bytes::Bytes;
+use form_data_builder::FormData;
+use golem_stt::client::SttProviderClient;
+use golem_stt::client2::{HttpClient, ReqwestHttpClient2};
 use log::trace;
-use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
 use golem_stt::error::Error;
 use golem_stt::languages::Language;
+use http::{Method, Request, StatusCode};
 
-const BASE_URL: &str = "https://api.openai.com";
+const BASE_URL: &str = "https://api.openai.com/v1/audio/transcriptions";
 
 const WHISPER_SUPPORTED_LANGUAGES: [Language; 57] = [
     Language::new("af", "Afrikaans", "Afrikaans"),
@@ -132,9 +137,9 @@ impl<HC: HttpClient> TranscriptionsApi<HC> {
     }
 }
 
-impl TranscriptionsApi<ReqwestHttpClient> {
+impl TranscriptionsApi<ReqwestHttpClient2> {
     pub fn live(openai_api_key: String) -> Self {
-        Self::new(openai_api_key, ReqwestHttpClient::new())
+        Self::new(openai_api_key, ReqwestHttpClient2::new())
     }
 }
 
@@ -152,77 +157,84 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
 
         let audio_size_bytes = request.audio.len();
 
-        let part = reqwest::multipart::Part::bytes(request.audio)
-            .file_name(file_name)
-            .mime_str(&mime_type)?;
+        let mut form = FormData::new(vec![]);
 
-        let mut form = reqwest::multipart::Form::new()
-            .part("file", part)
-            .text("model", "whisper-1")
-            .text("response_format", "verbose_json");
+        let audio_cursor = Cursor::new(request.audio);
+        form.write_file(
+            "file",
+            audio_cursor,
+            Some(OsStr::new(&file_name)),
+            &mime_type,
+        )?;
+
+        form.write_field("model", "whisper-1")?;
+        form.write_field("response_format", "verbose_json")?;
 
         if let Some(transcription_config) = request.transcription_config {
             if let Some(language) = transcription_config.language {
-                form = form.text("language", language);
+                form.write_field("language", &language)?;
             }
 
             if transcription_config.enable_timestamps {
-                form = form.text("", "timestamp_granularities[]=word");
+                form.write_field("", "timestamp_granularities[]=word")?;
             }
 
             if let Some(prompt) = transcription_config.prompt {
-                form = form.text("prompt", prompt);
+                form.write_field("prompt", &prompt)?;
             }
         }
 
-        let req = self
-            .http_client
-            .request(
-                Method::POST,
-                format!("{}/v1/audio/transcriptions", BASE_URL),
-            )
+        let content_type = form.content_type_header();
+
+        // Finish and get the body
+        let body = form.finish()?;
+
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(BASE_URL)
             .header("Authorization", &*self.openai_api_token)
-            .multipart(form)
-            .build()?;
+            .header("Content-Type", content_type)
+            .body(Bytes::from(body))?;
 
         let response = self.http_client.execute(req)?;
 
         // match what official OpenAI SDK does https://github.com/openai/openai-python/blob/0673da62f2f2476a3e5791122e75ec0cbfd03442/src/openai/_client.py#L343
         match response.status() {
-            200 => {
-                let whisper_transcription: WhisperTranscription = response.json()?;
+            StatusCode::OK => {
+                let whisper_transcription: WhisperTranscription =
+                    serde_json::from_slice(response.body())?;
 
                 Ok(TranscriptionResponse {
                     audio_size_bytes,
                     whisper_transcription,
                 })
             }
-            400 => Err(Error::APIBadRequest {
-                provider_error: response.text()?,
+            StatusCode::BAD_REQUEST => Err(Error::APIBadRequest {
+                provider_error: String::from_utf8(response.body().to_vec())?,
             }),
-            401 => Err(Error::APIUnauthorized {
-                provider_error: response.text()?,
+            StatusCode::UNAUTHORIZED => Err(Error::APIUnauthorized {
+                provider_error: String::from_utf8(response.body().to_vec())?,
             }),
-            403 => Err(Error::APIForbidden {
-                provider_error: response.text()?,
+            StatusCode::FORBIDDEN => Err(Error::APIForbidden {
+                provider_error: String::from_utf8(response.body().to_vec())?,
             }),
-            404 => Err(Error::APINotFound {
-                provider_error: response.text()?,
+            StatusCode::NOT_FOUND => Err(Error::APINotFound {
+                provider_error: String::from_utf8(response.body().to_vec())?,
             }),
-            409 => Err(Error::APIConflict {
-                provider_error: response.text()?,
+            StatusCode::CONFLICT => Err(Error::APIConflict {
+                provider_error: String::from_utf8(response.body().to_vec())?,
             }),
-            422 => Err(Error::APIUnprocessableEntity {
-                provider_error: response.text()?,
+            StatusCode::UNPROCESSABLE_ENTITY => Err(Error::APIUnprocessableEntity {
+                provider_error: String::from_utf8(response.body().to_vec())?,
             }),
-            429 => Err(Error::APIRateLimit {
-                provider_error: response.text()?,
+            StatusCode::TOO_MANY_REQUESTS => Err(Error::APIRateLimit {
+                provider_error: String::from_utf8(response.body().to_vec())?,
             }),
-            status if status >= 500 => Err(Error::APIInternalServerError {
-                provider_error: response.text()?,
+            status if status.is_server_error() => Err(Error::APIInternalServerError {
+                provider_error: String::from_utf8(response.body().to_vec())?,
             }),
             _ => Err(Error::APIUnknown {
-                provider_error: response.text()?,
+                provider_error: String::from_utf8(response.body().to_vec())?,
             }),
         }
     }
@@ -313,21 +325,20 @@ pub struct ErrorBody {
 
 #[cfg(test)]
 mod tests {
-    use golem_stt::client::HttpResponse;
-    use reqwest::{Client, IntoUrl, Method, Request, RequestBuilder};
+    use http::Response;
     use std::cell::{Ref, RefCell};
     use std::collections::{HashMap, VecDeque};
     use std::io::{Cursor, Read};
 
-    use multipart::server::Multipart;
+    use multipart_2021::server::Multipart;
 
     use super::*;
 
     const TEST_API_KEY: &str = "test-api-key";
 
     struct MockHttpClient {
-        pub responses: RefCell<VecDeque<Result<HttpResponse, Error>>>,
-        pub captured_requests: RefCell<Vec<reqwest::Request>>,
+        pub responses: RefCell<VecDeque<Result<Response<Bytes>, Error>>>,
+        pub captured_requests: RefCell<Vec<Request<Bytes>>>,
     }
 
     #[allow(unused)]
@@ -339,11 +350,11 @@ mod tests {
             }
         }
 
-        pub fn expect_response(&self, response: HttpResponse) {
+        pub fn expect_response(&self, response: Response<Bytes>) {
             self.responses.borrow_mut().push_back(Ok(response));
         }
 
-        pub fn get_captured_requests(&self) -> Ref<Vec<reqwest::Request>> {
+        pub fn get_captured_requests(&self) -> Ref<Vec<Request<Bytes>>> {
             self.captured_requests.borrow()
         }
 
@@ -355,7 +366,7 @@ mod tests {
             self.captured_requests.borrow().len()
         }
 
-        pub fn last_captured_request(&self) -> Option<Ref<reqwest::Request>> {
+        pub fn last_captured_request(&self) -> Option<Ref<Request<Bytes>>> {
             let borrow = self.captured_requests.borrow();
             if borrow.is_empty() {
                 None
@@ -366,10 +377,7 @@ mod tests {
     }
 
     impl HttpClient for MockHttpClient {
-        fn execute(&self, mut request: Request) -> Result<HttpResponse, Error> {
-            // consume the body so we can verify it later
-            request.body_mut().as_mut().unwrap().buffer().unwrap();
-
+        fn execute(&self, request: Request<Bytes>) -> Result<Response<Bytes>, Error> {
             self.captured_requests.borrow_mut().push(request);
             self.responses
                 .borrow_mut()
@@ -377,13 +385,6 @@ mod tests {
                 .unwrap_or(Err(Error::APIUnknown {
                     provider_error: "unexpected error".to_string(),
                 }))
-        }
-
-        fn request<U: IntoUrl>(&self, method: Method, url: U) -> RequestBuilder {
-            Client::builder()
-                .build()
-                .expect("Failed to initialize HTTP client")
-                .request(method, url)
         }
     }
 
@@ -423,7 +424,12 @@ mod tests {
         "#;
 
         let mock_client = Arc::new(MockHttpClient::new());
-        mock_client.expect_response(HttpResponse::new(200, response_body));
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(Bytes::from_static(response_body.as_bytes()))
+                .unwrap(),
+        );
 
         let api: TranscriptionsApi<MockHttpClient> =
             TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client.clone());
@@ -444,7 +450,7 @@ mod tests {
 
         assert_eq!(captured_request.method(), &Method::POST);
 
-        assert_eq!(captured_request.url().path(), "/v1/audio/transcriptions");
+        assert_eq!(captured_request.uri().path(), "/v1/audio/transcriptions");
 
         let auth_header = captured_request
             .headers()
@@ -485,7 +491,12 @@ mod tests {
         "#;
 
         let mock_client = Arc::new(MockHttpClient::new());
-        mock_client.expect_response(HttpResponse::new(200, response_body));
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(Bytes::from_static(response_body.as_bytes()))
+                .unwrap(),
+        );
 
         let api: TranscriptionsApi<MockHttpClient> =
             TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client.clone());
@@ -525,7 +536,7 @@ mod tests {
 
         let boundary = content_type_header.split("boundary=").nth(1).unwrap();
 
-        let body_bytes = captured_request.body().unwrap().as_bytes().unwrap();
+        let body_bytes = captured_request.body().to_vec();
 
         let cursor = Cursor::new(body_bytes);
         let mut multipart = Multipart::with_body(cursor, boundary);
@@ -628,7 +639,12 @@ mod tests {
            "#;
 
         let mock_client = Arc::new(MockHttpClient::new());
-        mock_client.expect_response(HttpResponse::new(200, response_body));
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(Bytes::from_static(response_body.as_bytes()))
+                .unwrap(),
+        );
 
         let api: TranscriptionsApi<MockHttpClient> =
             TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client.clone());
@@ -665,7 +681,7 @@ mod tests {
 
         let boundary = content_type_header.split("boundary=").nth(1).unwrap();
 
-        let body_bytes = captured_request.body().unwrap().as_bytes().unwrap();
+        let body_bytes = captured_request.body().to_vec();
 
         let cursor = Cursor::new(body_bytes);
         let mut multipart = Multipart::with_body(cursor, boundary);
@@ -728,7 +744,12 @@ mod tests {
            "#;
 
         let mock_client = MockHttpClient::new();
-        mock_client.expect_response(HttpResponse::new(200, response_body));
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(Bytes::from_static(response_body.as_bytes()))
+                .unwrap(),
+        );
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
@@ -791,7 +812,12 @@ mod tests {
             "#;
 
         let mock_client = MockHttpClient::new();
-        mock_client.expect_response(HttpResponse::new(400, error_body));
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(Bytes::from_static(error_body.as_bytes()))
+                .unwrap(),
+        );
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
@@ -831,7 +857,12 @@ mod tests {
             "#;
 
         let mock_client = MockHttpClient::new();
-        mock_client.expect_response(HttpResponse::new(401, error_body));
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::UNAUTHORIZED)
+                .body(Bytes::from_static(error_body.as_bytes()))
+                .unwrap(),
+        );
 
         let api = TranscriptionsApi::new("invalid_key".to_string(), mock_client);
 
@@ -870,7 +901,12 @@ mod tests {
             "#;
 
         let mock_client = MockHttpClient::new();
-        mock_client.expect_response(HttpResponse::new(403, error_body));
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::FORBIDDEN)
+                .body(Bytes::from_static(error_body.as_bytes()))
+                .unwrap(),
+        );
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
@@ -909,7 +945,12 @@ mod tests {
             "#;
 
         let mock_client = MockHttpClient::new();
-        mock_client.expect_response(HttpResponse::new(404, error_body));
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Bytes::from_static(error_body.as_bytes()))
+                .unwrap(),
+        );
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
@@ -948,7 +989,12 @@ mod tests {
             "#;
 
         let mock_client = MockHttpClient::new();
-        mock_client.expect_response(HttpResponse::new(422, error_body));
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::UNPROCESSABLE_ENTITY)
+                .body(Bytes::from_static(error_body.as_bytes()))
+                .unwrap(),
+        );
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
@@ -987,7 +1033,12 @@ mod tests {
             "#;
 
         let mock_client = MockHttpClient::new();
-        mock_client.expect_response(HttpResponse::new(429, error_body));
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::TOO_MANY_REQUESTS)
+                .body(Bytes::from_static(error_body.as_bytes()))
+                .unwrap(),
+        );
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
@@ -1026,7 +1077,12 @@ mod tests {
             "#;
 
         let mock_client = MockHttpClient::new();
-        mock_client.expect_response(HttpResponse::new(500, error_body));
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Bytes::from_static(error_body.as_bytes()))
+                .unwrap(),
+        );
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
@@ -1065,7 +1121,12 @@ mod tests {
             "#;
 
         let mock_client = MockHttpClient::new();
-        mock_client.expect_response(HttpResponse::new(418, error_body));
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::IM_A_TEAPOT)
+                .body(Bytes::from_static(error_body.as_bytes()))
+                .unwrap(),
+        );
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 

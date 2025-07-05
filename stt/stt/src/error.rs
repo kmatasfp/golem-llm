@@ -10,6 +10,13 @@ pub enum Error {
     Reqwest(reqwest::Error),
     #[from]
     SerdeJson(serde_json::Error),
+    #[from]
+    Io(std::io::Error),
+
+    UriParseError(String),
+
+    #[from]
+    HttpError(http::Error),
 
     #[from]
     #[allow(clippy::enum_variant_names)]
@@ -86,6 +93,11 @@ impl From<Error> for SttError {
             Error::ToStringConversionError(error) => {
                 SttError::InternalError(format!("Failed to convert to string: {error}"))
             }
+            Error::Io(error) => SttError::InternalError(format!("I/O error: {error}")),
+            Error::UriParseError(uri) => {
+                SttError::InternalError(format!("Failed to parse URI: {uri}"))
+            }
+            Error::HttpError(error) => SttError::InternalError(format!("Http error: {error}")),
         }
     }
 }
