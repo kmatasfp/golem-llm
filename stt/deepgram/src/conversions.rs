@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use golem_stt::golem::stt::types::{
     AudioFormat as WitAudioFormat, SttError, TimingInfo as WitTimingInfo,
     TimingMarkType as WitTimingMarkType, TranscriptAlternative as WitTranscriptAlternative,
@@ -107,7 +108,7 @@ impl TryFrom<WitTranscriptionRequest> for TranscriptionRequest {
             };
 
         Ok(TranscriptionRequest {
-            audio,
+            audio: Bytes::from(audio),
             audio_config: AudioConfig {
                 format: request.config.format.into(),
                 channels: request.config.channels,

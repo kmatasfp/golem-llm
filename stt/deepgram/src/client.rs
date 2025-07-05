@@ -294,7 +294,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
 }
 
 pub struct TranscriptionRequest {
-    pub audio: Vec<u8>,
+    pub audio: Bytes,
     pub audio_config: AudioConfig,
     pub transcription_config: Option<TranscriptionConfig>,
 }
@@ -491,7 +491,7 @@ mod tests {
             PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client.clone());
 
         let request = TranscriptionRequest {
-            audio: b"fake audio data".to_vec(),
+            audio: b"fake audio data".to_vec().into(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: None,
@@ -521,7 +521,7 @@ mod tests {
 
         let audio_data = b"fake audio data".to_vec();
         let request = TranscriptionRequest {
-            audio: audio_data.clone(),
+            audio: audio_data.clone().into(),
             audio_config: AudioConfig {
                 format: AudioFormat::mp3,
                 channels: Some(2),
@@ -560,7 +560,7 @@ mod tests {
             PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client.clone());
 
         let request = TranscriptionRequest {
-            audio: b"fake audio data".to_vec(),
+            audio: b"fake audio data".to_vec().into(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: Some(2), // Should add multichannel=true
@@ -605,7 +605,7 @@ mod tests {
             PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client.clone());
 
         let request = TranscriptionRequest {
-            audio: b"fake audio data".to_vec(),
+            audio: b"fake audio data".to_vec().into(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: Some(2), // Should add multichannel=true
@@ -651,7 +651,7 @@ mod tests {
             PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client.clone());
 
         let request = TranscriptionRequest {
-            audio: b"fake audio data".to_vec(),
+            audio: b"fake audio data".to_vec().into(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: Some(2), // Should add multichannel=true
@@ -710,7 +710,7 @@ mod tests {
             PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client.clone());
 
         let request = TranscriptionRequest {
-            audio: b"fake audio data".to_vec(),
+            audio: b"fake audio data".to_vec().into(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: Some(1), // Should NOT add multichannel=true
@@ -797,7 +797,7 @@ mod tests {
 
         let audio_data = b"fake audio data".to_vec();
         let request = TranscriptionRequest {
-            audio: audio_data.clone(),
+            audio: audio_data.clone().into(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: None,
@@ -918,7 +918,7 @@ mod tests {
 
         let audio_data = b"fake audio data".to_vec();
         let request = TranscriptionRequest {
-            audio: audio_data.clone(),
+            audio: audio_data.clone().into(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: None,
@@ -1001,7 +1001,7 @@ mod tests {
             PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let request = TranscriptionRequest {
-            audio: b"fake audio data".to_vec(),
+            audio: b"fake audio data".to_vec().into(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: None,
@@ -1041,7 +1041,7 @@ mod tests {
             PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let request = TranscriptionRequest {
-            audio: b"fake audio data".to_vec(),
+            audio: b"fake audio data".to_vec().into(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: None,
@@ -1080,7 +1080,7 @@ mod tests {
             PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let request = TranscriptionRequest {
-            audio: b"fake audio data".to_vec(),
+            audio: b"fake audio data".to_vec().into(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: None,
@@ -1120,7 +1120,7 @@ mod tests {
             PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let request = TranscriptionRequest {
-            audio: b"fake audio data".to_vec(),
+            audio: b"fake audio data".to_vec().into(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: None,
@@ -1155,7 +1155,7 @@ mod tests {
             PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let request = TranscriptionRequest {
-            audio: b"fake audio data".to_vec(),
+            audio: b"fake audio data".to_vec().into(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: None,
@@ -1190,7 +1190,7 @@ mod tests {
             PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let request = TranscriptionRequest {
-            audio: vec![1, 2, 3, 4],
+            audio: b"fake audio data".to_vec().into(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: None,

@@ -1,9 +1,6 @@
-use std::ffi::OsStr;
-use std::io::Cursor;
 use std::sync::Arc;
 
-use bytes::Bytes;
-use form_data_builder::FormData;
+use bytes::{BufMut, Bytes, BytesMut};
 use golem_stt::client::{HttpClient, ReqwestHttpClient, SttProviderClient};
 use log::trace;
 use serde::{Deserialize, Serialize};
@@ -114,6 +111,53 @@ pub struct TranscriptionConfig {
     pub prompt: Option<String>,
 }
 
+pub struct MultipartBuilder {
+    boundary: String,
+    parts: Vec<Bytes>,
+}
+
+impl MultipartBuilder {
+    pub fn new() -> Self {
+        Self {
+            boundary: format!("----formdata-{}", uuid::Uuid::new_v4()),
+            parts: Vec::new(),
+        }
+    }
+
+    pub fn add_bytes(&mut self, name: &str, filename: &str, content_type: &str, data: Bytes) {
+        self.parts.push(Bytes::from(format!(
+            "--{}\r\nContent-Disposition: form-data; name=\"{}\"; filename=\"{}\"\r\nContent-Type: {}\r\n\r\n",
+            self.boundary, name, filename, content_type
+        )));
+        self.parts.push(data);
+        self.parts.push(Bytes::from_static(b"\r\n"));
+    }
+
+    pub fn add_field(&mut self, name: &str, value: &str) {
+        self.parts.push(Bytes::from(format!(
+            "--{}\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\n{}\r\n",
+            self.boundary, name, value
+        )));
+    }
+
+    pub fn finish(mut self) -> (String, Bytes) {
+        // Add end boundary
+        self.parts
+            .push(Bytes::from(format!("--{}--\r\n", self.boundary)));
+
+        // Calculate total size and build final buffer
+        let total_size: usize = self.parts.iter().map(|b| b.len()).sum();
+        let mut final_buffer = BytesMut::with_capacity(total_size);
+
+        for part in self.parts {
+            final_buffer.put(part);
+        }
+
+        let content_type = format!("multipart/form-data; boundary={}", self.boundary);
+        (content_type, final_buffer.freeze())
+    }
+}
+
 /// The OpenAI API client for transcribing audio into the input language powered by their open source Whisper V2 model
 ///
 /// https://platform.openai.com/docs/api-reference/audio/createTranscription
@@ -156,44 +200,35 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
 
         let audio_size_bytes = request.audio.len();
 
-        let mut form = FormData::new(vec![]);
+        let mut form = MultipartBuilder::new();
 
-        let audio_cursor = Cursor::new(request.audio);
-        form.write_file(
-            "file",
-            audio_cursor,
-            Some(OsStr::new(&file_name)),
-            &mime_type,
-        )?;
+        form.add_bytes("file", &file_name, &mime_type, request.audio);
 
-        form.write_field("model", "whisper-1")?;
-        form.write_field("response_format", "verbose_json")?;
+        form.add_field("model", "whisper-1");
+        form.add_field("response_format", "verbose_json");
 
         if let Some(transcription_config) = request.transcription_config {
             if let Some(language) = transcription_config.language {
-                form.write_field("language", &language)?;
+                form.add_field("language", &language);
             }
 
             if transcription_config.enable_timestamps {
-                form.write_field("", "timestamp_granularities[]=word")?;
+                form.add_field("", "timestamp_granularities[]=word");
             }
 
             if let Some(prompt) = transcription_config.prompt {
-                form.write_field("prompt", &prompt)?;
+                form.add_field("prompt", &prompt);
             }
         }
 
-        let content_type = form.content_type_header();
-
-        // Finish and get the body
-        let body = form.finish()?;
+        let (content_type, body) = form.finish();
 
         let req = Request::builder()
             .method(Method::POST)
             .uri(BASE_URL)
             .header("Authorization", &*self.openai_api_token)
             .header("Content-Type", content_type)
-            .body(Bytes::from(body))?;
+            .body(body)?;
 
         let response = self.http_client.execute(req)?;
 
@@ -240,7 +275,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
 }
 
 pub struct TranscriptionRequest {
-    pub audio: Vec<u8>,
+    pub audio: Bytes,
     pub audio_config: AudioConfig,
     pub transcription_config: Option<TranscriptionConfig>,
 }
@@ -436,7 +471,7 @@ mod tests {
         let audio_bytes = b"fake audio data".to_vec();
 
         let request = TranscriptionRequest {
-            audio: audio_bytes.clone(),
+            audio: audio_bytes.into(),
             audio_config: AudioConfig {
                 format: AudioFormat::mp3,
             },
@@ -506,7 +541,7 @@ mod tests {
         let prompt = "foo".to_string();
 
         let request = TranscriptionRequest {
-            audio: audio_bytes.clone(),
+            audio: audio_bytes.clone().into(),
             audio_config: AudioConfig {
                 format: AudioFormat::mp3,
             },
@@ -651,7 +686,7 @@ mod tests {
         let audio_bytes = b"fake audio data".to_vec();
 
         let request = TranscriptionRequest {
-            audio: audio_bytes.clone(),
+            audio: audio_bytes.clone().into(),
             audio_config: AudioConfig {
                 format: AudioFormat::mp3,
             },
@@ -754,8 +789,10 @@ mod tests {
 
         let audio_bytes = b"fake audio data for words test".to_vec();
 
+        let audio_byte_len = audio_bytes.len();
+
         let request = TranscriptionRequest {
-            audio: audio_bytes.clone(),
+            audio: audio_bytes.into(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
             },
@@ -769,7 +806,7 @@ mod tests {
         let response = api.transcribe_audio(request).unwrap();
 
         let expected_response = TranscriptionResponse {
-            audio_size_bytes: audio_bytes.len(),
+            audio_size_bytes: audio_byte_len,
             whisper_transcription: WhisperTranscription::Words {
                 task: "transcribe".to_string(),
                 language: "en".to_string(),
@@ -823,7 +860,7 @@ mod tests {
         let audio_bytes = b"fake audio data".to_vec();
 
         let request = TranscriptionRequest {
-            audio: audio_bytes,
+            audio: audio_bytes.into(),
             audio_config: AudioConfig {
                 format: AudioFormat::mp3,
             },
@@ -868,7 +905,7 @@ mod tests {
         let audio_bytes = b"fake audio data".to_vec();
 
         let request = TranscriptionRequest {
-            audio: audio_bytes,
+            audio: audio_bytes.into(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
             },
@@ -912,7 +949,7 @@ mod tests {
         let audio_bytes = b"fake audio data".to_vec();
 
         let request = TranscriptionRequest {
-            audio: audio_bytes,
+            audio: audio_bytes.into(),
             audio_config: AudioConfig {
                 format: AudioFormat::flac,
             },
@@ -956,7 +993,7 @@ mod tests {
         let audio_bytes = b"fake audio data".to_vec();
 
         let request = TranscriptionRequest {
-            audio: audio_bytes,
+            audio: audio_bytes.into(),
             audio_config: AudioConfig {
                 format: AudioFormat::ogg,
             },
@@ -1000,7 +1037,7 @@ mod tests {
         let audio_bytes = b"fake large audio data".to_vec();
 
         let request = TranscriptionRequest {
-            audio: audio_bytes,
+            audio: audio_bytes.into(),
             audio_config: AudioConfig {
                 format: AudioFormat::mp3,
             },
@@ -1044,7 +1081,7 @@ mod tests {
         let audio_bytes = b"fake audio data".to_vec();
 
         let request = TranscriptionRequest {
-            audio: audio_bytes,
+            audio: audio_bytes.into(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
             },
@@ -1088,7 +1125,7 @@ mod tests {
         let audio_bytes = b"fake audio data".to_vec();
 
         let request = TranscriptionRequest {
-            audio: audio_bytes,
+            audio: audio_bytes.into(),
             audio_config: AudioConfig {
                 format: AudioFormat::mp3,
             },
@@ -1132,7 +1169,7 @@ mod tests {
         let audio_bytes = b"fake audio data".to_vec();
 
         let request = TranscriptionRequest {
-            audio: audio_bytes,
+            audio: audio_bytes.into(),
             audio_config: AudioConfig {
                 format: AudioFormat::flac,
             },
