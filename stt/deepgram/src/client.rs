@@ -2,12 +2,11 @@ use std::{collections::HashMap, sync::Arc};
 
 use bytes::Bytes;
 use golem_stt::{
-    client::SttProviderClient,
-    client2::{HttpClient, ReqwestHttpClient2},
+    client::{HttpClient, ReqwestHttpClient, SttProviderClient},
     error::Error,
     languages::Language,
 };
-use http::{Method, Request, StatusCode};
+use http::{header::CONTENT_TYPE, Method, Request, StatusCode};
 use log::trace;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -161,9 +160,9 @@ impl<HC: HttpClient> PreRecordedAudioApi<HC> {
     }
 }
 
-impl PreRecordedAudioApi<ReqwestHttpClient2> {
+impl PreRecordedAudioApi<ReqwestHttpClient> {
     pub fn live(deepgram_api_key: String) -> Self {
-        Self::new(deepgram_api_key, ReqwestHttpClient2::new())
+        Self::new(deepgram_api_key, ReqwestHttpClient::new())
     }
 }
 
@@ -255,7 +254,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
         let req = Request::builder()
             .method(Method::POST)
             .uri(url.as_str())
-            .header(reqwest::header::CONTENT_TYPE, mime_type)
+            .header(CONTENT_TYPE, mime_type)
             .header("Authorization", &*self.deepgram_api_token)
             .body(Bytes::from(request.audio))?;
 

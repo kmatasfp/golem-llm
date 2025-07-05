@@ -4,8 +4,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use form_data_builder::FormData;
-use golem_stt::client::SttProviderClient;
-use golem_stt::client2::{HttpClient, ReqwestHttpClient2};
+use golem_stt::client::{HttpClient, ReqwestHttpClient, SttProviderClient};
 use log::trace;
 use serde::{Deserialize, Serialize};
 
@@ -137,9 +136,9 @@ impl<HC: HttpClient> TranscriptionsApi<HC> {
     }
 }
 
-impl TranscriptionsApi<ReqwestHttpClient2> {
+impl TranscriptionsApi<ReqwestHttpClient> {
     pub fn live(openai_api_key: String) -> Self {
-        Self::new(openai_api_key, ReqwestHttpClient2::new())
+        Self::new(openai_api_key, ReqwestHttpClient::new())
     }
 }
 

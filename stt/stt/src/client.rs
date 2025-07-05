@@ -1,43 +1,11 @@
 use bytes::Bytes;
-use reqwest::{Client, IntoUrl, Method, Request, RequestBuilder};
+use http::{Request, Response};
+use reqwest::Client;
 
 use crate::error::Error;
 
-#[derive(Debug, Clone)]
-pub struct HttpResponse {
-    pub status: u16,
-    body: Bytes,
-}
-
-#[allow(unused)]
-impl HttpResponse {
-    pub fn new(status: u16, body: impl Into<Bytes>) -> Self {
-        Self {
-            status,
-            body: body.into(),
-        }
-    }
-
-    pub fn status(&self) -> u16 {
-        self.status
-    }
-
-    pub fn bytes(&self) -> &Bytes {
-        &self.body
-    }
-
-    pub fn text(self) -> Result<String, std::string::FromUtf8Error> {
-        String::from_utf8(self.body.to_vec())
-    }
-
-    pub fn json<T: serde::de::DeserializeOwned>(self) -> Result<T, serde_json::Error> {
-        serde_json::from_slice(&self.body)
-    }
-}
-
 pub trait HttpClient {
-    fn request<U: IntoUrl>(&self, method: Method, url: U) -> RequestBuilder;
-    fn execute(&self, request: Request) -> Result<HttpResponse, Error>;
+    fn execute(&self, request: Request<Bytes>) -> Result<Response<Bytes>, Error>;
 }
 
 pub struct ReqwestHttpClient {
@@ -54,15 +22,39 @@ impl ReqwestHttpClient {
 }
 
 impl HttpClient for ReqwestHttpClient {
-    fn execute(&self, request: Request) -> Result<HttpResponse, Error> {
-        let response = self.client.execute(request)?;
-        let status = response.status().as_u16();
-        let body = response.bytes()?;
-        Ok(HttpResponse { status, body })
-    }
+    fn execute(&self, request: Request<Bytes>) -> Result<Response<Bytes>, Error> {
+        fn to_reqwest_request(
+            client: &Client,
+            req: Request<Bytes>,
+        ) -> Result<reqwest::Request, Error> {
+            let (parts, body) = req.into_parts();
 
-    fn request<U: IntoUrl>(&self, method: Method, url: U) -> RequestBuilder {
-        self.client.request(method, url)
+            let builder = client
+                .request(parts.method, parts.uri.to_string())
+                .headers(parts.headers)
+                .version(parts.version)
+                .body(body);
+
+            builder.build().map_err(Error::Reqwest)
+        }
+
+        let reqwest_request = to_reqwest_request(&self.client, request)?;
+        let reqwest_response = self.client.execute(reqwest_request)?;
+
+        let status = reqwest_response.status();
+        let headers = reqwest_response.headers().clone();
+        let body = reqwest_response.bytes()?;
+
+        let mut response = Response::builder().status(status).body(body).map_err(|e| {
+            Error::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Failed to build response: {}", e),
+            ))
+        })?;
+
+        *response.headers_mut() = headers;
+
+        Ok(response)
     }
 }
 

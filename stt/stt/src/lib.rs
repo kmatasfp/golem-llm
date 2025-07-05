@@ -1,5 +1,4 @@
 pub mod client;
-pub mod client2;
 pub mod error;
 pub mod languages;
 pub mod transcription_queue;
