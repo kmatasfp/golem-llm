@@ -35,13 +35,28 @@ impl fmt::Display for AwsService {
 // AWS uri encoding has special characters that need to be percent-encoded
 const URI_ENCODE_SET: &AsciiSet = &CONTROLS
     .add(b' ')
+    .add(b'!')
     .add(b'"')
     .add(b'#')
-    .add(b'<')
-    .add(b'>')
-    .add(b'`')
+    .add(b'$')
+    .add(b'%')
+    .add(b'\'')
+    .add(b'(')
+    .add(b')')
+    .add(b'*')
+    .add(b',')
+    .add(b'/')
+    .add(b':')
+    .add(b';')
     .add(b'?')
+    .add(b'@')
+    .add(b'[')
+    .add(b'\\')
+    .add(b']')
+    .add(b'^')
+    .add(b'`')
     .add(b'{')
+    .add(b'|')
     .add(b'}');
 
 /// AWS-specific percent-encoding set for query strings
@@ -88,11 +103,11 @@ impl AwsSignatureV4 {
             .headers
             .insert("x-amz-date", HeaderValue::from_str(&amz_date)?);
 
-        // let content_sha256 = self.hash_payload(body.as_ref());
-        // parts.headers.insert(
-        //     "x-amz-content-sha256",
-        //     HeaderValue::from_str(&content_sha256)?,
-        // );
+        let content_sha256 = self.hash_payload(body.as_ref());
+        parts.headers.insert(
+            "x-amz-content-sha256",
+            HeaderValue::from_str(&content_sha256)?,
+        );
 
         // Add host header if not present
         if !parts.headers.contains_key("host") {
@@ -108,8 +123,12 @@ impl AwsSignatureV4 {
             }
         }
 
-        let canonical_request =
-            self.create_canonical_request(&parts.method, &parts.uri, &parts.headers, body.as_ref());
+        let canonical_request = self.create_canonical_request(
+            &parts.method,
+            &parts.uri,
+            &parts.headers,
+            &content_sha256,
+        );
 
         let string_to_sign = self.create_string_to_sign(&canonical_request, &amz_date, &date_stamp);
 
@@ -137,7 +156,7 @@ impl AwsSignatureV4 {
         method: &http::Method,
         uri: &http::Uri,
         headers: &HeaderMap,
-        body: &[u8],
+        content_sha256: &str,
     ) -> String {
         // Canonical URI
         let canonical_uri = self.canonical_uri(uri.path());
@@ -152,7 +171,7 @@ impl AwsSignatureV4 {
         let signed_headers = self.get_signed_headers(headers);
 
         // Hashed payload
-        let hashed_payload = self.hash_payload(body);
+        let hashed_payload = content_sha256;
 
         let canonical_request = format!(
             "{}\n{}\n{}\n{}\n{}\n{}",
@@ -250,12 +269,6 @@ impl AwsSignatureV4 {
         signed_headers.join(";")
     }
 
-    fn hash_payload(&self, payload: &[u8]) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(payload);
-        hex::encode(hasher.finalize())
-    }
-
     fn create_string_to_sign(
         &self,
         canonical_request: &str,
@@ -268,9 +281,7 @@ impl AwsSignatureV4 {
             date_stamp, self.region, self.service
         );
 
-        let mut hasher = Sha256::new();
-        hasher.update(canonical_request.as_bytes());
-        let hashed_canonical_request = hex::encode(hasher.finalize());
+        let hashed_canonical_request = self.hash_payload(canonical_request.as_bytes());
 
         let string_to_sign = format!(
             "{}\n{}\n{}\n{}",
@@ -304,6 +315,12 @@ impl AwsSignatureV4 {
         let signature = mac.finalize().into_bytes();
 
         Ok(hex::encode(signature))
+    }
+
+    fn hash_payload(&self, payload: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(payload);
+        hex::encode(hasher.finalize())
     }
 }
 
@@ -343,6 +360,15 @@ mod tests {
             .unwrap()
             .into();
 
+        let mut hasher = Sha256::new();
+        hasher.update(request.body().as_ref());
+        let hashed_content = hex::encode(hasher.finalize());
+
+        request.headers_mut().append(
+            "x-amz-content-sha256",
+            HeaderValue::from_str(&hashed_content).unwrap(),
+        );
+
         let signable_request = SignableRequest::new(
             request.method().as_str(),
             request.uri().to_string(),
@@ -362,7 +388,105 @@ mod tests {
         request
     }
 
-    // test agains examples in https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html
+    // test constructd based on spec here https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html
+    #[test]
+    fn test_uri_encoding_all_characters() {
+        let signer = AwsSignatureV4::for_s3(
+            "test".to_string(),
+            "test".to_string(),
+            "us-east-1".to_string(),
+        );
+
+        assert_eq!(signer.canonical_uri("test file.txt"), "test%20file.txt");
+
+        assert_eq!(signer.canonical_uri("test!file.txt"), "test%21file.txt");
+
+        assert_eq!(signer.canonical_uri("test\"file.txt"), "test%22file.txt");
+
+        assert_eq!(signer.canonical_uri("test#file.txt"), "test%23file.txt");
+
+        assert_eq!(signer.canonical_uri("test$file.txt"), "test%24file.txt");
+
+        assert_eq!(signer.canonical_uri("test%file.txt"), "test%25file.txt");
+
+        assert_eq!(signer.canonical_uri("test'file.txt"), "test%27file.txt");
+
+        assert_eq!(signer.canonical_uri("test(file.txt"), "test%28file.txt");
+
+        assert_eq!(signer.canonical_uri("test)file.txt"), "test%29file.txt");
+
+        assert_eq!(signer.canonical_uri("test*file.txt"), "test%2Afile.txt");
+
+        assert_eq!(signer.canonical_uri("test,file.txt"), "test%2Cfile.txt");
+
+        assert_eq!(signer.canonical_uri("folder/file.txt"), "folder/file.txt");
+
+        assert_eq!(signer.canonical_uri("test:file.txt"), "test%3Afile.txt");
+
+        assert_eq!(signer.canonical_uri("test;file.txt"), "test%3Bfile.txt");
+
+        assert_eq!(signer.canonical_uri("test?file.txt"), "test%3Ffile.txt");
+
+        assert_eq!(signer.canonical_uri("test@file.txt"), "test%40file.txt");
+
+        assert_eq!(signer.canonical_uri("test[file.txt"), "test%5Bfile.txt");
+
+        assert_eq!(signer.canonical_uri("test\\file.txt"), "test%5Cfile.txt");
+
+        assert_eq!(signer.canonical_uri("test]file.txt"), "test%5Dfile.txt");
+
+        assert_eq!(signer.canonical_uri("test^file.txt"), "test%5Efile.txt");
+
+        assert_eq!(signer.canonical_uri("test`file.txt"), "test%60file.txt");
+
+        assert_eq!(signer.canonical_uri("test{file.txt"), "test%7Bfile.txt");
+
+        assert_eq!(signer.canonical_uri("test|file.txt"), "test%7Cfile.txt");
+
+        assert_eq!(signer.canonical_uri("test}file.txt"), "test%7Dfile.txt");
+
+        assert_eq!(signer.canonical_uri("test~file.txt"), "test~file.txt");
+
+        assert_eq!(
+            signer.canonical_uri("test-file_123.txt"),
+            "test-file_123.txt"
+        );
+    }
+
+    #[test]
+    fn test_query_encoding_all_characters() {
+        let signer = AwsSignatureV4::for_s3(
+            "test".to_string(),
+            "test".to_string(),
+            "us-east-1".to_string(),
+        );
+
+        assert_eq!(
+            signer.canonical_query_string("key=value=with=equals"),
+            "key=value%3Dwith%3Dequals",
+        );
+
+        assert_eq!(
+            signer.canonical_query_string("key=value+with+plus"),
+            "key=value%2Bwith%2Bplus",
+        );
+
+        assert_eq!(
+            signer.canonical_query_string("key=value with spaces"),
+            "key=value%20with%20spaces",
+        );
+
+        assert_eq!(
+            signer.canonical_query_string("filter=name=\"John Doe\"&sort=date:desc"),
+            "filter=name%3D%22John%20Doe%22&sort=date%3Adesc",
+        );
+
+        assert_eq!(
+            signer.canonical_query_string("z-param=last&a-param=first&m-param=middle"),
+            "a-param=first&m-param=middle&z-param=last",
+        );
+    }
+
     #[test]
     fn test_s3_get_object_authorization_header() {
         // Test case from AWS documentation
@@ -378,10 +502,12 @@ mod tests {
 
         let request = Request::builder()
             .method(Method::GET)
-            .uri("s3://examplebucket.s3.amazonaws.com/test.txt")
+            .uri("s3://examplebucket.s3.amazonaws.com/foo/bar/test@file.txt")
             .header("Range", "bytes=0-9")
             .body(vec![])
             .unwrap();
+
+        let request_for_aws_sdk = request.clone();
 
         let timestamp = DateTime::parse_from_rfc2822("Fri, 24 May 2013 00:00:00 GMT")
             .unwrap()
@@ -398,7 +524,22 @@ mod tests {
             .unwrap()
             .to_str()
             .unwrap();
-        let expected_auth = "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request,SignedHeaders=host;range;x-amz-content-sha256;x-amz-date,Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41";
+
+        let aws_signed_request = sign_with_aws_sdk(
+            request_for_aws_sdk,
+            access_key,
+            secret_key,
+            region,
+            "s3",
+            timestamp,
+        );
+
+        let expected_auth = aws_signed_request
+            .headers()
+            .get("authorization")
+            .unwrap()
+            .to_str()
+            .unwrap();
 
         assert_eq!(auth_header, expected_auth, "Authorization header mismatch");
     }
@@ -425,6 +566,8 @@ mod tests {
             .body(b"Welcome to Amazon S3.".to_vec())
             .unwrap();
 
+        let request_for_aws_sdk = request.clone();
+
         // Parse the Date header directly: "Fri, 24 May 2013 00:00:00 GMT"
         let timestamp = DateTime::parse_from_rfc2822("Fri, 24 May 2013 00:00:00 GMT")
             .unwrap()
@@ -443,7 +586,22 @@ mod tests {
             .to_str()
             .unwrap();
 
-        let expected_auth = "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request,SignedHeaders=date;host;x-amz-content-sha256;x-amz-date;x-amz-storage-class,Signature=98ad721746da40c64f1a55b78f14c238d841ea1380cd77a1b5971af0ece108bd";
+        let aws_signed_request = sign_with_aws_sdk(
+            request_for_aws_sdk,
+            access_key,
+            secret_key,
+            region,
+            "s3",
+            timestamp,
+        );
+
+        let expected_auth = aws_signed_request
+            .headers()
+            .get("authorization")
+            .unwrap()
+            .to_str()
+            .unwrap();
+
         assert_eq!(auth_header, expected_auth, "Authorization header mismatch");
     }
 
@@ -467,6 +625,8 @@ mod tests {
             .body(vec![])
             .unwrap();
 
+        let request_for_aws_sdk = request.clone();
+
         // Parse the Date header directly: "Fri, 24 May 2013 00:00:00 GMT"
         let timestamp = DateTime::parse_from_rfc2822("Fri, 24 May 2013 00:00:00 GMT")
             .unwrap()
@@ -485,7 +645,22 @@ mod tests {
             .to_str()
             .unwrap();
 
-        let expected_auth = "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request,SignedHeaders=host;x-amz-content-sha256;x-amz-date,Signature=34b48302e7b5fa45bde8084f4b7868a86f0a534bc59db6670ed5711ef69dc6f7";
+        let aws_signed_request = sign_with_aws_sdk(
+            request_for_aws_sdk,
+            access_key,
+            secret_key,
+            region,
+            "s3",
+            timestamp,
+        );
+
+        let expected_auth = aws_signed_request
+            .headers()
+            .get("authorization")
+            .unwrap()
+            .to_str()
+            .unwrap();
+
         assert_eq!(auth_header, expected_auth, "Authorization header mismatch");
     }
 
