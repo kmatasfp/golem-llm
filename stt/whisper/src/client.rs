@@ -503,14 +503,14 @@ mod tests {
                 "task": "transcribe",
                 "language": "en",
                 "duration": 10.5,
-                "text": "Hello,!",
+                "text": "Hello World from Rust!",
                 "segments": [
                     {
                         "id": 0,
                         "seek": 0,
                         "start": 0.0,
                         "end": 2.5,
-                        "text": "Hello,",
+                        "text": "Hello World from Rust!",
                         "temperature": 0.0,
                         "avg_logprob": -0.5,
                         "compression_ratio": 1.0,

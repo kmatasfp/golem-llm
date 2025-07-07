@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
 use http::{HeaderMap, HeaderValue, Request};
@@ -86,14 +87,11 @@ impl AwsSignatureV4 {
         Self::new(access_key, secret_key, region, AwsService::Transcribe)
     }
 
-    pub fn sign_request<T>(
+    pub fn sign_request(
         &self,
-        request: Request<T>,
+        request: Request<Bytes>,
         timestamp: DateTime<Utc>,
-    ) -> Result<Request<T>, Error>
-    where
-        T: AsRef<[u8]>,
-    {
+    ) -> Result<Request<Bytes>, Error> {
         let (mut parts, body) = request.into_parts();
 
         let date_stamp = timestamp.format("%Y%m%d").to_string();
@@ -335,17 +333,14 @@ mod tests {
         sign::v4,
     };
 
-    fn sign_with_aws_sdk<T>(
-        mut request: Request<T>,
+    fn sign_with_aws_sdk(
+        mut request: Request<Bytes>,
         access_key: &str,
         secret_key: &str,
         region: &str,
         service: &str,
         timestamp: DateTime<Utc>,
-    ) -> Request<T>
-    where
-        T: AsRef<[u8]>,
-    {
+    ) -> Request<Bytes> {
         let creds = Credentials::new(access_key, secret_key, None, None, "iam");
         let identity = creds.into();
 
@@ -504,7 +499,7 @@ mod tests {
             .method(Method::GET)
             .uri("s3://examplebucket.s3.amazonaws.com/foo/bar/test@file.txt")
             .header("Range", "bytes=0-9")
-            .body(vec![])
+            .body(vec![].into())
             .unwrap();
 
         let request_for_aws_sdk = request.clone();
@@ -563,7 +558,7 @@ mod tests {
             .uri("s3://examplebucket.s3.amazonaws.com/test$file.text")
             .header("Date", "Fri, 24 May 2013 00:00:00 GMT")
             .header("x-amz-storage-class", "REDUCED_REDUNDANCY")
-            .body(b"Welcome to Amazon S3.".to_vec())
+            .body(b"Welcome to Amazon S3.".to_vec().into())
             .unwrap();
 
         let request_for_aws_sdk = request.clone();
@@ -622,7 +617,7 @@ mod tests {
         let request = Request::builder()
             .method(Method::GET)
             .uri("s3://examplebucket.s3.amazonaws.com/?max-keys=2&prefix=J")
-            .body(vec![])
+            .body(vec![].into())
             .unwrap();
 
         let request_for_aws_sdk = request.clone();
@@ -693,7 +688,7 @@ mod tests {
         let request = Request::builder()
             .method(Method::GET)
             .uri("s3://examplebucket.s3.amazonaws.com/?max-keys=2&prefix=J")
-            .body(body.as_bytes())
+            .body(body.as_bytes().into())
             .unwrap();
 
         let request_for_aws_sdk = request.clone();
