@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use bytes::Bytes;
 use golem_stt::{
-    client::{HttpClient, ReqwestHttpClient, SttProviderClient},
+    client::{self, HttpClient, ReqwestHttpClient, SttProviderClient},
     error::Error,
     languages::Language,
 };
@@ -244,8 +244,8 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
             }
         }
 
-        let mut url =
-            Url::parse(BASE_URL).map_err(|_err| Error::UriParseError(BASE_URL.to_string()))?;
+        let mut url = Url::parse(BASE_URL)
+            .map_err(|e| client::Error::Generic(format!("Failed to parse uri: {}", e)))?;
 
         for (key, value) in query_params {
             url.query_pairs_mut().append_pair(key, &value);
@@ -256,39 +256,37 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
             .uri(url.as_str())
             .header(CONTENT_TYPE, mime_type)
             .header("Authorization", &*self.deepgram_api_token)
-            .body(Bytes::from(request.audio))?;
+            .body(Bytes::from(request.audio))
+            .map_err(|e| client::Error::HttpError(e))?;
 
         let response = self.http_client.execute(req)?;
 
-        match response.status() {
-            StatusCode::OK => {
-                let deepgram_transcription: DeepgramTranscription =
-                    serde_json::from_slice(response.body())?;
+        if response.status().is_success() {
+            let deepgram_transcription: DeepgramTranscription =
+                serde_json::from_slice(response.body()).map_err(|e| {
+                    client::Error::Generic(format!("Failed to deserialize response: {}", e))
+                })?;
 
-                Ok(TranscriptionResponse {
-                    language: req_language.unwrap_or_default(),
-                    audio_size_bytes,
-                    deepgram_transcription,
-                })
+            Ok(TranscriptionResponse {
+                language: req_language.unwrap_or_default(),
+                audio_size_bytes,
+                deepgram_transcription,
+            })
+        } else {
+            let provider_error = String::from_utf8(response.body().to_vec()).map_err(|e| {
+                client::Error::Generic(format!("Failed to parse response as UTF-8: {}", e))
+            })?;
+
+            match response.status() {
+                StatusCode::BAD_REQUEST => Err(Error::APIBadRequest { provider_error }),
+                StatusCode::UNAUTHORIZED => Err(Error::APIUnauthorized { provider_error }),
+                StatusCode::PAYMENT_REQUIRED => Err(Error::APIAccessDenied { provider_error }),
+                StatusCode::FORBIDDEN => Err(Error::APIForbidden { provider_error }),
+                status if status.is_server_error() => {
+                    Err(Error::APIInternalServerError { provider_error })
+                }
+                _ => Err(Error::APIUnknown { provider_error }),
             }
-            StatusCode::BAD_REQUEST => Err(Error::APIBadRequest {
-                provider_error: String::from_utf8(response.body().to_vec())?,
-            }),
-            StatusCode::UNAUTHORIZED => Err(Error::APIUnauthorized {
-                provider_error: String::from_utf8(response.body().to_vec())?,
-            }),
-            StatusCode::PAYMENT_REQUIRED => Err(Error::APIAccessDenied {
-                provider_error: String::from_utf8(response.body().to_vec())?,
-            }),
-            StatusCode::FORBIDDEN => Err(Error::APIForbidden {
-                provider_error: String::from_utf8(response.body().to_vec())?,
-            }),
-            status if status.is_server_error() => Err(Error::APIInternalServerError {
-                provider_error: String::from_utf8(response.body().to_vec())?,
-            }),
-            _ => Err(Error::APIUnknown {
-                provider_error: String::from_utf8(response.body().to_vec())?,
-            }),
         }
     }
 }
@@ -372,6 +370,7 @@ pub struct Word {
 #[cfg(test)]
 mod tests {
 
+    use golem_stt::client;
     use http::Response;
 
     use super::*;
@@ -381,7 +380,7 @@ mod tests {
     const TEST_API_KEY: &str = "test-deepgram-api-key";
 
     struct MockHttpClient {
-        pub responses: RefCell<VecDeque<Result<Response<Bytes>, Error>>>,
+        pub responses: RefCell<VecDeque<Result<Response<Bytes>, client::Error>>>,
         pub captured_requests: RefCell<Vec<Request<Bytes>>>,
     }
 
@@ -421,14 +420,12 @@ mod tests {
     }
 
     impl HttpClient for MockHttpClient {
-        fn execute(&self, request: Request<Bytes>) -> Result<Response<Bytes>, Error> {
+        fn execute(&self, request: Request<Bytes>) -> Result<Response<Bytes>, client::Error> {
             self.captured_requests.borrow_mut().push(request);
             self.responses
                 .borrow_mut()
                 .pop_front()
-                .unwrap_or(Err(Error::APIUnknown {
-                    provider_error: "unexpected error".to_string(),
-                }))
+                .unwrap_or(Err(client::Error::Generic("unexpected error".to_string())))
         }
     }
 

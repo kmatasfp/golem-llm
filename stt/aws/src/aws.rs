@@ -1,10 +1,15 @@
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
+use golem_stt::client::{self, HttpClient};
 use hmac::{Hmac, Mac};
 use http::{HeaderMap, HeaderValue, Request};
 use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::fmt;
+use std::{
+    fmt::{self},
+    sync::Arc,
+};
 
 use crate::error::Error;
 
@@ -78,13 +83,16 @@ impl AwsSignatureV4 {
         }
     }
 
-    /// Create a signer for Amazon S3
     pub fn for_s3(access_key: String, secret_key: String, region: String) -> Self {
         Self::new(access_key, secret_key, region, AwsService::S3)
     }
 
     pub fn for_transcribe(access_key: String, secret_key: String, region: String) -> Self {
         Self::new(access_key, secret_key, region, AwsService::Transcribe)
+    }
+
+    pub fn get_region(&self) -> &str {
+        &self.region
     }
 
     pub fn sign_request(
@@ -322,11 +330,315 @@ impl AwsSignatureV4 {
     }
 }
 
+pub struct S3Client<HC: HttpClient> {
+    http_client: Arc<HC>,
+    signer: AwsSignatureV4,
+}
+
+impl<HC: HttpClient> S3Client<HC> {
+    pub fn new(
+        access_key: String,
+        secret_key: String,
+        region: String,
+        http_client: impl Into<Arc<HC>>,
+    ) -> Self {
+        Self {
+            http_client: http_client.into(),
+            signer: AwsSignatureV4::for_s3(access_key, secret_key, region),
+        }
+    }
+
+    pub fn put_object(&self, bucket: &str, object_name: &str, content: Bytes) -> Result<(), Error> {
+        let timestamp = Utc::now();
+        let uri = format!("https://{}.s3.amazonaws.com/{}", bucket, object_name);
+
+        let request = Request::builder()
+            .method("PUT")
+            .uri(&uri)
+            .body(content)
+            .map_err(|e| client::Error::HttpError(e))?;
+
+        let signed_request = self.signer.sign_request(request, timestamp)?;
+
+        let response = self.http_client.execute(signed_request)?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            let error_body = String::from_utf8(response.body().to_vec())
+                .unwrap_or_else(|e| format!("Unknown error, {e}"));
+
+            Err(client::Error::Generic(format!(
+                "S3 PutObject failed with status: {} -{}",
+                response.status(),
+                error_body,
+            ))
+            .into())
+        }
+    }
+
+    pub fn get_object(&self, bucket: &str, object_name: &str) -> Result<Bytes, Error> {
+        let timestamp = Utc::now();
+        let uri = format!("https://{}.s3.amazonaws.com/{}", bucket, object_name);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri(&uri)
+            .body(Bytes::new())
+            .map_err(|e| client::Error::HttpError(e))?;
+
+        let signed_request = self.signer.sign_request(request, timestamp)?;
+
+        let response = self.http_client.execute(signed_request)?;
+
+        if response.status().is_success() {
+            Ok(response.into_body())
+        } else {
+            let error_body = String::from_utf8(response.body().to_vec())
+                .unwrap_or_else(|e| format!("Unknown error, {e}"));
+
+            Err(client::Error::Generic(format!(
+                "S3 GetObject failed with status: {} - {}",
+                response.status(),
+                error_body,
+            ))
+            .into())
+        }
+    }
+}
+
+// https://docs.aws.amazon.com/transcribe/latest/APIReference/API_CreateVocabulary.html
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct CreateVocabularyRequest {
+    pub vocabulary_name: String,
+    pub language_code: String,
+    pub phrases: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vocabulary_file_uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_access_role_arn: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<Tag>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct Tag {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct CreateVocabularyResponse {
+    pub vocabulary_name: String,
+    pub language_code: String,
+    pub vocabulary_state: String,
+    pub last_modified_time: f64,
+    pub failure_reason: Option<String>,
+}
+
+// https://docs.aws.amazon.com/transcribe/latest/APIReference/API_GetVocabulary.html
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct GetVocabularyRequest {
+    pub vocabulary_name: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct GetVocabularyResponse {
+    pub vocabulary_name: String,
+    pub language_code: String,
+    pub vocabulary_state: String,
+    pub last_modified_time: f64,
+    pub failure_reason: Option<String>,
+    pub download_uri: Option<String>,
+}
+
+// https://docs.aws.amazon.com/transcribe/latest/APIReference/API_DeleteVocabulary.html
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct DeleteVocabularyRequest {
+    pub vocabulary_name: String,
+}
+
+pub struct TranscribeClient<HC: golem_stt::client::HttpClient> {
+    http_client: std::sync::Arc<HC>,
+    signer: AwsSignatureV4,
+}
+
+impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
+    pub fn new(
+        access_key: String,
+        secret_key: String,
+        region: String,
+        http_client: impl Into<std::sync::Arc<HC>>,
+    ) -> Self {
+        Self {
+            http_client: http_client.into(),
+            signer: AwsSignatureV4::for_transcribe(access_key, secret_key, region),
+        }
+    }
+
+    pub fn create_vocabulary(
+        &self,
+        vocabulary_name: String,
+        language_code: String,
+        phrases: Vec<String>,
+    ) -> Result<CreateVocabularyResponse, Error> {
+        let timestamp = Utc::now();
+        let uri = format!(
+            "https://transcribe.{}.amazonaws.com/",
+            self.signer.get_region()
+        );
+
+        let request_body = CreateVocabularyRequest {
+            vocabulary_name,
+            language_code,
+            phrases,
+            vocabulary_file_uri: None,
+            data_access_role_arn: None,
+            tags: None,
+        };
+
+        let json_body = serde_json::to_string(&request_body)
+            .map_err(|e| client::Error::Generic(format!("Failed to serialize request: {}", e)))?;
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(&uri)
+            .header("Content-Type", "application/x-amz-json-1.1")
+            .header(
+                "X-Amz-Target",
+                "com.amazonaws.transcribe.Transcribe.CreateVocabulary",
+            )
+            .body(Bytes::from(json_body))
+            .map_err(|e| client::Error::HttpError(e))?;
+
+        let signed_request = self.signer.sign_request(request, timestamp)?;
+
+        let response = self.http_client.execute(signed_request)?;
+
+        if response.status().is_success() {
+            let vocabulary_response: CreateVocabularyResponse =
+                serde_json::from_slice(response.body()).map_err(|e| {
+                    client::Error::Generic(format!("Failed to deserialize response: {}", e))
+                })?;
+
+            Ok(vocabulary_response)
+        } else {
+            let error_body = String::from_utf8(response.body().to_vec())
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            Err(client::Error::Generic(format!(
+                "CreateVocabulary failed with status: {} - {}",
+                response.status(),
+                error_body
+            ))
+            .into())
+        }
+    }
+
+    pub fn get_vocabulary(&self, vocabulary_name: String) -> Result<GetVocabularyResponse, Error> {
+        let timestamp = Utc::now();
+        let uri = format!(
+            "https://transcribe.{}.amazonaws.com/",
+            self.signer.get_region()
+        );
+
+        let request_body = GetVocabularyRequest { vocabulary_name };
+
+        let json_body = serde_json::to_string(&request_body)
+            .map_err(|e| client::Error::Generic(format!("Failed to serialize request: {}", e)))?;
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(&uri)
+            .header("Content-Type", "application/x-amz-json-1.1")
+            .header(
+                "X-Amz-Target",
+                "com.amazonaws.transcribe.Transcribe.GetVocabulary",
+            )
+            .body(Bytes::from(json_body))
+            .map_err(|e| client::Error::HttpError(e))?;
+
+        let signed_request = self.signer.sign_request(request, timestamp)?;
+
+        let response = self.http_client.execute(signed_request)?;
+
+        if response.status().is_success() {
+            let vocabulary_response: GetVocabularyResponse =
+                serde_json::from_slice(response.body()).map_err(|e| {
+                    client::Error::Generic(format!("Failed to deserialize response: {}", e))
+                })?;
+
+            Ok(vocabulary_response)
+        } else {
+            let error_body = String::from_utf8(response.body().to_vec())
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            Err(client::Error::Generic(format!(
+                "GetVocabulary failed with status: {} - {}",
+                response.status(),
+                error_body
+            ))
+            .into())
+        }
+    }
+
+    pub fn delete_vocabulary(&self, vocabulary_name: String) -> Result<(), Error> {
+        let timestamp = Utc::now();
+        let uri = format!(
+            "https://transcribe.{}.amazonaws.com/",
+            self.signer.get_region()
+        );
+
+        let request_body = DeleteVocabularyRequest { vocabulary_name };
+
+        let json_body = serde_json::to_string(&request_body)
+            .map_err(|e| client::Error::Generic(format!("Failed to serialize request: {}", e)))?;
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(&uri)
+            .header("Content-Type", "application/x-amz-json-1.1")
+            .header(
+                "X-Amz-Target",
+                "com.amazonaws.transcribe.Transcribe.DeleteVocabulary",
+            )
+            .body(Bytes::from(json_body))
+            .map_err(|e| client::Error::HttpError(e))?;
+
+        let signed_request = self.signer.sign_request(request, timestamp)?;
+
+        let response = self.http_client.execute(signed_request)?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            let error_body = String::from_utf8(response.body().to_vec())
+                .unwrap_or_else(|_| "Unknown error".to_string());
+
+            Err(client::Error::Generic(format!(
+                "DeleteVocabulary failed with status: {} - {}",
+                response.status(),
+                error_body
+            ))
+            .into())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::{
+        cell::{Ref, RefCell},
+        collections::VecDeque,
+    };
+
     use super::*;
     use aws_credential_types::Credentials;
-    use http::{Method, Request};
+    use http::{Method, Request, Response, StatusCode};
 
     use aws_sigv4::{
         http_request::{sign, SignableBody, SignableRequest, SigningSettings},
@@ -347,7 +659,7 @@ mod tests {
         let signing_settings = SigningSettings::default();
         let signing_params = v4::SigningParams::builder()
             .identity(&identity)
-            .region(&region)
+            .region(region)
             .name(service)
             .time(timestamp.into())
             .settings(signing_settings)
@@ -484,7 +796,6 @@ mod tests {
 
     #[test]
     fn test_s3_get_object_authorization_header() {
-        // Test case from AWS documentation
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "us-east-1";
@@ -541,7 +852,6 @@ mod tests {
 
     #[test]
     fn test_s3_put_object_authorization_header() {
-        // Test case from AWS documentation
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "us-east-1";
@@ -563,7 +873,6 @@ mod tests {
 
         let request_for_aws_sdk = request.clone();
 
-        // Parse the Date header directly: "Fri, 24 May 2013 00:00:00 GMT"
         let timestamp = DateTime::parse_from_rfc2822("Fri, 24 May 2013 00:00:00 GMT")
             .unwrap()
             .with_timezone(&Utc);
@@ -573,7 +882,6 @@ mod tests {
 
         let signed_request = result.unwrap();
 
-        // Get the authorization header
         let auth_header = signed_request
             .headers()
             .get("authorization")
@@ -602,7 +910,6 @@ mod tests {
 
     #[test]
     fn test_s3_list_objects_authorization_header() {
-        // Test case from AWS documentation
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "us-east-1";
@@ -613,7 +920,6 @@ mod tests {
             region.to_string(),
         );
 
-        // Create the exact request from your specification
         let request = Request::builder()
             .method(Method::GET)
             .uri("s3://examplebucket.s3.amazonaws.com/?max-keys=2&prefix=J")
@@ -622,7 +928,6 @@ mod tests {
 
         let request_for_aws_sdk = request.clone();
 
-        // Parse the Date header directly: "Fri, 24 May 2013 00:00:00 GMT"
         let timestamp = DateTime::parse_from_rfc2822("Fri, 24 May 2013 00:00:00 GMT")
             .unwrap()
             .with_timezone(&Utc);
@@ -632,7 +937,6 @@ mod tests {
 
         let signed_request = result.unwrap();
 
-        // Get the authorization header
         let auth_header = signed_request
             .headers()
             .get("authorization")
@@ -661,7 +965,6 @@ mod tests {
 
     #[test]
     fn test_batch_transcription_authorization_header() {
-        // Test case from AWS documentation
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "us-east-1";
@@ -728,5 +1031,416 @@ mod tests {
             .unwrap();
 
         assert_eq!(auth_header, expected_auth, "Authorization header mismatch");
+    }
+
+    struct MockHttpClient {
+        pub responses: RefCell<VecDeque<Result<Response<Bytes>, client::Error>>>,
+        pub captured_requests: RefCell<Vec<Request<Bytes>>>,
+    }
+
+    #[allow(unused)]
+    impl MockHttpClient {
+        pub fn new() -> Self {
+            Self {
+                responses: RefCell::new(VecDeque::new()),
+                captured_requests: RefCell::new(Vec::new()),
+            }
+        }
+
+        pub fn expect_response(&self, response: Response<Bytes>) {
+            self.responses.borrow_mut().push_back(Ok(response));
+        }
+
+        pub fn get_captured_requests(&self) -> Ref<Vec<Request<Bytes>>> {
+            self.captured_requests.borrow()
+        }
+
+        pub fn clear_captured_requests(&self) {
+            self.captured_requests.borrow_mut().clear();
+        }
+
+        pub fn captured_request_count(&self) -> usize {
+            self.captured_requests.borrow().len()
+        }
+
+        pub fn last_captured_request(&self) -> Option<Ref<Request<Bytes>>> {
+            let borrow = self.captured_requests.borrow();
+            if borrow.is_empty() {
+                None
+            } else {
+                Some(Ref::map(borrow, |requests| requests.last().unwrap()))
+            }
+        }
+    }
+
+    impl HttpClient for MockHttpClient {
+        fn execute(&self, request: Request<Bytes>) -> Result<Response<Bytes>, client::Error> {
+            self.captured_requests.borrow_mut().push(request);
+            self.responses
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(Err(client::Error::Generic("unexpected error".to_string())))
+        }
+    }
+
+    #[test]
+    fn test_s3_put_object_request() {
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-east-1";
+
+        let mock_client = Arc::new(MockHttpClient::new());
+
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(Bytes::new())
+                .unwrap(),
+        );
+
+        let s3_client: S3Client<MockHttpClient> = S3Client::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client.clone(),
+        );
+
+        let bucket = "test-bucket";
+        let object_name = "test-object.txt";
+        let content = Bytes::from("Hello, World!");
+
+        let _result = s3_client.put_object(bucket, object_name, content.clone());
+
+        let captured_request = mock_client.last_captured_request();
+        let request = captured_request.as_ref().unwrap();
+
+        assert_eq!(request.method(), "PUT");
+
+        let expected_uri = format!("https://{}.s3.amazonaws.com/{}", bucket, object_name);
+        assert_eq!(request.uri().to_string(), expected_uri);
+
+        assert_eq!(request.body(), &content);
+
+        assert!(request.headers().contains_key("x-amz-date"));
+        assert!(request.headers().contains_key("x-amz-content-sha256"));
+        assert!(request.headers().contains_key("authorization"));
+        assert!(request.headers().contains_key("host"));
+
+        let auth_header = request
+            .headers()
+            .get("authorization")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(auth_header.starts_with("AWS4-HMAC-SHA256"));
+        assert!(auth_header.contains("Credential="));
+        assert!(auth_header.contains("SignedHeaders="));
+        assert!(auth_header.contains("Signature="));
+
+        let host_header = request.headers().get("host").unwrap().to_str().unwrap();
+        assert_eq!(host_header, format!("{}.s3.amazonaws.com", bucket));
+    }
+
+    #[test]
+    fn test_s3_get_object_request() {
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-east-1";
+
+        let expected_content = Bytes::from("Hello from S3!");
+
+        let mock_client = Arc::new(MockHttpClient::new());
+
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(expected_content.clone())
+                .unwrap(),
+        );
+
+        let s3_client: S3Client<MockHttpClient> = S3Client::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client.clone(),
+        );
+
+        let bucket = "test-bucket";
+        let object_name = "test-object.txt";
+
+        let result = s3_client.get_object(bucket, object_name);
+
+        let actual_content = result.unwrap();
+        assert_eq!(actual_content, expected_content);
+
+        let captured_request = mock_client.last_captured_request();
+        assert!(captured_request.is_some(), "Request should be captured");
+
+        let request = captured_request.as_ref().unwrap();
+
+        assert_eq!(request.method(), "GET");
+
+        let expected_uri = format!("https://{}.s3.amazonaws.com/{}", bucket, object_name);
+        assert_eq!(request.uri().to_string(), expected_uri);
+
+        assert_eq!(request.body(), &Bytes::new());
+
+        assert!(request.headers().contains_key("x-amz-date"));
+        assert!(request.headers().contains_key("x-amz-content-sha256"));
+        assert!(request.headers().contains_key("authorization"));
+        assert!(request.headers().contains_key("host"));
+
+        let auth_header = request
+            .headers()
+            .get("authorization")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(auth_header.starts_with("AWS4-HMAC-SHA256"));
+        assert!(auth_header.contains("Credential="));
+        assert!(auth_header.contains("SignedHeaders="));
+        assert!(auth_header.contains("Signature="));
+
+        let host_header = request.headers().get("host").unwrap().to_str().unwrap();
+        assert_eq!(host_header, format!("{}.s3.amazonaws.com", bucket));
+    }
+
+    #[test]
+    fn test_transcribe_create_vocabulary_request() {
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-east-1";
+
+        let expected_response = CreateVocabularyResponse {
+            vocabulary_name: "test-vocabulary".to_string(),
+            language_code: "en-US".to_string(),
+            vocabulary_state: "PENDING".to_string(),
+            last_modified_time: 1234567890.0,
+            failure_reason: None,
+        };
+
+        let mock_client = Arc::new(MockHttpClient::new());
+
+        let response_json_str = serde_json::to_string(&expected_response).unwrap();
+
+        let body_bytes = Bytes::from(response_json_str.as_bytes().to_vec());
+
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(body_bytes)
+                .unwrap(),
+        );
+
+        let transcribe_client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client.clone(),
+        );
+
+        let vocabulary_name = "test-vocabulary".to_string();
+        let language_code = "en-US".to_string();
+        let phrases = vec![
+            "hello world".to_string(),
+            "machine learning".to_string(),
+            "artificial intelligence".to_string(),
+        ];
+
+        let result = transcribe_client.create_vocabulary(
+            vocabulary_name.clone(),
+            language_code.clone(),
+            phrases.clone(),
+        );
+
+        assert!(result.is_ok());
+        let actual_response = result.unwrap();
+        assert_eq!(actual_response, expected_response);
+
+        let request = mock_client.last_captured_request().unwrap();
+        assert_eq!(request.method(), "POST");
+        assert_eq!(
+            request.uri().to_string(),
+            format!("https://transcribe.{}.amazonaws.com/", region)
+        );
+        assert_eq!(
+            request.headers().get("content-type").unwrap(),
+            "application/x-amz-json-1.1"
+        );
+        assert_eq!(
+            request.headers().get("x-amz-target").unwrap(),
+            "com.amazonaws.transcribe.Transcribe.CreateVocabulary"
+        );
+
+        let expected_request = CreateVocabularyRequest {
+            vocabulary_name,
+            language_code,
+            phrases,
+            vocabulary_file_uri: None,
+            data_access_role_arn: None,
+            tags: None,
+        };
+
+        let actual_request: CreateVocabularyRequest =
+            serde_json::from_slice(request.body()).unwrap();
+        assert_eq!(actual_request, expected_request);
+
+        assert!(request.headers().contains_key("x-amz-date"));
+        assert!(request.headers().contains_key("x-amz-content-sha256"));
+        assert!(request.headers().contains_key("authorization"));
+        assert!(request.headers().contains_key("host"));
+
+        let auth_header = request
+            .headers()
+            .get("authorization")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(auth_header.starts_with("AWS4-HMAC-SHA256"));
+        assert!(auth_header.contains("Credential="));
+        assert!(auth_header.contains("SignedHeaders="));
+        assert!(auth_header.contains("Signature="));
+    }
+
+    #[test]
+    fn test_transcribe_get_vocabulary_request() {
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-east-1";
+
+        let expected_response = GetVocabularyResponse {
+            vocabulary_name: "test-vocabulary".to_string(),
+            language_code: "en-US".to_string(),
+            vocabulary_state: "READY".to_string(),
+            last_modified_time: 1234567890.0,
+            failure_reason: None,
+            download_uri: Some("https://s3.amazonaws.com/bucket/vocabulary.txt".to_string()),
+        };
+
+        let mock_client = Arc::new(MockHttpClient::new());
+
+        let response_json_str = serde_json::to_string(&expected_response).unwrap();
+        let body_bytes = Bytes::from(response_json_str.as_bytes().to_vec());
+
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(body_bytes)
+                .unwrap(),
+        );
+
+        let transcribe_client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client.clone(),
+        );
+
+        let vocabulary_name = "test-vocabulary".to_string();
+        let result = transcribe_client.get_vocabulary(vocabulary_name.clone());
+
+        assert!(result.is_ok());
+        let actual_response = result.unwrap();
+        assert_eq!(actual_response, expected_response);
+
+        let request = mock_client.last_captured_request().unwrap();
+        assert_eq!(request.method(), "POST");
+        assert_eq!(
+            request.uri().to_string(),
+            format!("https://transcribe.{}.amazonaws.com/", region)
+        );
+        assert_eq!(
+            request.headers().get("content-type").unwrap(),
+            "application/x-amz-json-1.1"
+        );
+        assert_eq!(
+            request.headers().get("x-amz-target").unwrap(),
+            "com.amazonaws.transcribe.Transcribe.GetVocabulary"
+        );
+
+        let expected_request = GetVocabularyRequest { vocabulary_name };
+
+        let actual_request: GetVocabularyRequest = serde_json::from_slice(request.body()).unwrap();
+        assert_eq!(actual_request, expected_request);
+
+        assert!(request.headers().contains_key("x-amz-date"));
+        assert!(request.headers().contains_key("x-amz-content-sha256"));
+        assert!(request.headers().contains_key("authorization"));
+        assert!(request.headers().contains_key("host"));
+
+        let auth_header = request
+            .headers()
+            .get("authorization")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(auth_header.starts_with("AWS4-HMAC-SHA256"));
+        assert!(auth_header.contains("Credential="));
+        assert!(auth_header.contains("SignedHeaders="));
+        assert!(auth_header.contains("Signature="));
+    }
+
+    #[test]
+    fn test_transcribe_delete_vocabulary_request() {
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-east-1";
+
+        let mock_client = Arc::new(MockHttpClient::new());
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(Bytes::new())
+                .unwrap(),
+        );
+
+        let transcribe_client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client.clone(),
+        );
+
+        let vocabulary_name = "test-vocabulary".to_string();
+        let result = transcribe_client.delete_vocabulary(vocabulary_name.clone());
+
+        assert!(result.is_ok());
+
+        let request = mock_client.last_captured_request().unwrap();
+        assert_eq!(request.method(), "POST");
+        assert_eq!(
+            request.uri().to_string(),
+            format!("https://transcribe.{}.amazonaws.com/", region)
+        );
+        assert_eq!(
+            request.headers().get("content-type").unwrap(),
+            "application/x-amz-json-1.1"
+        );
+        assert_eq!(
+            request.headers().get("x-amz-target").unwrap(),
+            "com.amazonaws.transcribe.Transcribe.DeleteVocabulary"
+        );
+
+        let expected_request = DeleteVocabularyRequest { vocabulary_name };
+
+        let actual_request: DeleteVocabularyRequest =
+            serde_json::from_slice(request.body()).unwrap();
+        assert_eq!(actual_request, expected_request);
+
+        assert!(request.headers().contains_key("x-amz-date"));
+        assert!(request.headers().contains_key("x-amz-content-sha256"));
+        assert!(request.headers().contains_key("authorization"));
+        assert!(request.headers().contains_key("host"));
+
+        let auth_header = request
+            .headers()
+            .get("authorization")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(auth_header.starts_with("AWS4-HMAC-SHA256"));
+        assert!(auth_header.contains("Credential="));
+        assert!(auth_header.contains("SignedHeaders="));
+        assert!(auth_header.contains("Signature="));
     }
 }

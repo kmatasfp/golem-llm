@@ -1,8 +1,27 @@
 use bytes::Bytes;
+use derive_more::From;
 use http::{Request, Response};
 use reqwest::Client;
 
-use crate::error::Error;
+#[allow(unused)]
+#[derive(Debug, From)]
+pub enum Error {
+    #[from]
+    HttpError(http::Error),
+    #[from]
+    Reqwest(reqwest::Error),
+    #[from]
+    Io(std::io::Error),
+    Generic(String),
+}
+
+impl core::fmt::Display for Error {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(fmt, "{self:?}")
+    }
+}
+
+impl std::error::Error for Error {}
 
 pub trait HttpClient {
     fn execute(&self, request: Request<Bytes>) -> Result<Response<Bytes>, Error>;

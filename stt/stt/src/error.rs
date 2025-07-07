@@ -1,5 +1,4 @@
-use crate::golem::stt::types::SttError;
-use std::string::FromUtf8Error;
+use crate::{client, golem::stt::types::SttError};
 
 use derive_more::From;
 
@@ -7,20 +6,7 @@ use derive_more::From;
 #[derive(Debug, From)]
 pub enum Error {
     #[from]
-    Reqwest(reqwest::Error),
-    #[from]
-    SerdeJson(serde_json::Error),
-    #[from]
-    Io(std::io::Error),
-
-    UriParseError(String),
-
-    #[from]
-    HttpError(http::Error),
-
-    #[from]
-    #[allow(clippy::enum_variant_names)]
-    ToStringConversionError(FromUtf8Error),
+    Client(client::Error),
 
     APIBadRequest {
         provider_error: String,
@@ -72,10 +58,6 @@ pub struct ApiError {
 impl From<Error> for SttError {
     fn from(error: Error) -> Self {
         match error {
-            Error::Reqwest(error) => SttError::NetworkError(format!("Failed to call API: {error}")),
-            Error::SerdeJson(error) => {
-                SttError::InternalError(format!("API returned unexpected JSON: {error}"))
-            }
             Error::APIBadRequest { provider_error } => SttError::InvalidAudio(provider_error),
             Error::APIUnauthorized { provider_error } => SttError::AccessDenied(provider_error),
             Error::APIForbidden { provider_error } => SttError::Unauthorized(provider_error),
@@ -90,14 +72,7 @@ impl From<Error> for SttError {
                 SttError::ServiceUnavailable(provider_error)
             }
             Error::APIUnknown { provider_error } => SttError::InternalError(provider_error),
-            Error::ToStringConversionError(error) => {
-                SttError::InternalError(format!("Failed to convert to string: {error}"))
-            }
-            Error::Io(error) => SttError::InternalError(format!("I/O error: {error}")),
-            Error::UriParseError(uri) => {
-                SttError::InternalError(format!("Failed to parse URI: {uri}"))
-            }
-            Error::HttpError(error) => SttError::InternalError(format!("Http error: {error}")),
+            Error::Client(error) => SttError::InternalError(format!("Internal error: {error}")),
         }
     }
 }

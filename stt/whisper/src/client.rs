@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
-use golem_stt::client::{HttpClient, ReqwestHttpClient, SttProviderClient};
+use golem_stt::client::{self, HttpClient, ReqwestHttpClient, SttProviderClient};
 use log::trace;
 use serde::{Deserialize, Serialize};
 
@@ -228,48 +228,43 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
             .uri(BASE_URL)
             .header("Authorization", &*self.openai_api_token)
             .header("Content-Type", content_type)
-            .body(body)?;
+            .body(body)
+            .map_err(|e| client::Error::HttpError(e))?;
 
         let response = self.http_client.execute(req)?;
 
         // match what official OpenAI SDK does https://github.com/openai/openai-python/blob/0673da62f2f2476a3e5791122e75ec0cbfd03442/src/openai/_client.py#L343
-        match response.status() {
-            StatusCode::OK => {
-                let whisper_transcription: WhisperTranscription =
-                    serde_json::from_slice(response.body())?;
 
-                Ok(TranscriptionResponse {
-                    audio_size_bytes,
-                    whisper_transcription,
-                })
+        if response.status().is_success() {
+            let whisper_transcription: WhisperTranscription =
+                serde_json::from_slice(response.body()).map_err(|e| {
+                    client::Error::Generic(format!("Failed to deserialize response: {}", e))
+                })?;
+
+            Ok(TranscriptionResponse {
+                audio_size_bytes,
+                whisper_transcription,
+            })
+        } else {
+            let provider_error = String::from_utf8(response.body().to_vec()).map_err(|e| {
+                client::Error::Generic(format!("Failed to parse response as UTF-8: {}", e))
+            })?;
+
+            match response.status() {
+                StatusCode::BAD_REQUEST => Err(Error::APIBadRequest { provider_error }),
+                StatusCode::UNAUTHORIZED => Err(Error::APIUnauthorized { provider_error }),
+                StatusCode::FORBIDDEN => Err(Error::APIForbidden { provider_error }),
+                StatusCode::NOT_FOUND => Err(Error::APINotFound { provider_error }),
+                StatusCode::CONFLICT => Err(Error::APIConflict { provider_error }),
+                StatusCode::UNPROCESSABLE_ENTITY => {
+                    Err(Error::APIUnprocessableEntity { provider_error })
+                }
+                StatusCode::TOO_MANY_REQUESTS => Err(Error::APIRateLimit { provider_error }),
+                status if status.is_server_error() => {
+                    Err(Error::APIInternalServerError { provider_error })
+                }
+                _ => Err(Error::APIUnknown { provider_error }),
             }
-            StatusCode::BAD_REQUEST => Err(Error::APIBadRequest {
-                provider_error: String::from_utf8(response.body().to_vec())?,
-            }),
-            StatusCode::UNAUTHORIZED => Err(Error::APIUnauthorized {
-                provider_error: String::from_utf8(response.body().to_vec())?,
-            }),
-            StatusCode::FORBIDDEN => Err(Error::APIForbidden {
-                provider_error: String::from_utf8(response.body().to_vec())?,
-            }),
-            StatusCode::NOT_FOUND => Err(Error::APINotFound {
-                provider_error: String::from_utf8(response.body().to_vec())?,
-            }),
-            StatusCode::CONFLICT => Err(Error::APIConflict {
-                provider_error: String::from_utf8(response.body().to_vec())?,
-            }),
-            StatusCode::UNPROCESSABLE_ENTITY => Err(Error::APIUnprocessableEntity {
-                provider_error: String::from_utf8(response.body().to_vec())?,
-            }),
-            StatusCode::TOO_MANY_REQUESTS => Err(Error::APIRateLimit {
-                provider_error: String::from_utf8(response.body().to_vec())?,
-            }),
-            status if status.is_server_error() => Err(Error::APIInternalServerError {
-                provider_error: String::from_utf8(response.body().to_vec())?,
-            }),
-            _ => Err(Error::APIUnknown {
-                provider_error: String::from_utf8(response.body().to_vec())?,
-            }),
         }
     }
 }
@@ -371,7 +366,7 @@ mod tests {
     const TEST_API_KEY: &str = "test-api-key";
 
     struct MockHttpClient {
-        pub responses: RefCell<VecDeque<Result<Response<Bytes>, Error>>>,
+        pub responses: RefCell<VecDeque<Result<Response<Bytes>, client::Error>>>,
         pub captured_requests: RefCell<Vec<Request<Bytes>>>,
     }
 
@@ -411,14 +406,12 @@ mod tests {
     }
 
     impl HttpClient for MockHttpClient {
-        fn execute(&self, request: Request<Bytes>) -> Result<Response<Bytes>, Error> {
+        fn execute(&self, request: Request<Bytes>) -> Result<Response<Bytes>, client::Error> {
             self.captured_requests.borrow_mut().push(request);
             self.responses
                 .borrow_mut()
                 .pop_front()
-                .unwrap_or(Err(Error::APIUnknown {
-                    provider_error: "unexpected error".to_string(),
-                }))
+                .unwrap_or(Err(client::Error::Generic("unexpected error".to_string())))
         }
     }
 
