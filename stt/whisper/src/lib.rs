@@ -1,9 +1,11 @@
 mod client;
 mod conversions;
 
-use crate::client::TranscriptionsApi;
+use futures_concurrency::future::Join;
 use itertools::Itertools;
+use wasi_async_runtime::block_on;
 
+use crate::client::TranscriptionsApi;
 use client::TranscriptionRequest;
 use golem_stt::client::SttProviderClient;
 use golem_stt::error::Error;
@@ -16,7 +18,6 @@ use golem_stt::golem::stt::transcription::{
 };
 
 use golem_stt::golem::stt::languages::{Guest as LanguageGuest, LanguageInfo};
-use wasi_async_runtime::block_on;
 
 #[allow(unused)]
 struct Component;
@@ -86,7 +87,7 @@ impl TranscriptionGuest for Component {
                     .map(|request| api_client.transcribe_audio(request))
                     .collect::<Vec<_>>();
 
-                let results = futures::future::join_all(futures).await;
+                let results = futures.join().await;
 
                 for res in results {
                     match res {

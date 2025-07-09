@@ -10,6 +10,7 @@ use golem_stt::golem::stt::transcription::{
     TranscriptionRequest as WitTranscriptionRequest, TranscriptionResult as WitTranscriptionResult,
 };
 
+use futures_concurrency::future::Join;
 use golem_stt::golem::stt::types::SttError as WitSttError;
 use itertools::Itertools;
 use wasi_async_runtime::block_on;
@@ -85,7 +86,7 @@ impl TranscriptionGuest for Component {
                     .map(|request| api_client.transcribe_audio(request))
                     .collect::<Vec<_>>();
 
-                let results = futures::future::join_all(futures).await;
+                let results = futures.join().await;
 
                 for res in results {
                     match res {
