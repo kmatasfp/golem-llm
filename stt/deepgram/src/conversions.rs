@@ -108,6 +108,7 @@ impl TryFrom<WitTranscriptionRequest> for TranscriptionRequest {
             };
 
         Ok(TranscriptionRequest {
+            request_id: request.request_id,
             audio: Bytes::from(audio),
             audio_config: AudioConfig {
                 format: request.config.format.into(),

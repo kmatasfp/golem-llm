@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{rc::Rc, sync::Arc};
 
 use bytes::{BufMut, Bytes, BytesMut};
 use golem_stt::client::{self, HttpClient, ReqwestHttpClient, SttProviderClient};
@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use golem_stt::error::Error;
 use golem_stt::languages::Language;
 use http::{Method, Request, StatusCode};
+use wasi_async_runtime::Reactor;
 
 const BASE_URL: &str = "https://api.openai.com/v1/audio/transcriptions";
 
@@ -75,6 +76,10 @@ pub fn is_supported_language(language_code: &str) -> bool {
     WHISPER_SUPPORTED_LANGUAGES
         .iter()
         .any(|lang| lang.code == language_code)
+}
+
+pub fn get_supported_languages() -> &'static [Language] {
+    &WHISPER_SUPPORTED_LANGUAGES
 }
 
 #[allow(non_camel_case_types)]
@@ -174,26 +179,24 @@ impl<HC: HttpClient> TranscriptionsApi<HC> {
             http_client: http_client.into(),
         }
     }
-
-    pub fn get_supported_languages(&self) -> &[Language] {
-        &WHISPER_SUPPORTED_LANGUAGES
-    }
 }
 
 impl TranscriptionsApi<ReqwestHttpClient> {
-    pub fn live(openai_api_key: String) -> Self {
-        Self::new(openai_api_key, ReqwestHttpClient::new())
+    pub fn live(openai_api_key: String, reactor: Reactor) -> Self {
+        Self::new(openai_api_key, ReqwestHttpClient::new(reactor))
     }
 }
 
 impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionResponse, Error>
     for TranscriptionsApi<HC>
 {
-    fn transcribe_audio(
+    async fn transcribe_audio(
         &self,
         request: TranscriptionRequest,
     ) -> Result<TranscriptionResponse, Error> {
         trace!("Sending request to OpenAI API: {request:?}");
+
+        let request_id: Rc<str> = Rc::from(request.request_id.clone()); // is there a better way to do this?
 
         let file_name = format!("audio.{}", request.audio_config.format);
         let mime_type = format!("audio/{}", request.audio_config.format);
@@ -229,16 +232,25 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
             .header("Authorization", &*self.openai_api_token)
             .header("Content-Type", content_type)
             .body(body)
-            .map_err(|e| client::Error::HttpError(e))?;
+            .map_err(|e| {
+                Error::Client(request_id.clone().to_string(), client::Error::HttpError(e))
+            })?;
 
-        let response = self.http_client.execute(req)?;
+        let response = self
+            .http_client
+            .execute(req)
+            .await
+            .map_err(|e| Error::Client(request_id.clone().to_string(), e))?;
 
         // match what official OpenAI SDK does https://github.com/openai/openai-python/blob/0673da62f2f2476a3e5791122e75ec0cbfd03442/src/openai/_client.py#L343
 
         if response.status().is_success() {
             let whisper_transcription: WhisperTranscription =
                 serde_json::from_slice(response.body()).map_err(|e| {
-                    client::Error::Generic(format!("Failed to deserialize response: {}", e))
+                    Error::Client(
+                        request_id.clone().to_string(),
+                        client::Error::Generic(format!("Failed to deserialize response: {}", e)),
+                    )
                 })?;
 
             Ok(TranscriptionResponse {
@@ -247,29 +259,56 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
             })
         } else {
             let provider_error = String::from_utf8(response.body().to_vec()).map_err(|e| {
-                client::Error::Generic(format!("Failed to parse response as UTF-8: {}", e))
+                Error::Client(
+                    request_id.clone().to_string(),
+                    client::Error::Generic(format!("Failed to parse response as UTF-8: {}", e)),
+                )
             })?;
 
             match response.status() {
-                StatusCode::BAD_REQUEST => Err(Error::APIBadRequest { provider_error }),
-                StatusCode::UNAUTHORIZED => Err(Error::APIUnauthorized { provider_error }),
-                StatusCode::FORBIDDEN => Err(Error::APIForbidden { provider_error }),
-                StatusCode::NOT_FOUND => Err(Error::APINotFound { provider_error }),
-                StatusCode::CONFLICT => Err(Error::APIConflict { provider_error }),
-                StatusCode::UNPROCESSABLE_ENTITY => {
-                    Err(Error::APIUnprocessableEntity { provider_error })
-                }
-                StatusCode::TOO_MANY_REQUESTS => Err(Error::APIRateLimit { provider_error }),
-                status if status.is_server_error() => {
-                    Err(Error::APIInternalServerError { provider_error })
-                }
-                _ => Err(Error::APIUnknown { provider_error }),
+                StatusCode::BAD_REQUEST => Err(Error::APIBadRequest {
+                    request_id: request_id.clone().to_string(),
+                    provider_error,
+                }),
+                StatusCode::UNAUTHORIZED => Err(Error::APIUnauthorized {
+                    request_id: request_id.clone().to_string(),
+                    provider_error,
+                }),
+                StatusCode::FORBIDDEN => Err(Error::APIForbidden {
+                    request_id: request_id.clone().to_string(),
+                    provider_error,
+                }),
+                StatusCode::NOT_FOUND => Err(Error::APINotFound {
+                    request_id: request_id.clone().to_string(),
+                    provider_error,
+                }),
+                StatusCode::CONFLICT => Err(Error::APIConflict {
+                    request_id: request_id.clone().to_string(),
+                    provider_error,
+                }),
+                StatusCode::UNPROCESSABLE_ENTITY => Err(Error::APIUnprocessableEntity {
+                    request_id: request_id.clone().to_string(),
+                    provider_error,
+                }),
+                StatusCode::TOO_MANY_REQUESTS => Err(Error::APIRateLimit {
+                    request_id: request_id.clone().to_string(),
+                    provider_error,
+                }),
+                status if status.is_server_error() => Err(Error::APIInternalServerError {
+                    request_id: request_id.clone().to_string(),
+                    provider_error,
+                }),
+                _ => Err(Error::APIUnknown {
+                    request_id: request_id.clone().to_string(),
+                    provider_error,
+                }),
             }
         }
     }
 }
 
 pub struct TranscriptionRequest {
+    pub request_id: String,
     pub audio: Bytes,
     pub audio_config: AudioConfig,
     pub transcription_config: Option<TranscriptionConfig>,
@@ -358,6 +397,7 @@ mod tests {
     use std::cell::{Ref, RefCell};
     use std::collections::{HashMap, VecDeque};
     use std::io::{Cursor, Read};
+    use wasi_async_runtime::block_on;
 
     use multipart_2021::server::Multipart;
 
@@ -406,7 +446,7 @@ mod tests {
     }
 
     impl HttpClient for MockHttpClient {
-        fn execute(&self, request: Request<Bytes>) -> Result<Response<Bytes>, client::Error> {
+        async fn execute(&self, request: Request<Bytes>) -> Result<Response<Bytes>, client::Error> {
             self.captured_requests.borrow_mut().push(request);
             self.responses
                 .borrow_mut()
@@ -464,6 +504,7 @@ mod tests {
         let audio_bytes = b"fake audio data".to_vec();
 
         let request = TranscriptionRequest {
+            request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.into(),
             audio_config: AudioConfig {
                 format: AudioFormat::mp3,
@@ -471,7 +512,7 @@ mod tests {
             transcription_config: None,
         };
 
-        api.transcribe_audio(request).unwrap();
+        block_on(|_| async { api.transcribe_audio(request).await.unwrap() });
 
         let captured_request = mock_client.last_captured_request().unwrap();
 
@@ -534,6 +575,7 @@ mod tests {
         let prompt = "foo".to_string();
 
         let request = TranscriptionRequest {
+            request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.clone().into(),
             audio_config: AudioConfig {
                 format: AudioFormat::mp3,
@@ -545,7 +587,7 @@ mod tests {
             }),
         };
 
-        api.transcribe_audio(request).unwrap();
+        block_on(|_| async { api.transcribe_audio(request).await.unwrap() });
 
         let captured_request = mock_client.last_captured_request().unwrap();
 
@@ -679,6 +721,7 @@ mod tests {
         let audio_bytes = b"fake audio data".to_vec();
 
         let request = TranscriptionRequest {
+            request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.clone().into(),
             audio_config: AudioConfig {
                 format: AudioFormat::mp3,
@@ -690,7 +733,7 @@ mod tests {
             }),
         };
 
-        api.transcribe_audio(request).unwrap();
+        block_on(|_| async { api.transcribe_audio(request).await.unwrap() });
 
         let captured_request = mock_client.last_captured_request().unwrap();
 
@@ -785,6 +828,7 @@ mod tests {
         let audio_byte_len = audio_bytes.len();
 
         let request = TranscriptionRequest {
+            request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.into(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
@@ -796,7 +840,7 @@ mod tests {
             }),
         };
 
-        let response = api.transcribe_audio(request).unwrap();
+        let response = block_on(|_| async { api.transcribe_audio(request).await.unwrap() });
 
         let expected_response = TranscriptionResponse {
             audio_size_bytes: audio_byte_len,
@@ -853,6 +897,7 @@ mod tests {
         let audio_bytes = b"fake audio data".to_vec();
 
         let request = TranscriptionRequest {
+            request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.into(),
             audio_config: AudioConfig {
                 format: AudioFormat::mp3,
@@ -860,12 +905,16 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = api.transcribe_audio(request);
+        let result = block_on(|_| async { api.transcribe_audio(request).await });
 
         assert!(result.is_err());
 
         match result.unwrap_err() {
-            Error::APIBadRequest { provider_error } => {
+            Error::APIBadRequest {
+                request_id,
+                provider_error,
+            } => {
+                assert_eq!(request_id, "some-transcription-id");
                 assert_eq!(provider_error, error_body);
             }
             _ => panic!("Expected APIBadRequest error"),
@@ -898,6 +947,7 @@ mod tests {
         let audio_bytes = b"fake audio data".to_vec();
 
         let request = TranscriptionRequest {
+            request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.into(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
@@ -905,11 +955,15 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = api.transcribe_audio(request);
+        let result = block_on(|_| async { api.transcribe_audio(request).await });
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::APIUnauthorized { provider_error } => {
+            Error::APIUnauthorized {
+                request_id,
+                provider_error,
+            } => {
+                assert_eq!(request_id, "some-transcription-id");
                 assert_eq!(provider_error, error_body);
             }
             _ => panic!("Expected APIUnauthorized error"),
@@ -942,6 +996,7 @@ mod tests {
         let audio_bytes = b"fake audio data".to_vec();
 
         let request = TranscriptionRequest {
+            request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.into(),
             audio_config: AudioConfig {
                 format: AudioFormat::flac,
@@ -949,11 +1004,15 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = api.transcribe_audio(request);
+        let result = block_on(|_| async { api.transcribe_audio(request).await });
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::APIForbidden { provider_error } => {
+            Error::APIForbidden {
+                request_id,
+                provider_error,
+            } => {
+                assert_eq!(request_id, "some-transcription-id");
                 assert_eq!(provider_error, error_body);
             }
             _ => panic!("Expected APIForbidden error"),
@@ -986,6 +1045,7 @@ mod tests {
         let audio_bytes = b"fake audio data".to_vec();
 
         let request = TranscriptionRequest {
+            request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.into(),
             audio_config: AudioConfig {
                 format: AudioFormat::ogg,
@@ -993,11 +1053,15 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = api.transcribe_audio(request);
+        let result = block_on(|_| async { api.transcribe_audio(request).await });
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::APINotFound { provider_error } => {
+            Error::APINotFound {
+                request_id,
+                provider_error,
+            } => {
+                assert_eq!(request_id, "some-transcription-id");
                 assert_eq!(provider_error, error_body);
             }
             _ => panic!("Expected APINotFound error"),
@@ -1030,6 +1094,7 @@ mod tests {
         let audio_bytes = b"fake large audio data".to_vec();
 
         let request = TranscriptionRequest {
+            request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.into(),
             audio_config: AudioConfig {
                 format: AudioFormat::mp3,
@@ -1037,11 +1102,15 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = api.transcribe_audio(request);
+        let result = block_on(|_| async { api.transcribe_audio(request).await });
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::APIUnprocessableEntity { provider_error } => {
+            Error::APIUnprocessableEntity {
+                request_id,
+                provider_error,
+            } => {
+                assert_eq!(request_id, "some-transcription-id");
                 assert_eq!(provider_error, error_body);
             }
             _ => panic!("Expected APIUnprocessableEntity error"),
@@ -1074,6 +1143,7 @@ mod tests {
         let audio_bytes = b"fake audio data".to_vec();
 
         let request = TranscriptionRequest {
+            request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.into(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
@@ -1081,11 +1151,15 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = api.transcribe_audio(request);
+        let result = block_on(|_| async { api.transcribe_audio(request).await });
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::APIRateLimit { provider_error } => {
+            Error::APIRateLimit {
+                request_id,
+                provider_error,
+            } => {
+                assert_eq!(request_id, "some-transcription-id");
                 assert_eq!(provider_error, error_body);
             }
             _ => panic!("Expected APIRateLimit error"),
@@ -1118,6 +1192,7 @@ mod tests {
         let audio_bytes = b"fake audio data".to_vec();
 
         let request = TranscriptionRequest {
+            request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.into(),
             audio_config: AudioConfig {
                 format: AudioFormat::mp3,
@@ -1125,11 +1200,15 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = api.transcribe_audio(request);
+        let result = block_on(|_| async { api.transcribe_audio(request).await });
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::APIInternalServerError { provider_error } => {
+            Error::APIInternalServerError {
+                request_id,
+                provider_error,
+            } => {
+                assert_eq!(request_id, "some-transcription-id");
                 assert_eq!(provider_error, error_body);
             }
             _ => panic!("Expected APIInternalServerError error"),
@@ -1162,6 +1241,7 @@ mod tests {
         let audio_bytes = b"fake audio data".to_vec();
 
         let request = TranscriptionRequest {
+            request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.into(),
             audio_config: AudioConfig {
                 format: AudioFormat::flac,
@@ -1169,11 +1249,15 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = api.transcribe_audio(request);
+        let result = block_on(|_| async { api.transcribe_audio(request).await });
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::APIUnknown { provider_error } => {
+            Error::APIUnknown {
+                request_id,
+                provider_error,
+            } => {
+                assert_eq!(request_id, "some-transcription-id");
                 assert_eq!(provider_error, error_body);
             }
             _ => panic!("Expected APIUnknown error"),

@@ -1,4 +1,6 @@
+use futures_concurrency::future::Join;
 use std::collections::VecDeque;
+use wasi_async_runtime::block_on;
 
 use crate::client::SttProviderClient;
 
@@ -29,7 +31,7 @@ where
 
     fn process_next(&mut self) -> bool {
         if let Some(request) = self.requests.pop_front() {
-            let result = self.api.transcribe_audio(request);
+            let result = block_on(|_| async { self.api.transcribe_audio(request).await });
             self.processed_results.push_back(result);
             true
         } else {
@@ -46,16 +48,21 @@ where
     }
 
     pub fn blocking_get_next(&mut self) -> Vec<Result<RES, ERR>> {
-        while !self.requests.is_empty() {
-            self.process_next();
+        if self.requests.is_empty() {
+            return vec![];
         }
 
-        let mut results = Vec::new();
-        while let Some(result) = self.processed_results.pop_front() {
-            results.push(result);
+        let mut requests_to_process = Vec::new();
+        while let Some(request) = self.requests.pop_front() {
+            requests_to_process.push(request);
         }
 
-        results
+        let futures: Vec<_> = requests_to_process
+            .into_iter()
+            .map(|request| self.api.transcribe_audio(request))
+            .collect();
+
+        block_on(|_| async { futures.join().await })
     }
 
     pub fn has_pending(&self) -> bool {
@@ -99,7 +106,7 @@ mod tests {
     }
 
     impl SttProviderClient<&str, String, MockError> for MockSttProvider {
-        fn transcribe_audio(&self, _request: &str) -> Result<String, MockError> {
+        async fn transcribe_audio(&self, _request: &str) -> Result<String, MockError> {
             self.responses.borrow_mut().pop_front().unwrap_or_else(|| {
                 Err(MockError {
                     message: "No more responses".to_string(),

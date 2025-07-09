@@ -2,6 +2,7 @@ use bytes::Bytes;
 use derive_more::From;
 use http::{Request, Response};
 use reqwest::Client;
+use wasi_async_runtime::Reactor;
 
 #[allow(unused)]
 #[derive(Debug, From)]
@@ -23,8 +24,9 @@ impl core::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+#[allow(async_fn_in_trait)]
 pub trait HttpClient {
-    fn execute(&self, request: Request<Bytes>) -> Result<Response<Bytes>, Error>;
+    async fn execute(&self, request: Request<Bytes>) -> Result<Response<Bytes>, Error>;
 }
 
 pub struct ReqwestHttpClient {
@@ -32,16 +34,14 @@ pub struct ReqwestHttpClient {
 }
 
 impl ReqwestHttpClient {
-    pub fn new() -> Self {
-        let client = Client::builder()
-            .build()
-            .expect("Failed to initialize HTTP client");
+    pub fn new(reactor: Reactor) -> Self {
+        let client = Client::new(reactor);
         Self { client }
     }
 }
 
 impl HttpClient for ReqwestHttpClient {
-    fn execute(&self, request: Request<Bytes>) -> Result<Response<Bytes>, Error> {
+    async fn execute(&self, request: Request<Bytes>) -> Result<Response<Bytes>, Error> {
         fn to_reqwest_request(
             client: &Client,
             req: Request<Bytes>,
@@ -58,11 +58,11 @@ impl HttpClient for ReqwestHttpClient {
         }
 
         let reqwest_request = to_reqwest_request(&self.client, request)?;
-        let reqwest_response = self.client.execute(reqwest_request)?;
+        let reqwest_response = self.client.execute(reqwest_request).await?;
 
         let status = reqwest_response.status();
         let headers = reqwest_response.headers().clone();
-        let body = reqwest_response.bytes()?;
+        let body = reqwest_response.bytes().await?;
 
         let mut response = Response::builder().status(status).body(body).map_err(|e| {
             Error::Io(std::io::Error::new(
@@ -77,6 +77,7 @@ impl HttpClient for ReqwestHttpClient {
     }
 }
 
+#[allow(async_fn_in_trait)]
 pub trait SttProviderClient<REQ, RES, ERR: std::error::Error> {
-    fn transcribe_audio(&self, request: REQ) -> Result<RES, ERR>;
+    async fn transcribe_audio(&self, request: REQ) -> Result<RES, ERR>;
 }

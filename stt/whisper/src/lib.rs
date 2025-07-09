@@ -2,42 +2,28 @@ mod client;
 mod conversions;
 
 use crate::client::TranscriptionsApi;
+use itertools::Itertools;
 
-use client::{TranscriptionRequest, TranscriptionResponse};
-use golem_stt::client::{ReqwestHttpClient, SttProviderClient};
+use client::TranscriptionRequest;
+use golem_stt::client::SttProviderClient;
 use golem_stt::error::Error;
 use golem_stt::golem::stt::types::SttError as WitSttError;
 
 use golem_stt::golem::stt::transcription::{
-    Guest as TranscriptionGuest, GuestTranscriptionQueue,
-    TranscriptionQueue as WitTranscriptionQueue, TranscriptionRequest as WitTranscriptionRequest,
-    TranscriptionResult as WitTranscriptionResult,
+    FailedTranscription as WitFailedTranscription, Guest as TranscriptionGuest,
+    MultiTranscriptionResult as WitMultiTranscriptionResult,
+    TranscriptionRequest as WitTranscriptionRequest, TranscriptionResult as WitTranscriptionResult,
 };
 
 use golem_stt::golem::stt::languages::{Guest as LanguageGuest, LanguageInfo};
-use golem_stt::transcription_queue::TranscriptionQueue;
-
-use std::cell::RefCell;
-use std::sync::OnceLock;
+use wasi_async_runtime::block_on;
 
 #[allow(unused)]
 struct Component;
 
-static CLIENT: OnceLock<TranscriptionsApi<ReqwestHttpClient>> = OnceLock::new();
-
-fn get_client() -> &'static TranscriptionsApi<ReqwestHttpClient> {
-    CLIENT.get_or_init(|| {
-        let api_key =
-            std::env::var("OPENAI_API_KEY").expect("env variable OPENAI_API_KEY was not set");
-        TranscriptionsApi::live(api_key)
-    })
-}
-
 impl LanguageGuest for Component {
     fn list_languages() -> Result<Vec<LanguageInfo>, WitSttError> {
-        let api_client = get_client();
-
-        let supported_languages = api_client.get_supported_languages();
+        let supported_languages = client::get_supported_languages();
         Ok(supported_languages
             .iter()
             .map(|lang| LanguageInfo {
@@ -49,71 +35,75 @@ impl LanguageGuest for Component {
     }
 }
 
-struct WhisperTranscriptionQueue {
-    queue: RefCell<
-        TranscriptionQueue<
-            'static,
-            TranscriptionsApi<ReqwestHttpClient>,
-            TranscriptionRequest,
-            TranscriptionResponse,
-            Error,
-        >,
-    >,
-}
+impl TranscriptionGuest for Component {
+    fn transcribe(req: WitTranscriptionRequest) -> Result<WitTranscriptionResult, WitSttError> {
+        let api_key = std::env::var("OPENAI_API_KEY").map_err(|err| {
+            Error::EnvVariablesNotSet(format!("Failed to load OPENAI_API_KEY: {}", err))
+        })?;
 
-impl GuestTranscriptionQueue for WhisperTranscriptionQueue {
-    fn get_next(&self) -> Option<Result<WitTranscriptionResult, WitSttError>> {
-        self.queue.borrow_mut().get_next().map(|result| {
-            result
-                .map(|transcription| transcription.into())
-                .map_err(|e| e.into())
+        block_on(|reactor| async {
+            let api_client = TranscriptionsApi::live(api_key, reactor);
+
+            let api_response = api_client.transcribe_audio(req.try_into()?).await?;
+
+            Ok(api_response.into())
         })
     }
 
-    fn blocking_get_next(&self) -> Vec<Result<WitTranscriptionResult, WitSttError>> {
-        self.queue
-            .borrow_mut()
-            .blocking_get_next()
-            .into_iter()
-            .map(|result| {
-                result
-                    .map(|transcription| transcription.into())
-                    .map_err(|e| e.into())
+    fn transcribe_many(
+        wit_requests: Vec<WitTranscriptionRequest>,
+    ) -> Result<WitMultiTranscriptionResult, WitSttError> {
+        let api_key = std::env::var("OPENAI_API_KEY").map_err(|err| {
+            Error::EnvVariablesNotSet(format!("Failed to load OPENAI_API_KEY: {}", err))
+        })?;
+
+        block_on(|reactor| async {
+            let api_client = TranscriptionsApi::live(api_key, reactor);
+
+            let mut successes: Vec<WitTranscriptionResult> = Vec::new();
+            let mut failures: Vec<WitFailedTranscription> = Vec::new();
+
+            let requests: Vec<_> = wit_requests
+                .into_iter()
+                .map(|wr| (wr.request_id.clone(), TranscriptionRequest::try_from(wr)))
+                .filter_map(|(id, res)| match res {
+                    Ok(req) => Some(req),
+                    Err(err) => {
+                        failures.push(WitFailedTranscription {
+                            request_id: id,
+                            error: err,
+                        });
+                        None
+                    }
+                })
+                .collect();
+
+            for chunk in requests.into_iter().chunks(16).into_iter() {
+                let req_vec: Vec<_> = chunk.collect();
+
+                let futures = req_vec
+                    .into_iter()
+                    .map(|request| api_client.transcribe_audio(request))
+                    .collect::<Vec<_>>();
+
+                let results = futures::future::join_all(futures).await;
+
+                for res in results {
+                    match res {
+                        Ok(resp) => successes.push(resp.into()),
+                        Err(err) => failures.push(WitFailedTranscription {
+                            request_id: err.request_id().to_string(),
+                            error: WitSttError::from(err),
+                        }),
+                    }
+                }
+            }
+
+            Ok(WitMultiTranscriptionResult {
+                successes,
+                failures,
             })
-            .collect()
-    }
-}
-
-impl TranscriptionGuest for Component {
-    type TranscriptionQueue = WhisperTranscriptionQueue;
-
-    fn transcribe(req: WitTranscriptionRequest) -> Result<WitTranscriptionResult, WitSttError> {
-        let api_client = get_client();
-
-        let api_response = api_client.transcribe_audio(req.try_into()?)?;
-
-        Ok(api_response.into())
-    }
-
-    fn queue_transcription(
-        requests: Vec<WitTranscriptionRequest>,
-    ) -> Result<WitTranscriptionQueue, WitSttError> {
-        let api_client = get_client();
-
-        let reqs: Result<Vec<TranscriptionRequest>, WitSttError> = requests
-            .into_iter()
-            .map(|req| req.try_into())
-            .try_fold(Vec::new(), |mut acc, res| {
-                let item = res?;
-                acc.push(item);
-                Ok(acc)
-            });
-
-        let queue = TranscriptionQueue::new(api_client, reqs?);
-
-        Ok(WitTranscriptionQueue::new(WhisperTranscriptionQueue {
-            queue: queue.into(),
-        }))
+        })
     }
 }
 
