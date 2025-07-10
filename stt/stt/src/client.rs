@@ -2,6 +2,7 @@ use bytes::Bytes;
 use derive_more::From;
 use http::{Request, Response};
 use reqwest::Client;
+use url::Url;
 use wasi_async_runtime::Reactor;
 
 #[allow(unused)]
@@ -40,25 +41,25 @@ impl ReqwestHttpClient {
     }
 }
 
+struct WasiRequest(reqwest::Request);
+
+impl From<Request<Bytes>> for WasiRequest {
+    fn from(request: Request<Bytes>) -> Self {
+        let (parts, body) = request.into_parts();
+        let url = Url::parse(&parts.uri.to_string()).expect("Valid URL");
+
+        let mut req = reqwest::Request::new(parts.method, url);
+        *req.headers_mut() = parts.headers;
+        *req.version_mut() = parts.version;
+        *req.body_mut() = Some(body.into());
+        WasiRequest(req)
+    }
+}
+
 impl HttpClient for ReqwestHttpClient {
     async fn execute(&self, request: Request<Bytes>) -> Result<Response<Bytes>, Error> {
-        fn to_reqwest_request(
-            client: &Client,
-            req: Request<Bytes>,
-        ) -> Result<reqwest::Request, Error> {
-            let (parts, body) = req.into_parts();
-
-            let builder = client
-                .request(parts.method, parts.uri.to_string())
-                .headers(parts.headers)
-                .version(parts.version)
-                .body(body);
-
-            builder.build().map_err(Error::Reqwest)
-        }
-
-        let reqwest_request = to_reqwest_request(&self.client, request)?;
-        let reqwest_response = self.client.execute(reqwest_request).await?;
+        let reqwest_request = WasiRequest::from(request);
+        let reqwest_response = self.client.execute(reqwest_request.0).await?;
 
         let status = reqwest_response.status();
         let headers = reqwest_response.headers().clone();

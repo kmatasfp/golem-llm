@@ -23,6 +23,7 @@ reqwest = { git = "https://github.com/golemcloud/reqwest", branch = "update-july
 serde = { workspace = true }
 serde_json = { workspace = true }
 http = "=1.3.1"
+url = "2.5.4"
 wasi-async-runtime = "0.1.2"
 futures = { version = "0.3.31", features = [] }
 futures-concurrency = "7.6.3"
