@@ -1,6 +1,7 @@
 pub mod client;
 pub mod error;
 pub mod languages;
+pub mod runtime;
 pub mod transcription_queue;
 
 wit_bindgen::generate!({

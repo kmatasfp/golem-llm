@@ -1,6 +1,9 @@
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use golem_stt::client::{self, HttpClient};
+use golem_stt::{
+    client::{self, HttpClient},
+    runtime::AsyncRuntime,
+};
 use hmac::{Hmac, Mac};
 use http::{HeaderMap, HeaderValue, Request};
 use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
@@ -9,6 +12,7 @@ use sha2::{Digest, Sha256};
 use std::{
     fmt::{self},
     sync::Arc,
+    time::Duration,
 };
 
 use crate::error::Error;
@@ -353,17 +357,16 @@ impl<HC: HttpClient> S3Client<HC> {
         bucket: &str,
         object_name: &str,
         content: Bytes,
-    ) -> Result<(), Error> {
+    ) -> Result<(), client::Error> {
         let timestamp = Utc::now();
         let uri = format!("https://{}.s3.amazonaws.com/{}", bucket, object_name);
 
-        let request = Request::builder()
-            .method("PUT")
-            .uri(&uri)
-            .body(content)
-            .map_err(|e| client::Error::HttpError(e))?;
+        let request = Request::builder().method("PUT").uri(&uri).body(content)?;
 
-        let signed_request = self.signer.sign_request(request, timestamp)?;
+        let signed_request = self
+            .signer
+            .sign_request(request, timestamp)
+            .map_err(|err| client::Error::Generic(format!("Failed to sign request: {}", err)))?;
 
         let response = self.http_client.execute(signed_request).await?;
 
@@ -382,17 +385,23 @@ impl<HC: HttpClient> S3Client<HC> {
         }
     }
 
-    pub async fn get_object(&self, bucket: &str, object_name: &str) -> Result<Bytes, Error> {
+    pub async fn get_object(
+        &self,
+        bucket: &str,
+        object_name: &str,
+    ) -> Result<Bytes, client::Error> {
         let timestamp = Utc::now();
         let uri = format!("https://{}.s3.amazonaws.com/{}", bucket, object_name);
 
         let request = Request::builder()
             .method("GET")
             .uri(&uri)
-            .body(Bytes::new())
-            .map_err(|e| client::Error::HttpError(e))?;
+            .body(Bytes::new())?;
 
-        let signed_request = self.signer.sign_request(request, timestamp)?;
+        let signed_request = self
+            .signer
+            .sign_request(request, timestamp)
+            .map_err(|err| client::Error::Generic(format!("Failed to sign request: {}", err)))?;
 
         let response = self.http_client.execute(signed_request).await?;
 
@@ -473,22 +482,74 @@ pub struct DeleteVocabularyRequest {
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "PascalCase")]
 pub struct StartTranscriptionJobRequest {
-    pub transcription_job_name: String,
-    pub media: Media,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_redaction: Option<ContentRedaction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identify_language: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identify_multiple_languages: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job_execution_settings: Option<JobExecutionSettings>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kms_encryption_context: Option<std::collections::HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language_id_settings: Option<std::collections::HashMap<String, LanguageIdSettings>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language_options: Option<Vec<String>>,
+    pub media: Media,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_sample_rate_hertz: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_settings: Option<ModelSettings>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub output_bucket_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_encryption_kms_key_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub settings: Option<Settings>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub subtitles: Option<Subtitles>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<Tag>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub toxicity_detection: Option<Vec<ToxicityDetectionSettings>>,
+    pub transcription_job_name: String,
+}
+
+// ContentRedaction - https://docs.aws.amazon.com/transcribe/latest/APIReference/API_ContentRedaction.html
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct ContentRedaction {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pii_entity_types: Option<Vec<String>>,
+    pub redaction_output: String,
+    pub redaction_type: String,
+}
+
+// JobExecutionSettings - https://docs.aws.amazon.com/transcribe/latest/APIReference/API_JobExecutionSettings.html
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct JobExecutionSettings {
+    pub allow_deferred_execution: bool,
+    pub data_access_role_arn: String,
+}
+
+// LanguageIdSettings - https://docs.aws.amazon.com/transcribe/latest/APIReference/API_LanguageIdSettings.html
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct LanguageIdSettings {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language_model_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vocabulary_filter_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vocabulary_name: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -497,6 +558,22 @@ pub struct Media {
     pub media_file_uri: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub redacted_media_file_uri: Option<String>,
+}
+
+// ModelSettings - https://docs.aws.amazon.com/transcribe/latest/APIReference/API_ModelSettings.html
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct ModelSettings {
+    pub language_model_name: String,
+}
+
+// Subtitles - https://docs.aws.amazon.com/transcribe/latest/APIReference/API_Subtitles.html
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct Subtitles {
+    pub formats: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_start_index: Option<i32>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -518,6 +595,13 @@ pub struct Settings {
     pub vocabulary_filter_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vocabulary_name: Option<String>,
+}
+
+// ToxicityDetectionSettings - https://docs.aws.amazon.com/transcribe/latest/APIReference/API_ToxicityDetectionSettings.html
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct ToxicityDetectionSettings {
+    pub toxicity_categories: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -587,7 +671,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         vocabulary_name: String,
         language_code: String,
         phrases: Vec<String>,
-    ) -> Result<CreateVocabularyResponse, Error> {
+    ) -> Result<CreateVocabularyResponse, client::Error> {
         let timestamp = Utc::now();
         let uri = format!(
             "https://transcribe.{}.amazonaws.com/",
@@ -617,7 +701,10 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
             .body(Bytes::from(json_body))
             .map_err(|e| client::Error::HttpError(e))?;
 
-        let signed_request = self.signer.sign_request(request, timestamp)?;
+        let signed_request = self
+            .signer
+            .sign_request(request, timestamp)
+            .map_err(|err| client::Error::Generic(format!("Failed to sign request: {}", err)))?;
 
         let response = self.http_client.execute(signed_request).await?;
 
@@ -640,10 +727,63 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         }
     }
 
+    pub async fn wait_for_vocabulary_ready<RT: AsyncRuntime>(
+        &self,
+        runtime: &RT,
+        request_id: &str,
+        max_wait_time: Duration,
+    ) -> Result<(), golem_stt::error::Error> {
+        let start_time = std::time::Instant::now();
+        let mut retry_delay = Duration::from_millis(500);
+        let max_delay = Duration::from_secs(30);
+
+        loop {
+            if start_time.elapsed() > max_wait_time {
+                return Err(golem_stt::error::Error::APIBadRequest {
+                    request_id: request_id.to_string(),
+                    provider_error: "Vocabulary creation timed out".to_string(),
+                });
+            }
+
+            runtime.sleep(retry_delay).await;
+
+            let res = self
+                .get_vocabulary(request_id.to_string())
+                .await
+                .map_err(|err| golem_stt::error::Error::Client(request_id.to_string(), err))?;
+
+            match res.vocabulary_state.as_str() {
+                "READY" => return Ok(()),
+                "FAILED" => {
+                    return Err(golem_stt::error::Error::APIBadRequest {
+                        request_id: request_id.to_string(),
+                        provider_error: format!(
+                            "Vocabulary creation failed: {}",
+                            res.failure_reason
+                                .unwrap_or_else(|| "Unknown error".to_string())
+                        ),
+                    });
+                }
+                "PENDING" => {
+                    retry_delay = std::cmp::min(
+                        Duration::from_millis((retry_delay.as_millis() * 2) as u64),
+                        max_delay,
+                    );
+                }
+                other => {
+                    return Err(golem_stt::error::Error::APIBadRequest {
+                        request_id: request_id.to_string(),
+                        provider_error: format!("Unexpected vocabulary state: {}", other),
+                    });
+                }
+            }
+        }
+    }
+
     pub async fn get_vocabulary(
         &self,
         vocabulary_name: String,
-    ) -> Result<GetVocabularyResponse, Error> {
+    ) -> Result<GetVocabularyResponse, client::Error> {
         let timestamp = Utc::now();
         let uri = format!(
             "https://transcribe.{}.amazonaws.com/",
@@ -666,7 +806,10 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
             .body(Bytes::from(json_body))
             .map_err(|e| client::Error::HttpError(e))?;
 
-        let signed_request = self.signer.sign_request(request, timestamp)?;
+        let signed_request = self
+            .signer
+            .sign_request(request, timestamp)
+            .map_err(|err| client::Error::Generic(format!("Failed to sign request: {}", err)))?;
 
         let response = self.http_client.execute(signed_request).await?;
 
@@ -689,7 +832,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         }
     }
 
-    pub async fn delete_vocabulary(&self, vocabulary_name: String) -> Result<(), Error> {
+    pub async fn delete_vocabulary(&self, vocabulary_name: String) -> Result<(), client::Error> {
         let timestamp = Utc::now();
         let uri = format!(
             "https://transcribe.{}.amazonaws.com/",
@@ -712,7 +855,10 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
             .body(Bytes::from(json_body))
             .map_err(|e| client::Error::HttpError(e))?;
 
-        let signed_request = self.signer.sign_request(request, timestamp)?;
+        let signed_request = self
+            .signer
+            .sign_request(request, timestamp)
+            .map_err(|err| client::Error::Generic(format!("Failed to sign request: {}", err)))?;
 
         let response = self.http_client.execute(signed_request).await?;
 
@@ -739,7 +885,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         media_format: Option<String>,
         output_bucket_name: Option<String>,
         output_key: Option<String>,
-    ) -> Result<StartTranscriptionJobResponse, Error> {
+    ) -> Result<StartTranscriptionJobResponse, client::Error> {
         let timestamp = Utc::now();
         let uri = format!(
             "https://transcribe.{}.amazonaws.com/",
@@ -747,18 +893,29 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         );
 
         let request_body = StartTranscriptionJobRequest {
-            transcription_job_name,
+            content_redaction: None,
+            identify_language: None,
+            identify_multiple_languages: None,
+            job_execution_settings: None,
+            kms_encryption_context: None,
+            language_code,
+            language_id_settings: None,
+            language_options: None,
             media: Media {
                 media_file_uri,
                 redacted_media_file_uri: None,
             },
-            language_code,
             media_format,
             media_sample_rate_hertz: None,
+            model_settings: None,
             output_bucket_name,
+            output_encryption_kms_key_id: None,
             output_key,
             settings: None,
+            subtitles: None,
             tags: None,
+            toxicity_detection: None,
+            transcription_job_name,
         };
 
         let json_body = serde_json::to_string(&request_body)
@@ -775,7 +932,10 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
             .body(Bytes::from(json_body))
             .map_err(|e| client::Error::HttpError(e))?;
 
-        let signed_request = self.signer.sign_request(request, timestamp)?;
+        let signed_request = self
+            .signer
+            .sign_request(request, timestamp)
+            .map_err(|err| client::Error::Generic(format!("Failed to sign request: {}", err)))?;
 
         let response = self.http_client.execute(signed_request).await?;
 
@@ -801,7 +961,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
     pub async fn get_transcription_job(
         &self,
         transcription_job_name: String,
-    ) -> Result<GetTranscriptionJobResponse, Error> {
+    ) -> Result<GetTranscriptionJobResponse, client::Error> {
         let timestamp = Utc::now();
         let uri = format!(
             "https://transcribe.{}.amazonaws.com/",
@@ -826,7 +986,10 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
             .body(Bytes::from(json_body))
             .map_err(|e| client::Error::HttpError(e))?;
 
-        let signed_request = self.signer.sign_request(request, timestamp)?;
+        let signed_request = self
+            .signer
+            .sign_request(request, timestamp)
+            .map_err(|err| client::Error::Generic(format!("Failed to sign request: {}", err)))?;
 
         let response = self.http_client.execute(signed_request).await?;
 
@@ -1768,18 +1931,29 @@ mod tests {
         );
 
         let expected_request = StartTranscriptionJobRequest {
-            transcription_job_name,
+            content_redaction: None,
+            identify_language: None,
+            identify_multiple_languages: None,
+            job_execution_settings: None,
+            kms_encryption_context: None,
+            language_code,
+            language_id_settings: None,
+            language_options: None,
             media: Media {
                 media_file_uri,
                 redacted_media_file_uri: None,
             },
-            language_code,
             media_format,
             media_sample_rate_hertz: None,
+            model_settings: None,
             output_bucket_name,
+            output_encryption_kms_key_id: None,
             output_key,
             settings: None,
+            subtitles: None,
             tags: None,
+            toxicity_detection: None,
+            transcription_job_name,
         };
 
         let actual_request: StartTranscriptionJobRequest =

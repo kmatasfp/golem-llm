@@ -1,5 +1,4 @@
 use derive_more::From;
-use golem_stt::client;
 use hmac::digest::InvalidLength;
 use http::header::InvalidHeaderValue;
 
@@ -10,8 +9,6 @@ pub enum Error {
     InvalidHeader(InvalidHeaderValue),
     #[from]
     HmacSha256ErrorInvalidLength(InvalidLength),
-    #[from]
-    HttpClient(client::Error),
 }
 
 impl core::fmt::Display for Error {
