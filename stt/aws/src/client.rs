@@ -1,4 +1,4 @@
-use std::{rc::Rc, sync::Arc, time::Duration};
+use std::{fmt::format, rc::Rc, sync::Arc, time::Duration};
 
 use crate::aws::{S3Client, TranscribeClient};
 use golem_stt::{
@@ -64,22 +64,20 @@ impl<HC: HttpClient, RT: AsyncRuntime>
     ) -> Result<TranscriptionResponse, Error> {
         trace!("Sending request to AWS Transcribe API: {request:?}");
 
-        let request_id: Rc<str> = Rc::from(request.request_id.clone());
+        let request_id: Rc<str> = Rc::from(request.request_id);
+
+        let object_key = format!("{}/audio.{}", request_id, request.audio_config.format);
 
         self.s3_client
-            .put_object(
-                self.bucket_name.as_ref(),
-                request_id.as_ref(),
-                request.audio,
-            )
+            .put_object(self.bucket_name.as_ref(), &object_key, request.audio)
             .await
-            .map_err(|err| Error::Client(request_id.clone().to_string(), err))?;
+            .map_err(|err| Error::Client(request_id.to_string(), err))?;
 
         if let Some(transcription_config) = request.transcription_config {
             if transcription_config.vocabulary.len() > 0 {
                 if transcription_config.language.is_none() {
                     return Err(Error::APIBadRequest {
-                        request_id: request_id.clone().to_string(),
+                        request_id: request_id.to_string(),
                         provider_error:
                             "When specifying a vocabulary, a language must also be specified."
                                 .to_string(),
@@ -90,16 +88,16 @@ impl<HC: HttpClient, RT: AsyncRuntime>
                 let res = self
                     .transcribe_client
                     .create_vocabulary(
-                        request_id.clone().to_string(),
+                        request_id.to_string(),
                         language_code,
                         transcription_config.vocabulary,
                     )
                     .await
-                    .map_err(|err| Error::Client(request_id.clone().to_string(), err))?;
+                    .map_err(|err| Error::Client(request_id.to_string(), err))?;
 
                 if res.vocabulary_state == "FAILED" {
                     return Err(Error::APIBadRequest {
-                        request_id: request_id.clone().to_string(),
+                        request_id: request_id.to_string(),
                         provider_error: format!(
                             "Vocabulary creation failed: {}",
                             res.failure_reason
@@ -118,9 +116,69 @@ impl<HC: HttpClient, RT: AsyncRuntime>
                         .await?;
                 }
             }
-        }
+            // TODO handle case if user specified some config options
+            todo!()
+        } else {
+            let res = self
+                .transcribe_client
+                .start_transcription_job(
+                    request_id.to_string(),
+                    format!("s3://{}/{object_key}", self.bucket_name),
+                    None,
+                    request.audio_config.format.to_string(),
+                    None,
+                    None,
+                )
+                .await?;
 
-        todo!()
+            if res.transcription_job.transcription_job_status == "FAILED" {
+                return Err(Error::APIBadRequest {
+                    request_id: request_id.to_string(),
+                    provider_error: format!(
+                        "Transcription job creation failed: {}",
+                        res.transcription_job
+                            .failure_reason
+                            .unwrap_or_else(|| "Unknown error".to_string())
+                    ),
+                });
+            }
+
+            let completed_transcription_job =
+                if res.transcription_job.transcription_job_status == "IN_PROGRESS" {
+                    self.transcribe_client
+                        .wait_for_transcription_job_completion(
+                            &self.runtime,
+                            &request_id,
+                            Duration::from_secs(3600 * 6),
+                        )
+                        .await?
+                        .transcription_job
+                } else {
+                    res.transcription_job
+                };
+
+            if let Some(transcript) = completed_transcription_job.transcript {
+                if let Some(transcript_uri) = transcript.transcript_file_uri {
+                    let transcribe_output = self
+                        .transcribe_client
+                        .download_transcript_json(request_id.as_ref(), &transcript_uri)
+                        .await?;
+
+                    todo!()
+                } else {
+                    Err(golem_stt::error::Error::APIUnknown {
+                        request_id: request_id.to_string(),
+                        provider_error: "Transcription completed but no transcript file URI found"
+                            .to_string(),
+                    })
+                }
+            } else {
+                Err(golem_stt::error::Error::APIUnknown {
+                    request_id: request_id.to_string(),
+                    provider_error: "Transcription completed but no transcript found".to_string(),
+                })
+            }
+        }
     }
 }
 

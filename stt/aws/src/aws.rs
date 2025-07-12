@@ -15,7 +15,7 @@ use std::{
     time::Duration,
 };
 
-use crate::error::Error;
+use crate::{client::TranscribeOutput, error::Error};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -882,10 +882,10 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         transcription_job_name: String,
         media_file_uri: String,
         language_code: Option<String>,
-        media_format: Option<String>,
+        media_format: String,
         output_bucket_name: Option<String>,
         output_key: Option<String>,
-    ) -> Result<StartTranscriptionJobResponse, client::Error> {
+    ) -> Result<StartTranscriptionJobResponse, golem_stt::error::Error> {
         let timestamp = Utc::now();
         let uri = format!(
             "https://transcribe.{}.amazonaws.com/",
@@ -905,7 +905,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
                 media_file_uri,
                 redacted_media_file_uri: None,
             },
-            media_format,
+            media_format: Some(media_format),
             media_sample_rate_hertz: None,
             model_settings: None,
             output_bucket_name,
@@ -915,11 +915,15 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
             subtitles: None,
             tags: None,
             toxicity_detection: None,
-            transcription_job_name,
+            transcription_job_name: transcription_job_name.clone(),
         };
 
-        let json_body = serde_json::to_string(&request_body)
-            .map_err(|e| client::Error::Generic(format!("Failed to serialize request: {}", e)))?;
+        let json_body = serde_json::to_string(&request_body).map_err(|e| {
+            (
+                transcription_job_name.clone(),
+                client::Error::Generic(format!("Failed to serialize request: {}", e)),
+            )
+        })?;
 
         let request = Request::builder()
             .method("POST")
@@ -930,31 +934,124 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
                 "com.amazonaws.transcribe.Transcribe.StartTranscriptionJob",
             )
             .body(Bytes::from(json_body))
-            .map_err(|e| client::Error::HttpError(e))?;
+            .map_err(|e| (transcription_job_name.clone(), client::Error::HttpError(e)))?;
 
         let signed_request = self
             .signer
             .sign_request(request, timestamp)
-            .map_err(|err| client::Error::Generic(format!("Failed to sign request: {}", err)))?;
+            .map_err(|err| {
+                (
+                    transcription_job_name.clone(),
+                    client::Error::Generic(format!("Failed to sign request: {}", err)),
+                )
+            })?;
 
-        let response = self.http_client.execute(signed_request).await?;
+        let response = self
+            .http_client
+            .execute(signed_request)
+            .await
+            .map_err(|err| (transcription_job_name.clone(), err))?;
 
         if response.status().is_success() {
             let transcription_response: StartTranscriptionJobResponse =
                 serde_json::from_slice(response.body()).map_err(|e| {
-                    client::Error::Generic(format!("Failed to deserialize response: {}", e))
+                    (
+                        transcription_job_name.clone(),
+                        client::Error::Generic(format!("Failed to deserialize response: {}", e)),
+                    )
                 })?;
 
             Ok(transcription_response)
         } else {
             let error_body = String::from_utf8(response.body().to_vec())
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            Err(client::Error::Generic(format!(
-                "StartTranscriptionJob failed with status: {} - {}",
-                response.status(),
-                error_body
-            ))
-            .into())
+            Err((
+                transcription_job_name.clone(),
+                client::Error::Generic(format!(
+                    "StartTranscriptionJob failed with status: {} - {}",
+                    response.status(),
+                    error_body
+                )),
+            )
+                .into())
+        }
+    }
+
+    pub async fn wait_for_transcription_job_completion<RT: AsyncRuntime>(
+        &self,
+        runtime: &RT,
+        transcription_job_name: &str,
+        max_wait_time: Duration,
+    ) -> Result<GetTranscriptionJobResponse, golem_stt::error::Error> {
+        let start_time = std::time::Instant::now();
+        let mut retry_delay = Duration::from_millis(2000); // Start with 2 seconds for transcription jobs
+        let max_delay = Duration::from_secs(60); // Max 60 seconds between retries
+
+        loop {
+            if start_time.elapsed() > max_wait_time {
+                return Err(golem_stt::error::Error::APIBadRequest {
+                    request_id: transcription_job_name.to_string(),
+                    provider_error: "Transcription job timed out".to_string(),
+                });
+            }
+
+            runtime.sleep(retry_delay).await;
+
+            let res = self
+                .get_transcription_job(transcription_job_name.to_string())
+                .await
+                .map_err(|err| {
+                    golem_stt::error::Error::Client(transcription_job_name.to_string(), err)
+                })?;
+
+            match res.transcription_job.transcription_job_status.as_str() {
+                "COMPLETED" => {
+                    // Ensure we have the transcript file URI
+                    if let Some(transcript) = &res.transcription_job.transcript {
+                        if transcript.transcript_file_uri.is_some() {
+                            return Ok(res);
+                        } else {
+                            return Err(golem_stt::error::Error::APIBadRequest {
+                                request_id: transcription_job_name.to_string(),
+                                provider_error:
+                                    "Transcription completed but no transcript file URI found"
+                                        .to_string(),
+                            });
+                        }
+                    } else {
+                        return Err(golem_stt::error::Error::APIBadRequest {
+                            request_id: transcription_job_name.to_string(),
+                            provider_error: "Transcription completed but no transcript data found"
+                                .to_string(),
+                        });
+                    }
+                }
+                "FAILED" => {
+                    return Err(golem_stt::error::Error::APIBadRequest {
+                        request_id: transcription_job_name.to_string(),
+                        provider_error: format!(
+                            "Transcription job failed: {}",
+                            res.transcription_job
+                                .failure_reason
+                                .as_ref()
+                                .unwrap_or(&"Unknown error".to_string())
+                        ),
+                    });
+                }
+                "IN_PROGRESS" | "QUEUED" => {
+                    // Continue polling with exponential backoff
+                    retry_delay = std::cmp::min(
+                        Duration::from_millis((retry_delay.as_millis() as f64 * 1.5) as u64),
+                        max_delay,
+                    );
+                }
+                other => {
+                    return Err(golem_stt::error::Error::APIBadRequest {
+                        request_id: transcription_job_name.to_string(),
+                        provider_error: format!("Unexpected transcription job status: {}", other),
+                    });
+                }
+            }
         }
     }
 
@@ -1009,6 +1106,53 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
                 error_body
             ))
             .into())
+        }
+    }
+
+    pub async fn download_transcript_json(
+        &self,
+        transcription_job_name: &str,
+        transcript_uri: &str,
+    ) -> Result<TranscribeOutput, golem_stt::error::Error> {
+        let request = http::Request::builder()
+            .method("GET")
+            .uri(transcript_uri)
+            .header("Accept", "application/json")
+            .body(bytes::Bytes::new())
+            .map_err(|e| {
+                (
+                    transcription_job_name.to_string(),
+                    client::Error::HttpError(e),
+                )
+            })?;
+
+        let response = self
+            .http_client
+            .execute(request)
+            .await
+            .map_err(|err| (transcription_job_name.to_string(), err))?;
+
+        if response.status().is_success() {
+            let transcript_json: crate::client::TranscribeOutput =
+                serde_json::from_slice(response.body()).map_err(|e| {
+                    golem_stt::error::Error::Client(
+                        transcription_job_name.to_string(),
+                        client::Error::Generic(format!("Failed to deserialize response: {}", e)),
+                    )
+                })?;
+
+            Ok(transcript_json)
+        } else {
+            let error_body = String::from_utf8(response.body().to_vec())
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            Err(golem_stt::error::Error::Client(
+                transcription_job_name.to_string(),
+                client::Error::Generic(format!(
+                    "Failed to download transcript: {} - {}",
+                    response.status(),
+                    error_body
+                )),
+            ))
         }
     }
 }
@@ -1851,16 +1995,21 @@ mod tests {
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "us-east-1";
 
+        let transcription_job_name = "test-transcription-job".to_string();
+        let media_file_uri = "s3://test-bucket/audio.mp3".to_string();
+        let language_code = Some("en-US".to_string());
+        let media_format = "mp3".to_string();
+
         let expected_response = StartTranscriptionJobResponse {
             transcription_job: TranscriptionJob {
-                transcription_job_name: "test-transcription-job".to_string(),
+                transcription_job_name: transcription_job_name.clone(),
                 transcription_job_status: "IN_PROGRESS".to_string(),
-                language_code: Some("en-US".to_string()),
+                language_code: language_code.clone(),
                 media: Some(Media {
-                    media_file_uri: "s3://test-bucket/audio.mp3".to_string(),
+                    media_file_uri: media_file_uri.clone(),
                     redacted_media_file_uri: None,
                 }),
-                media_format: Some("mp3".to_string()),
+                media_format: Some(media_format.clone()),
                 media_sample_rate_hertz: None,
                 creation_time: Some(1234567890.0),
                 completion_time: None,
@@ -1891,10 +2040,6 @@ mod tests {
             mock_client.clone(),
         );
 
-        let transcription_job_name = "test-transcription-job".to_string();
-        let media_file_uri = "s3://test-bucket/audio.mp3".to_string();
-        let language_code = Some("en-US".to_string());
-        let media_format = Some("mp3".to_string());
         let output_bucket_name = Some("test-output-bucket".to_string());
         let output_key = Some("transcripts/".to_string());
 
@@ -1943,7 +2088,7 @@ mod tests {
                 media_file_uri,
                 redacted_media_file_uri: None,
             },
-            media_format,
+            media_format: Some(media_format),
             media_sample_rate_hertz: None,
             model_settings: None,
             output_bucket_name,
