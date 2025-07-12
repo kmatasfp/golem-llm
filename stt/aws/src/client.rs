@@ -2,14 +2,16 @@ use std::{rc::Rc, sync::Arc, time::Duration};
 
 use crate::aws::{S3Client, TranscribeClient};
 use golem_stt::{
-    client::{HttpClient, SttProviderClient},
+    client::{HttpClient, ReqwestHttpClient, SttProviderClient},
     error::Error,
     runtime::AsyncRuntime,
+    runtime::WasiAyncRuntime,
 };
 
 use bytes::Bytes;
 use log::trace;
 use serde::{Deserialize, Serialize};
+use wasi_async_runtime::Reactor;
 
 #[allow(non_camel_case_types)]
 #[allow(unused)]
@@ -102,10 +104,59 @@ pub struct TranscriptionConfig {
 }
 
 pub struct TranscribeApi<HC: HttpClient, RT: AsyncRuntime> {
-    bucket_name: Arc<str>,
+    bucket_name: String,
     s3_client: S3Client<HC>,
     transcribe_client: TranscribeClient<HC>,
     runtime: RT,
+}
+
+#[allow(unused)]
+impl<HC: HttpClient, RT: AsyncRuntime> TranscribeApi<HC, RT> {
+    pub fn new(
+        access_key: String,
+        secret_key: String,
+        region: String,
+        http_client: impl Into<Arc<HC>>,
+        runtime: RT,
+    ) -> Self {
+        let http_client = http_client.into();
+
+        let s3_client = S3Client::new(
+            access_key.clone(),
+            secret_key.clone(),
+            region.clone(),
+            http_client.clone(),
+        );
+        let transcribe_client = TranscribeClient::new(
+            access_key.clone(),
+            secret_key.clone(),
+            region.clone(),
+            http_client.clone(),
+        );
+
+        Self {
+            bucket_name: format!("deepgram-transcribe-{}", region),
+            s3_client,
+            transcribe_client,
+            runtime,
+        }
+    }
+
+    // pub fn get_supported_languages(&self) -> &[Language] {
+    //     &AWS_TRANSCRIBE_SUPPORTED_LANGUAGES
+    // }
+}
+
+impl TranscribeApi<ReqwestHttpClient, WasiAyncRuntime> {
+    pub fn live(access_key: String, secret_key: String, region: String, reactor: Reactor) -> Self {
+        Self::new(
+            access_key,
+            secret_key,
+            region,
+            ReqwestHttpClient::new(reactor.clone()),
+            WasiAyncRuntime::new(reactor.clone()),
+        )
+    }
 }
 
 impl<HC: HttpClient, RT: AsyncRuntime>
@@ -149,12 +200,7 @@ impl<HC: HttpClient, RT: AsyncRuntime>
         let object_key = format!("{}/audio.{}", request_id, request.audio_config.format);
 
         self.s3_client
-            .put_object(
-                &request_id,
-                self.bucket_name.as_ref(),
-                &object_key,
-                request.audio,
-            )
+            .put_object(&request_id, &self.bucket_name, &object_key, request.audio)
             .await?;
 
         let vocabulary_name = if let Some(ref config) = request.transcription_config {
@@ -203,7 +249,7 @@ impl<HC: HttpClient, RT: AsyncRuntime>
             .transcribe_client
             .start_transcription_job(
                 request_id.to_string(),
-                format!("s3://{}/{object_key}", self.bucket_name),
+                format!("s3://{}/{object_key}", &self.bucket_name),
                 request.audio_config,
                 request.transcription_config,
                 vocabulary_name,
@@ -247,7 +293,9 @@ impl<HC: HttpClient, RT: AsyncRuntime>
                     .delete_vocabulary(&request_id)
                     .await?;
 
-                // TODO delete audio file
+                self.s3_client
+                    .delete_object(&request_id, &self.bucket_name, &object_key)
+                    .await?;
 
                 Ok(TranscriptionResponse {
                     audio_size_bytes,

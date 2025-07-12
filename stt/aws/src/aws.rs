@@ -122,7 +122,6 @@ impl AwsSignatureV4 {
             HeaderValue::from_str(&content_sha256)?,
         );
 
-        // Add host header if not present
         if !parts.headers.contains_key("host") {
             if let Some(host) = parts.uri.host() {
                 let host_header = if let Some(port) = parts.uri.port_u16() {
@@ -171,19 +170,14 @@ impl AwsSignatureV4 {
         headers: &HeaderMap,
         content_sha256: &str,
     ) -> String {
-        // Canonical URI
         let canonical_uri = self.canonical_uri(uri.path());
 
-        // Canonical query string
         let canonical_query_string = self.canonical_query_string(uri.query().unwrap_or(""));
 
-        // Canonical headers
         let canonical_headers = self.canonical_headers(headers);
 
-        // Signed headers
         let signed_headers = self.get_signed_headers(headers);
 
-        // Hashed payload
         let hashed_payload = content_sha256;
 
         let canonical_request = format!(
@@ -254,7 +248,6 @@ impl AwsSignatureV4 {
     fn canonical_headers(&self, headers: &HeaderMap) -> String {
         let mut canonical_headers = String::new();
 
-        // Collect and sort headers
         let mut sorted_headers: Vec<_> = headers
             .iter()
             .map(|(name, value)| {
@@ -393,15 +386,92 @@ impl<HC: HttpClient> S3Client<HC> {
             let error_body = String::from_utf8(response.body().to_vec())
                 .unwrap_or_else(|e| format!("Unknown error, {e}"));
 
-            Err((
-                request_id.to_string(),
-                client::Error::Generic(format!(
-                    "S3 PutObject failed with status: {} -{}",
-                    response.status(),
-                    error_body,
-                )),
-            )
-                .into())
+            let status = response.status();
+            let request_id = request_id.to_string();
+
+            match status.as_u16() {
+                400 => Err(golem_stt::error::Error::APIBadRequest {
+                    request_id,
+                    provider_error: format!("S3 PutObject bad request: {}", error_body),
+                }),
+                500..=599 => Err(golem_stt::error::Error::APIInternalServerError {
+                    request_id,
+                    provider_error: format!(
+                        "S3 PutObject server error ({}): {}",
+                        status, error_body
+                    ),
+                }),
+                _ => Err(golem_stt::error::Error::APIUnknown {
+                    request_id,
+                    provider_error: format!(
+                        "S3 PutObject unexpected error ({}): {}",
+                        status, error_body
+                    ),
+                }),
+            }
+        }
+    }
+
+    pub async fn delete_object(
+        &self,
+        request_id: &str,
+        bucket: &str,
+        object_name: &str,
+    ) -> Result<(), golem_stt::error::Error> {
+        let timestamp = Utc::now();
+        let uri = format!("https://{}.s3.amazonaws.com/{}", bucket, object_name);
+
+        let request = Request::builder()
+            .method("DELETE")
+            .uri(&uri)
+            .body(Bytes::new())
+            .map_err(|e| (request_id.to_string(), client::Error::HttpError(e)))?;
+
+        let signed_request = self
+            .signer
+            .sign_request(request, timestamp)
+            .map_err(|err| {
+                (
+                    request_id.to_string(),
+                    client::Error::Generic(format!("Failed to sign request: {}", err)),
+                )
+            })?;
+
+        let response = self
+            .http_client
+            .execute(signed_request)
+            .await
+            .map_err(|err| (request_id.to_string(), err))?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            let error_body = String::from_utf8(response.body().to_vec())
+                .unwrap_or_else(|e| format!("Unknown error, {e}"));
+
+            let status = response.status();
+            let request_id = request_id.to_string();
+
+            match status.as_u16() {
+                400 => Err(golem_stt::error::Error::APIBadRequest {
+                    request_id,
+                    provider_error: format!("S3 DeleteObject bad request: {}", error_body),
+                }),
+                500..=599 => Err(golem_stt::error::Error::APIInternalServerError {
+                    request_id,
+                    provider_error: format!(
+                        "S3 DeleteObject server error ({}): {}",
+                        status, error_body
+                    ),
+                }),
+                _ => Err(golem_stt::error::Error::APIUnknown {
+                    request_id,
+                    provider_error: format!(
+                        "S3 DeleteObject unexpected error ({}): {}",
+                        status, error_body
+                    ),
+                }),
+            }
         }
     }
 }
@@ -719,64 +789,46 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         } else {
             let error_body = String::from_utf8(response.body().to_vec())
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            Err((
-                vocabulary_name.clone(),
-                client::Error::Generic(format!(
-                    "CreateVocabulary failed with status: {} - {}",
-                    response.status(),
-                    error_body
-                )),
-            )
-                .into())
-        }
-    }
 
-    pub async fn wait_for_vocabulary_ready<RT: AsyncRuntime>(
-        &self,
-        runtime: &RT,
-        request_id: &str,
-        max_wait_time: Duration,
-    ) -> Result<(), golem_stt::error::Error> {
-        let start_time = std::time::Instant::now();
-        let mut retry_delay = Duration::from_millis(500);
-        let max_delay = Duration::from_secs(30);
+            let status = response.status();
+            let request_id = vocabulary_name.clone();
 
-        loop {
-            if start_time.elapsed() > max_wait_time {
-                return Err(golem_stt::error::Error::APIBadRequest {
-                    request_id: request_id.to_string(),
-                    provider_error: "Vocabulary creation timed out".to_string(),
-                });
-            }
-
-            runtime.sleep(retry_delay).await;
-
-            let res = self.get_vocabulary(request_id.to_string()).await?;
-
-            match res.vocabulary_state.as_str() {
-                "READY" => return Ok(()),
-                "FAILED" => {
-                    return Err(golem_stt::error::Error::APIBadRequest {
-                        request_id: request_id.to_string(),
-                        provider_error: format!(
-                            "Vocabulary creation failed: {}",
-                            res.failure_reason
-                                .unwrap_or_else(|| "Unknown error".to_string())
-                        ),
-                    });
-                }
-                "PENDING" => {
-                    retry_delay = std::cmp::min(
-                        Duration::from_millis((retry_delay.as_millis() * 2) as u64),
-                        max_delay,
-                    );
-                }
-                other => {
-                    return Err(golem_stt::error::Error::APIBadRequest {
-                        request_id: request_id.to_string(),
-                        provider_error: format!("Unexpected vocabulary state: {}", other),
-                    });
-                }
+            match status.as_u16() {
+                400 => Err(golem_stt::error::Error::APIBadRequest {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe CreateVocabulary bad request: {}",
+                        error_body
+                    ),
+                }),
+                403 => Err(golem_stt::error::Error::APIForbidden {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe CreateVocabulary forbidden: {}",
+                        error_body
+                    ),
+                }),
+                500 => Err(golem_stt::error::Error::APIInternalServerError {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe CreateVocabulary server error: {}",
+                        error_body
+                    ),
+                }),
+                503 => Err(golem_stt::error::Error::APIInternalServerError {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe CreateVocabulary service unavailable: {}",
+                        error_body
+                    ),
+                }),
+                _ => Err(golem_stt::error::Error::APIUnknown {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe CreateVocabulary unknown error ({}): {}",
+                        status, error_body
+                    ),
+                }),
             }
         }
     }
@@ -842,15 +894,91 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         } else {
             let error_body = String::from_utf8(response.body().to_vec())
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            Err((
-                vocabulary_name.clone(),
-                client::Error::Generic(format!(
-                    "GetVocabulary failed with status: {} - {}",
-                    response.status(),
-                    error_body
-                )),
-            )
-                .into())
+
+            let status = response.status();
+            let request_id = vocabulary_name.clone();
+
+            match status.as_u16() {
+                400 => Err(golem_stt::error::Error::APIBadRequest {
+                    request_id,
+                    provider_error: format!("Transcribe GetVocabulary bad request: {}", error_body),
+                }),
+                403 => Err(golem_stt::error::Error::APIForbidden {
+                    request_id,
+                    provider_error: format!("Transcribe GetVocabulary forbidden: {}", error_body),
+                }),
+                500 => Err(golem_stt::error::Error::APIInternalServerError {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe GetVocabulary server error: {}",
+                        error_body
+                    ),
+                }),
+                503 => Err(golem_stt::error::Error::APIInternalServerError {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe GetVocabulary service unavailable: {}",
+                        error_body
+                    ),
+                }),
+                _ => Err(golem_stt::error::Error::APIUnknown {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe GetVocabulary unknown error ({}): {}",
+                        status, error_body
+                    ),
+                }),
+            }
+        }
+    }
+
+    pub async fn wait_for_vocabulary_ready<RT: AsyncRuntime>(
+        &self,
+        runtime: &RT,
+        request_id: &str,
+        max_wait_time: Duration,
+    ) -> Result<(), golem_stt::error::Error> {
+        let start_time = std::time::Instant::now();
+        let mut retry_delay = Duration::from_millis(500);
+        let max_delay = Duration::from_secs(30);
+
+        loop {
+            if start_time.elapsed() > max_wait_time {
+                return Err(golem_stt::error::Error::APIBadRequest {
+                    request_id: request_id.to_string(),
+                    provider_error: "Vocabulary creation timed out".to_string(),
+                });
+            }
+
+            runtime.sleep(retry_delay).await;
+
+            let res = self.get_vocabulary(request_id.to_string()).await?;
+
+            match res.vocabulary_state.as_str() {
+                "READY" => return Ok(()),
+                "FAILED" => {
+                    return Err(golem_stt::error::Error::APIBadRequest {
+                        request_id: request_id.to_string(),
+                        provider_error: format!(
+                            "Vocabulary creation failed: {}",
+                            res.failure_reason
+                                .unwrap_or_else(|| "Unknown error".to_string())
+                        ),
+                    });
+                }
+                "PENDING" => {
+                    retry_delay = std::cmp::min(
+                        Duration::from_millis((retry_delay.as_millis() * 2) as u64),
+                        max_delay,
+                    );
+                }
+                other => {
+                    return Err(golem_stt::error::Error::APIBadRequest {
+                        request_id: request_id.to_string(),
+                        provider_error: format!("Unexpected vocabulary state: {}", other),
+                    });
+                }
+            }
         }
     }
 
@@ -908,15 +1036,46 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
             let error_body = String::from_utf8(response.body().to_vec())
                 .unwrap_or_else(|_| "Unknown error".to_string());
 
-            Err((
-                vocabulary_name.to_string(),
-                client::Error::Generic(format!(
-                    "DeleteVocabulary failed with status: {} - {}",
-                    response.status(),
-                    error_body
-                )),
-            )
-                .into())
+            let status = response.status();
+            let request_id = vocabulary_name.to_string();
+
+            match status.as_u16() {
+                400 => Err(golem_stt::error::Error::APIBadRequest {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe DeleteVocabulary bad request: {}",
+                        error_body
+                    ),
+                }),
+                403 => Err(golem_stt::error::Error::APIForbidden {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe DeleteVocabulary forbidden: {}",
+                        error_body
+                    ),
+                }),
+                500 => Err(golem_stt::error::Error::APIInternalServerError {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe DeleteVocabulary server error: {}",
+                        error_body
+                    ),
+                }),
+                503 => Err(golem_stt::error::Error::APIInternalServerError {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe DeleteVocabulary service unavailable: {}",
+                        error_body
+                    ),
+                }),
+                _ => Err(golem_stt::error::Error::APIUnknown {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe DeleteVocabulary unknown error ({}): {}",
+                        status, error_body
+                    ),
+                }),
+            }
         }
     }
 
@@ -1066,71 +1225,46 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         } else {
             let error_body = String::from_utf8(response.body().to_vec())
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            Err((
-                transcription_job_name.clone(),
-                client::Error::Generic(format!(
-                    "StartTranscriptionJob failed with status: {} - {}",
-                    response.status(),
-                    error_body
-                )),
-            )
-                .into())
-        }
-    }
 
-    pub async fn wait_for_transcription_job_completion<RT: AsyncRuntime>(
-        &self,
-        runtime: &RT,
-        transcription_job_name: &str,
-        max_wait_time: Duration,
-    ) -> Result<GetTranscriptionJobResponse, golem_stt::error::Error> {
-        let start_time = std::time::Instant::now();
-        let mut retry_delay = Duration::from_millis(2000); // Start with 2 seconds for transcription jobs
-        let max_delay = Duration::from_secs(60); // Max 60 seconds between retries
+            let status = response.status();
+            let request_id = transcription_job_name.clone();
 
-        loop {
-            if start_time.elapsed() > max_wait_time {
-                return Err(golem_stt::error::Error::APIBadRequest {
-                    request_id: transcription_job_name.to_string(),
-                    provider_error: "Transcription job timed out".to_string(),
-                });
-            }
-
-            runtime.sleep(retry_delay).await;
-
-            let res = self
-                .get_transcription_job(transcription_job_name.to_string())
-                .await?;
-
-            match res.transcription_job.transcription_job_status.as_str() {
-                "COMPLETED" => {
-                    return Ok(res);
-                }
-                "FAILED" => {
-                    return Err(golem_stt::error::Error::APIBadRequest {
-                        request_id: transcription_job_name.to_string(),
-                        provider_error: format!(
-                            "Transcription job failed: {}",
-                            res.transcription_job
-                                .failure_reason
-                                .as_ref()
-                                .unwrap_or(&"Unknown error".to_string())
-                        ),
-                    });
-                }
-                "IN_PROGRESS" | "QUEUED" => {
-                    // Continue polling with exponential backoff
-                    retry_delay = std::cmp::min(
-                        Duration::from_millis((retry_delay.as_millis() as f64 * 1.5) as u64),
-                        max_delay,
-                    );
-                }
-                other => {
-                    return Err(golem_stt::error::Error::APIBadRequest {
-                        request_id: transcription_job_name.to_string(),
-                        provider_error: format!("Unexpected transcription job status: {}", other),
-                    });
-                }
+            match status.as_u16() {
+                400 => Err(golem_stt::error::Error::APIBadRequest {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe StartTranscriptionJob bad request: {}",
+                        error_body
+                    ),
+                }),
+                403 => Err(golem_stt::error::Error::APIForbidden {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe StartTranscriptionJob forbidden: {}",
+                        error_body
+                    ),
+                }),
+                500 => Err(golem_stt::error::Error::APIInternalServerError {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe StartTranscriptionJob server error: {}",
+                        error_body
+                    ),
+                }),
+                503 => Err(golem_stt::error::Error::APIInternalServerError {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe StartTranscriptionJob service unavailable: {}",
+                        error_body
+                    ),
+                }),
+                _ => Err(golem_stt::error::Error::APIUnknown {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe StartTranscriptionJob unknown error ({}): {}",
+                        status, error_body
+                    ),
+                }),
             }
         }
     }
@@ -1196,15 +1330,105 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         } else {
             let error_body = String::from_utf8(response.body().to_vec())
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            Err((
-                transcription_job_name.clone(),
-                client::Error::Generic(format!(
-                    "GetTranscriptionJob failed with status: {} - {}",
-                    response.status(),
-                    error_body
-                )),
-            )
-                .into())
+
+            let status = response.status();
+            let request_id = transcription_job_name.clone();
+
+            // Map HTTP status codes based on AWS Transcribe GetTranscriptionJob API spec
+            match status.as_u16() {
+                400 => Err(golem_stt::error::Error::APIBadRequest {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe GetTranscriptionJob bad request: {}",
+                        error_body
+                    ),
+                }),
+                403 => Err(golem_stt::error::Error::APIForbidden {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe GetTranscriptionJob forbidden: {}",
+                        error_body
+                    ),
+                }),
+                500 => Err(golem_stt::error::Error::APIInternalServerError {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe GetTranscriptionJob server error: {}",
+                        error_body
+                    ),
+                }),
+                503 => Err(golem_stt::error::Error::APIInternalServerError {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe GetTranscriptionJob service unavailable: {}",
+                        error_body
+                    ),
+                }),
+                _ => Err(golem_stt::error::Error::APIUnknown {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe GetTranscriptionJob unknown error ({}): {}",
+                        status, error_body
+                    ),
+                }),
+            }
+        }
+    }
+
+    pub async fn wait_for_transcription_job_completion<RT: AsyncRuntime>(
+        &self,
+        runtime: &RT,
+        transcription_job_name: &str,
+        max_wait_time: Duration,
+    ) -> Result<GetTranscriptionJobResponse, golem_stt::error::Error> {
+        let start_time = std::time::Instant::now();
+        let mut retry_delay = Duration::from_millis(2000); // Start with 2 seconds for transcription jobs
+        let max_delay = Duration::from_secs(60); // Max 60 seconds between retries
+
+        loop {
+            if start_time.elapsed() > max_wait_time {
+                return Err(golem_stt::error::Error::APIBadRequest {
+                    request_id: transcription_job_name.to_string(),
+                    provider_error: "Transcription job timed out".to_string(),
+                });
+            }
+
+            runtime.sleep(retry_delay).await;
+
+            let res = self
+                .get_transcription_job(transcription_job_name.to_string())
+                .await?;
+
+            match res.transcription_job.transcription_job_status.as_str() {
+                "COMPLETED" => {
+                    return Ok(res);
+                }
+                "FAILED" => {
+                    return Err(golem_stt::error::Error::APIBadRequest {
+                        request_id: transcription_job_name.to_string(),
+                        provider_error: format!(
+                            "Transcription job failed: {}",
+                            res.transcription_job
+                                .failure_reason
+                                .as_ref()
+                                .unwrap_or(&"Unknown error".to_string())
+                        ),
+                    });
+                }
+                "IN_PROGRESS" | "QUEUED" => {
+                    // Continue polling with exponential backoff
+                    retry_delay = std::cmp::min(
+                        Duration::from_millis((retry_delay.as_millis() as f64 * 1.5) as u64),
+                        max_delay,
+                    );
+                }
+                other => {
+                    return Err(golem_stt::error::Error::APIBadRequest {
+                        request_id: transcription_job_name.to_string(),
+                        provider_error: format!("Unexpected transcription job status: {}", other),
+                    });
+                }
+            }
         }
     }
 
@@ -1244,14 +1468,33 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         } else {
             let error_body = String::from_utf8(response.body().to_vec())
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            Err(golem_stt::error::Error::Client(
-                transcription_job_name.to_string(),
-                client::Error::Generic(format!(
-                    "Failed to download transcript: {} - {}",
-                    response.status(),
-                    error_body
-                )),
-            ))
+
+            let status = response.status();
+            let request_id = transcription_job_name.to_string();
+
+            // Map HTTP status codes based on S3 GET object behavior for transcript download
+            match status.as_u16() {
+                400 => Err(golem_stt::error::Error::APIBadRequest {
+                    request_id,
+                    provider_error: format!("Transcript download bad request: {}", error_body),
+                }),
+                403 => Err(golem_stt::error::Error::APIForbidden {
+                    request_id,
+                    provider_error: format!("Transcript download forbidden (expired URL or insufficient permissions): {}", error_body),
+                }),
+                404 => Err(golem_stt::error::Error::APINotFound {
+                    request_id,
+                    provider_error: format!("Transcript file not found: {}", error_body),
+                }),
+                500..=599 => Err(golem_stt::error::Error::APIInternalServerError {
+                    request_id,
+                    provider_error: format!("Transcript download server error ({}): {}", status, error_body),
+                }),
+                _ => Err(golem_stt::error::Error::APIUnknown {
+                    request_id,
+                    provider_error: format!("Transcript download unknown error ({}): {}", status, error_body),
+                }),
+            }
         }
     }
 }
@@ -1752,6 +1995,69 @@ mod tests {
         assert_eq!(request.uri().to_string(), expected_uri);
 
         assert_eq!(request.body(), &content);
+
+        assert!(request.headers().contains_key("x-amz-date"));
+        assert!(request.headers().contains_key("x-amz-content-sha256"));
+        assert!(request.headers().contains_key("authorization"));
+        assert!(request.headers().contains_key("host"));
+
+        let auth_header = request
+            .headers()
+            .get("authorization")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(auth_header.starts_with("AWS4-HMAC-SHA256"));
+        assert!(auth_header.contains("Credential="));
+        assert!(auth_header.contains("SignedHeaders="));
+        assert!(auth_header.contains("Signature="));
+
+        let host_header = request.headers().get("host").unwrap().to_str().unwrap();
+        assert_eq!(host_header, format!("{}.s3.amazonaws.com", bucket));
+    }
+
+    #[test]
+    fn test_s3_delete_object_request() {
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-east-1";
+
+        let mock_client = Arc::new(MockHttpClient::new());
+
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::NO_CONTENT)
+                .body(Bytes::new())
+                .unwrap(),
+        );
+
+        let s3_client: S3Client<MockHttpClient> = S3Client::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client.clone(),
+        );
+
+        let bucket = "test-bucket";
+        let object_name = "test-object.txt";
+
+        let result = block_on(|_| async {
+            s3_client
+                .delete_object("some-request-id", bucket, object_name)
+                .await
+        });
+
+        assert!(result.is_ok());
+
+        let captured_request = mock_client.last_captured_request();
+        let request = captured_request.as_ref().unwrap();
+
+        assert_eq!(request.method(), "DELETE");
+
+        let expected_uri = format!("https://{}.s3.amazonaws.com/{}", bucket, object_name);
+        assert_eq!(request.uri().to_string(), expected_uri);
+
+        assert_eq!(request.body(), &Bytes::new());
 
         assert!(request.headers().contains_key("x-amz-date"));
         assert!(request.headers().contains_key("x-amz-content-sha256"));
