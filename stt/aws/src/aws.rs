@@ -357,21 +357,35 @@ impl<HC: HttpClient> S3Client<HC> {
 
     pub async fn put_object(
         &self,
+        request_id: &str,
         bucket: &str,
         object_name: &str,
         content: Bytes,
-    ) -> Result<(), client::Error> {
+    ) -> Result<(), golem_stt::error::Error> {
         let timestamp = Utc::now();
         let uri = format!("https://{}.s3.amazonaws.com/{}", bucket, object_name);
 
-        let request = Request::builder().method("PUT").uri(&uri).body(content)?;
+        let request = Request::builder()
+            .method("PUT")
+            .uri(&uri)
+            .body(content)
+            .map_err(|e| (request_id.to_string(), client::Error::HttpError(e)))?;
 
         let signed_request = self
             .signer
             .sign_request(request, timestamp)
-            .map_err(|err| client::Error::Generic(format!("Failed to sign request: {}", err)))?;
+            .map_err(|err| {
+                (
+                    request_id.to_string(),
+                    client::Error::Generic(format!("Failed to sign request: {}", err)),
+                )
+            })?;
 
-        let response = self.http_client.execute(signed_request).await?;
+        let response = self
+            .http_client
+            .execute(signed_request)
+            .await
+            .map_err(|err| (request_id.to_string(), err))?;
 
         if response.status().is_success() {
             Ok(())
@@ -379,47 +393,15 @@ impl<HC: HttpClient> S3Client<HC> {
             let error_body = String::from_utf8(response.body().to_vec())
                 .unwrap_or_else(|e| format!("Unknown error, {e}"));
 
-            Err(client::Error::Generic(format!(
-                "S3 PutObject failed with status: {} -{}",
-                response.status(),
-                error_body,
-            ))
-            .into())
-        }
-    }
-
-    pub async fn get_object(
-        &self,
-        bucket: &str,
-        object_name: &str,
-    ) -> Result<Bytes, client::Error> {
-        let timestamp = Utc::now();
-        let uri = format!("https://{}.s3.amazonaws.com/{}", bucket, object_name);
-
-        let request = Request::builder()
-            .method("GET")
-            .uri(&uri)
-            .body(Bytes::new())?;
-
-        let signed_request = self
-            .signer
-            .sign_request(request, timestamp)
-            .map_err(|err| client::Error::Generic(format!("Failed to sign request: {}", err)))?;
-
-        let response = self.http_client.execute(signed_request).await?;
-
-        if response.status().is_success() {
-            Ok(response.into_body())
-        } else {
-            let error_body = String::from_utf8(response.body().to_vec())
-                .unwrap_or_else(|e| format!("Unknown error, {e}"));
-
-            Err(client::Error::Generic(format!(
-                "S3 GetObject failed with status: {} - {}",
-                response.status(),
-                error_body,
-            ))
-            .into())
+            Err((
+                request_id.to_string(),
+                client::Error::Generic(format!(
+                    "S3 PutObject failed with status: {} -{}",
+                    response.status(),
+                    error_body,
+                )),
+            )
+                .into())
         }
     }
 }
@@ -674,7 +656,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         vocabulary_name: String,
         language_code: String,
         phrases: Vec<String>,
-    ) -> Result<CreateVocabularyResponse, client::Error> {
+    ) -> Result<CreateVocabularyResponse, golem_stt::error::Error> {
         let timestamp = Utc::now();
         let uri = format!(
             "https://transcribe.{}.amazonaws.com/",
@@ -682,7 +664,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         );
 
         let request_body = CreateVocabularyRequest {
-            vocabulary_name,
+            vocabulary_name: vocabulary_name.clone(),
             language_code,
             phrases,
             vocabulary_file_uri: None,
@@ -690,8 +672,12 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
             tags: None,
         };
 
-        let json_body = serde_json::to_string(&request_body)
-            .map_err(|e| client::Error::Generic(format!("Failed to serialize request: {}", e)))?;
+        let json_body = serde_json::to_string(&request_body).map_err(|e| {
+            (
+                vocabulary_name.clone(),
+                client::Error::Generic(format!("Failed to serialize request: {}", e)),
+            )
+        })?;
 
         let request = Request::builder()
             .method("POST")
@@ -702,31 +688,46 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
                 "com.amazonaws.transcribe.Transcribe.CreateVocabulary",
             )
             .body(Bytes::from(json_body))
-            .map_err(|e| client::Error::HttpError(e))?;
+            .map_err(|e| (vocabulary_name.clone(), client::Error::HttpError(e)))?;
 
         let signed_request = self
             .signer
             .sign_request(request, timestamp)
-            .map_err(|err| client::Error::Generic(format!("Failed to sign request: {}", err)))?;
+            .map_err(|err| {
+                (
+                    vocabulary_name.clone(),
+                    client::Error::Generic(format!("Failed to sign request: {}", err)),
+                )
+            })?;
 
-        let response = self.http_client.execute(signed_request).await?;
+        let response = self
+            .http_client
+            .execute(signed_request)
+            .await
+            .map_err(|err| (vocabulary_name.clone(), err))?;
 
         if response.status().is_success() {
             let vocabulary_response: CreateVocabularyResponse =
                 serde_json::from_slice(response.body()).map_err(|e| {
-                    client::Error::Generic(format!("Failed to deserialize response: {}", e))
+                    (
+                        vocabulary_name.clone(),
+                        client::Error::Generic(format!("Failed to deserialize response: {}", e)),
+                    )
                 })?;
 
             Ok(vocabulary_response)
         } else {
             let error_body = String::from_utf8(response.body().to_vec())
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            Err(client::Error::Generic(format!(
-                "CreateVocabulary failed with status: {} - {}",
-                response.status(),
-                error_body
-            ))
-            .into())
+            Err((
+                vocabulary_name.clone(),
+                client::Error::Generic(format!(
+                    "CreateVocabulary failed with status: {} - {}",
+                    response.status(),
+                    error_body
+                )),
+            )
+                .into())
         }
     }
 
@@ -750,10 +751,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
 
             runtime.sleep(retry_delay).await;
 
-            let res = self
-                .get_vocabulary(request_id.to_string())
-                .await
-                .map_err(|err| golem_stt::error::Error::Client(request_id.to_string(), err))?;
+            let res = self.get_vocabulary(request_id.to_string()).await?;
 
             match res.vocabulary_state.as_str() {
                 "READY" => return Ok(()),
@@ -786,17 +784,23 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
     pub async fn get_vocabulary(
         &self,
         vocabulary_name: String,
-    ) -> Result<GetVocabularyResponse, client::Error> {
+    ) -> Result<GetVocabularyResponse, golem_stt::error::Error> {
         let timestamp = Utc::now();
         let uri = format!(
             "https://transcribe.{}.amazonaws.com/",
             self.signer.get_region()
         );
 
-        let request_body = GetVocabularyRequest { vocabulary_name };
+        let request_body = GetVocabularyRequest {
+            vocabulary_name: vocabulary_name.clone(),
+        };
 
-        let json_body = serde_json::to_string(&request_body)
-            .map_err(|e| client::Error::Generic(format!("Failed to serialize request: {}", e)))?;
+        let json_body = serde_json::to_string(&request_body).map_err(|e| {
+            (
+                vocabulary_name.clone(),
+                client::Error::Generic(format!("Failed to serialize request: {}", e)),
+            )
+        })?;
 
         let request = Request::builder()
             .method("POST")
@@ -807,45 +811,69 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
                 "com.amazonaws.transcribe.Transcribe.GetVocabulary",
             )
             .body(Bytes::from(json_body))
-            .map_err(|e| client::Error::HttpError(e))?;
+            .map_err(|e| (vocabulary_name.clone(), client::Error::HttpError(e)))?;
 
         let signed_request = self
             .signer
             .sign_request(request, timestamp)
-            .map_err(|err| client::Error::Generic(format!("Failed to sign request: {}", err)))?;
+            .map_err(|err| {
+                (
+                    vocabulary_name.clone(),
+                    client::Error::Generic(format!("Failed to sign request: {}", err)),
+                )
+            })?;
 
-        let response = self.http_client.execute(signed_request).await?;
+        let response = self
+            .http_client
+            .execute(signed_request)
+            .await
+            .map_err(|err| (vocabulary_name.clone(), err))?;
 
         if response.status().is_success() {
             let vocabulary_response: GetVocabularyResponse =
                 serde_json::from_slice(response.body()).map_err(|e| {
-                    client::Error::Generic(format!("Failed to deserialize response: {}", e))
+                    (
+                        vocabulary_name.clone(),
+                        client::Error::Generic(format!("Failed to deserialize response: {}", e)),
+                    )
                 })?;
 
             Ok(vocabulary_response)
         } else {
             let error_body = String::from_utf8(response.body().to_vec())
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            Err(client::Error::Generic(format!(
-                "GetVocabulary failed with status: {} - {}",
-                response.status(),
-                error_body
-            ))
-            .into())
+            Err((
+                vocabulary_name.clone(),
+                client::Error::Generic(format!(
+                    "GetVocabulary failed with status: {} - {}",
+                    response.status(),
+                    error_body
+                )),
+            )
+                .into())
         }
     }
 
-    pub async fn delete_vocabulary(&self, vocabulary_name: String) -> Result<(), client::Error> {
+    pub async fn delete_vocabulary(
+        &self,
+        vocabulary_name: &str,
+    ) -> Result<(), golem_stt::error::Error> {
         let timestamp = Utc::now();
         let uri = format!(
             "https://transcribe.{}.amazonaws.com/",
             self.signer.get_region()
         );
 
-        let request_body = DeleteVocabularyRequest { vocabulary_name };
+        let request_body = DeleteVocabularyRequest {
+            vocabulary_name: vocabulary_name.to_string(),
+        };
 
-        let json_body = serde_json::to_string(&request_body)
-            .map_err(|e| client::Error::Generic(format!("Failed to serialize request: {}", e)))?;
+        let json_body = serde_json::to_string(&request_body).map_err(|e| {
+            (
+                vocabulary_name.to_string(),
+                client::Error::Generic(format!("Failed to serialize request: {}", e)),
+            )
+        })?;
 
         let request = Request::builder()
             .method("POST")
@@ -856,14 +884,23 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
                 "com.amazonaws.transcribe.Transcribe.DeleteVocabulary",
             )
             .body(Bytes::from(json_body))
-            .map_err(|e| client::Error::HttpError(e))?;
+            .map_err(|e| (vocabulary_name.to_string(), client::Error::HttpError(e)))?;
 
         let signed_request = self
             .signer
             .sign_request(request, timestamp)
-            .map_err(|err| client::Error::Generic(format!("Failed to sign request: {}", err)))?;
+            .map_err(|err| {
+                (
+                    vocabulary_name.to_string(),
+                    client::Error::Generic(format!("Failed to sign request: {}", err)),
+                )
+            })?;
 
-        let response = self.http_client.execute(signed_request).await?;
+        let response = self
+            .http_client
+            .execute(signed_request)
+            .await
+            .map_err(|err| (vocabulary_name.to_string(), err))?;
 
         if response.status().is_success() {
             Ok(())
@@ -871,12 +908,15 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
             let error_body = String::from_utf8(response.body().to_vec())
                 .unwrap_or_else(|_| "Unknown error".to_string());
 
-            Err(client::Error::Generic(format!(
-                "DeleteVocabulary failed with status: {} - {}",
-                response.status(),
-                error_body
-            ))
-            .into())
+            Err((
+                vocabulary_name.to_string(),
+                client::Error::Generic(format!(
+                    "DeleteVocabulary failed with status: {} - {}",
+                    response.status(),
+                    error_body
+                )),
+            )
+                .into())
         }
     }
 
@@ -1060,10 +1100,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
 
             let res = self
                 .get_transcription_job(transcription_job_name.to_string())
-                .await
-                .map_err(|err| {
-                    golem_stt::error::Error::Client(transcription_job_name.to_string(), err)
-                })?;
+                .await?;
 
             match res.transcription_job.transcription_job_status.as_str() {
                 "COMPLETED" => {
@@ -1101,7 +1138,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
     pub async fn get_transcription_job(
         &self,
         transcription_job_name: String,
-    ) -> Result<GetTranscriptionJobResponse, client::Error> {
+    ) -> Result<GetTranscriptionJobResponse, golem_stt::error::Error> {
         let timestamp = Utc::now();
         let uri = format!(
             "https://transcribe.{}.amazonaws.com/",
@@ -1109,11 +1146,15 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         );
 
         let request_body = GetTranscriptionJobRequest {
-            transcription_job_name,
+            transcription_job_name: transcription_job_name.clone(),
         };
 
-        let json_body = serde_json::to_string(&request_body)
-            .map_err(|e| client::Error::Generic(format!("Failed to serialize request: {}", e)))?;
+        let json_body = serde_json::to_string(&request_body).map_err(|e| {
+            (
+                transcription_job_name.clone(),
+                client::Error::Generic(format!("Failed to serialize request: {}", e)),
+            )
+        })?;
 
         let request = Request::builder()
             .method("POST")
@@ -1124,31 +1165,46 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
                 "com.amazonaws.transcribe.Transcribe.GetTranscriptionJob",
             )
             .body(Bytes::from(json_body))
-            .map_err(|e| client::Error::HttpError(e))?;
+            .map_err(|e| (transcription_job_name.clone(), client::Error::HttpError(e)))?;
 
         let signed_request = self
             .signer
             .sign_request(request, timestamp)
-            .map_err(|err| client::Error::Generic(format!("Failed to sign request: {}", err)))?;
+            .map_err(|err| {
+                (
+                    transcription_job_name.clone(),
+                    client::Error::Generic(format!("Failed to sign request: {}", err)),
+                )
+            })?;
 
-        let response = self.http_client.execute(signed_request).await?;
+        let response = self
+            .http_client
+            .execute(signed_request)
+            .await
+            .map_err(|err| (transcription_job_name.clone(), err))?;
 
         if response.status().is_success() {
             let transcription_response: GetTranscriptionJobResponse =
                 serde_json::from_slice(response.body()).map_err(|e| {
-                    client::Error::Generic(format!("Failed to deserialize response: {}", e))
+                    (
+                        transcription_job_name.clone(),
+                        client::Error::Generic(format!("Failed to deserialize response: {}", e)),
+                    )
                 })?;
 
             Ok(transcription_response)
         } else {
             let error_body = String::from_utf8(response.body().to_vec())
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            Err(client::Error::Generic(format!(
-                "GetTranscriptionJob failed with status: {} - {}",
-                response.status(),
-                error_body
-            ))
-            .into())
+            Err((
+                transcription_job_name.clone(),
+                client::Error::Generic(format!(
+                    "GetTranscriptionJob failed with status: {} - {}",
+                    response.status(),
+                    error_body
+                )),
+            )
+                .into())
         }
     }
 
@@ -1683,7 +1739,7 @@ mod tests {
 
         let _result = block_on(|_| async {
             s3_client
-                .put_object(bucket, object_name, content.clone())
+                .put_object("some-request-id", bucket, object_name, content.clone())
                 .await
         });
 
@@ -1696,70 +1752,6 @@ mod tests {
         assert_eq!(request.uri().to_string(), expected_uri);
 
         assert_eq!(request.body(), &content);
-
-        assert!(request.headers().contains_key("x-amz-date"));
-        assert!(request.headers().contains_key("x-amz-content-sha256"));
-        assert!(request.headers().contains_key("authorization"));
-        assert!(request.headers().contains_key("host"));
-
-        let auth_header = request
-            .headers()
-            .get("authorization")
-            .unwrap()
-            .to_str()
-            .unwrap();
-        assert!(auth_header.starts_with("AWS4-HMAC-SHA256"));
-        assert!(auth_header.contains("Credential="));
-        assert!(auth_header.contains("SignedHeaders="));
-        assert!(auth_header.contains("Signature="));
-
-        let host_header = request.headers().get("host").unwrap().to_str().unwrap();
-        assert_eq!(host_header, format!("{}.s3.amazonaws.com", bucket));
-    }
-
-    #[test]
-    fn test_s3_get_object_request() {
-        let access_key = "AKIAIOSFODNN7EXAMPLE";
-        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
-        let region = "us-east-1";
-
-        let expected_content = Bytes::from("Hello from S3!");
-
-        let mock_client = Arc::new(MockHttpClient::new());
-
-        mock_client.expect_response(
-            Response::builder()
-                .status(StatusCode::OK)
-                .body(expected_content.clone())
-                .unwrap(),
-        );
-
-        let s3_client: S3Client<MockHttpClient> = S3Client::new(
-            access_key.to_string(),
-            secret_key.to_string(),
-            region.to_string(),
-            mock_client.clone(),
-        );
-
-        let bucket = "test-bucket";
-        let object_name = "test-object.txt";
-
-        let result = block_on(|_| async { s3_client.get_object(bucket, object_name).await });
-
-        let actual_content = result.unwrap();
-        assert_eq!(actual_content, expected_content);
-
-        let captured_request = mock_client.last_captured_request();
-        assert!(captured_request.is_some(), "Request should be captured");
-
-        let request = captured_request.as_ref().unwrap();
-
-        assert_eq!(request.method(), "GET");
-
-        let expected_uri = format!("https://{}.s3.amazonaws.com/{}", bucket, object_name);
-        assert_eq!(request.uri().to_string(), expected_uri);
-
-        assert_eq!(request.body(), &Bytes::new());
 
         assert!(request.headers().contains_key("x-amz-date"));
         assert!(request.headers().contains_key("x-amz-content-sha256"));
@@ -1904,11 +1896,8 @@ mod tests {
         );
 
         let vocabulary_name = "test-vocabulary".to_string();
-        let result = block_on(|_| async {
-            transcribe_client
-                .delete_vocabulary(vocabulary_name.clone())
-                .await
-        });
+        let result =
+            block_on(|_| async { transcribe_client.delete_vocabulary(&vocabulary_name).await });
 
         assert!(result.is_ok());
 

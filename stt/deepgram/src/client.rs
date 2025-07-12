@@ -288,8 +288,8 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
                 })?;
 
             Ok(TranscriptionResponse {
-                language: req_language.unwrap_or_default(),
                 audio_size_bytes,
+                language: req_language.unwrap_or_default(),
                 deepgram_transcription,
             })
         } else {

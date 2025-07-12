@@ -119,6 +119,11 @@ impl<HC: HttpClient, RT: AsyncRuntime>
         trace!("Sending request to AWS Transcribe API: {request:?}");
 
         let request_id: Rc<str> = Rc::from(request.request_id);
+        let audio_size_bytes = request.audio.len();
+        let req_language = request
+            .transcription_config
+            .as_ref()
+            .and_then(|config| config.language.clone());
 
         validate_request_id(&request_id).map_err(|validation_error| Error::APIBadRequest {
             request_id: request_id.to_string(),
@@ -144,9 +149,13 @@ impl<HC: HttpClient, RT: AsyncRuntime>
         let object_key = format!("{}/audio.{}", request_id, request.audio_config.format);
 
         self.s3_client
-            .put_object(self.bucket_name.as_ref(), &object_key, request.audio)
-            .await
-            .map_err(|err| Error::Client(request_id.to_string(), err))?;
+            .put_object(
+                &request_id,
+                self.bucket_name.as_ref(),
+                &object_key,
+                request.audio,
+            )
+            .await?;
 
         let vocabulary_name = if let Some(ref config) = request.transcription_config {
             if !config.vocabulary.is_empty() {
@@ -159,8 +168,7 @@ impl<HC: HttpClient, RT: AsyncRuntime>
                         language_code.clone(),
                         config.vocabulary.clone(),
                     )
-                    .await
-                    .map_err(|err| Error::Client(request_id.to_string(), err))?;
+                    .await?;
 
                 if res.vocabulary_state == "FAILED" {
                     return Err(Error::APIBadRequest {
@@ -235,7 +243,17 @@ impl<HC: HttpClient, RT: AsyncRuntime>
                     .download_transcript_json(request_id.as_ref(), &transcript_uri)
                     .await?;
 
-                todo!()
+                self.transcribe_client
+                    .delete_vocabulary(&request_id)
+                    .await?;
+
+                // TODO delete audio file
+
+                Ok(TranscriptionResponse {
+                    audio_size_bytes,
+                    language: req_language.unwrap_or_default(),
+                    aws_transcription: transcribe_output,
+                })
             } else {
                 Err(golem_stt::error::Error::APIUnknown {
                     request_id: request_id.to_string(),
