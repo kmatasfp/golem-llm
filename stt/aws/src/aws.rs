@@ -16,7 +16,7 @@ use std::{
 };
 
 use crate::{
-    client::{TranscribeOutput, TranscriptionConfig},
+    client::{AudioConfig, TranscribeOutput, TranscriptionConfig},
     error::Error,
 };
 
@@ -884,10 +884,9 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         &self,
         transcription_job_name: String,
         media_file_uri: String,
-        media_format: String,
-        enable_channel_identification: bool,
-        vocabulary_name: Option<String>,
+        audio_config: AudioConfig,
         transcription_config: Option<TranscriptionConfig>,
+        vocabulary_name: Option<String>,
     ) -> Result<StartTranscriptionJobResponse, golem_stt::error::Error> {
         let timestamp = Utc::now();
         let uri = format!(
@@ -897,58 +896,62 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
 
         let language_code = transcription_config
             .as_ref()
-            .and_then(|config| config.language.clone());
+            .and_then(|config| config.language.as_ref().map(|lang| lang.to_string()));
+        let use_identify_language = language_code.is_none();
+        let enable_channel_identification = audio_config.channels.filter(|ch| *ch > 1).is_some();
+        let enable_speaker_diarization = transcription_config
+            .as_ref()
+            .map(|config| config.enable_speaker_diarization)
+            .unwrap_or(false);
 
-        let mut settings = None;
-        if enable_channel_identification {
-            settings = Some(Settings {
-                channel_identification: Some(true),
-                max_alternatives: None,
-                max_speaker_labels: Some(30),
-                show_alternatives: None,
-                show_speaker_labels: None,
-                vocabulary_filter_method: None,
-                vocabulary_filter_name: None,
-                vocabulary_name: if language_code.is_some() {
-                    vocabulary_name.clone()
+        let model_settings = if !use_identify_language {
+            transcription_config
+                .as_ref()
+                .and_then(|config| config.model.as_deref())
+                .map(|model| ModelSettings {
+                    language_model_name: model.to_string(),
+                })
+        } else {
+            None
+        };
+
+        let settings = if enable_channel_identification
+            || enable_speaker_diarization
+            || (!use_identify_language && vocabulary_name.is_some())
+        {
+            Some(Settings {
+                channel_identification: if enable_channel_identification {
+                    Some(true)
                 } else {
                     None
                 },
-            });
-        }
-
-        if let Some(transcription_config) = &transcription_config {
-            settings = Some(settings.map_or_else(
-                || Settings {
-                    channel_identification: None,
-                    max_alternatives: None,
-                    max_speaker_labels: None,
-                    show_alternatives: None,
-                    show_speaker_labels: Some(transcription_config.enable_speaker_diarization),
-                    vocabulary_filter_method: None,
-                    vocabulary_filter_name: None,
-                    vocabulary_name: if language_code.is_some() {
-                        vocabulary_name.clone()
-                    } else {
-                        None
-                    },
+                max_alternatives: None,
+                max_speaker_labels: if enable_speaker_diarization {
+                    Some(30)
+                } else {
+                    None
                 },
-                |mut settings| {
-                    settings.show_speaker_labels =
-                        Some(transcription_config.enable_speaker_diarization);
-
-                    if language_code.is_some() {
-                        settings.vocabulary_name = vocabulary_name.clone();
-                    }
-
-                    settings
+                show_alternatives: None,
+                show_speaker_labels: if enable_speaker_diarization {
+                    Some(true)
+                } else {
+                    None
                 },
-            ));
-        }
+                vocabulary_filter_method: None,
+                vocabulary_filter_name: None,
+                vocabulary_name: if !use_identify_language {
+                    vocabulary_name
+                } else {
+                    None
+                },
+            })
+        } else {
+            None
+        };
 
         let request_body = StartTranscriptionJobRequest {
             content_redaction: None,
-            identify_language: if language_code.is_none() {
+            identify_language: if use_identify_language {
                 Some(true)
             } else {
                 None
@@ -956,24 +959,16 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
             identify_multiple_languages: None,
             job_execution_settings: None,
             kms_encryption_context: None,
-            language_code: language_code.clone(),
+            language_code,
             language_id_settings: None,
             language_options: None,
             media: Media {
                 media_file_uri,
                 redacted_media_file_uri: None,
             },
-            media_format: Some(media_format),
+            media_format: Some(audio_config.format.to_string()),
             media_sample_rate_hertz: None,
-            model_settings: if language_code.is_some() {
-                transcription_config.as_ref().and_then(|config| {
-                    config.model.clone().map(|model| ModelSettings {
-                        language_model_name: model,
-                    })
-                })
-            } else {
-                None
-            },
+            model_settings,
             output_bucket_name: None,
             output_encryption_kms_key_id: None,
             output_key: None,
@@ -1072,25 +1067,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
 
             match res.transcription_job.transcription_job_status.as_str() {
                 "COMPLETED" => {
-                    // Ensure we have the transcript file URI
-                    if let Some(transcript) = &res.transcription_job.transcript {
-                        if transcript.transcript_file_uri.is_some() {
-                            return Ok(res);
-                        } else {
-                            return Err(golem_stt::error::Error::APIBadRequest {
-                                request_id: transcription_job_name.to_string(),
-                                provider_error:
-                                    "Transcription completed but no transcript file URI found"
-                                        .to_string(),
-                            });
-                        }
-                    } else {
-                        return Err(golem_stt::error::Error::APIBadRequest {
-                            request_id: transcription_job_name.to_string(),
-                            provider_error: "Transcription completed but no transcript data found"
-                                .to_string(),
-                        });
-                    }
+                    return Ok(res);
                 }
                 "FAILED" => {
                     return Err(golem_stt::error::Error::APIBadRequest {
@@ -1906,88 +1883,6 @@ mod tests {
     }
 
     #[test]
-    fn test_transcribe_get_vocabulary_request() {
-        let access_key = "AKIAIOSFODNN7EXAMPLE";
-        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
-        let region = "us-east-1";
-
-        let expected_response = GetVocabularyResponse {
-            vocabulary_name: "test-vocabulary".to_string(),
-            language_code: "en-US".to_string(),
-            vocabulary_state: "READY".to_string(),
-            last_modified_time: 1234567890.0,
-            failure_reason: None,
-            download_uri: Some("https://s3.amazonaws.com/bucket/vocabulary.txt".to_string()),
-        };
-
-        let mock_client = Arc::new(MockHttpClient::new());
-
-        let response_json_str = serde_json::to_string(&expected_response).unwrap();
-        let body_bytes = Bytes::from(response_json_str.as_bytes().to_vec());
-
-        mock_client.expect_response(
-            Response::builder()
-                .status(StatusCode::OK)
-                .body(body_bytes)
-                .unwrap(),
-        );
-
-        let transcribe_client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
-            access_key.to_string(),
-            secret_key.to_string(),
-            region.to_string(),
-            mock_client.clone(),
-        );
-
-        let vocabulary_name = "test-vocabulary".to_string();
-        let result = block_on(|_| async {
-            transcribe_client
-                .get_vocabulary(vocabulary_name.clone())
-                .await
-        });
-
-        assert!(result.is_ok());
-        let actual_response = result.unwrap();
-        assert_eq!(actual_response, expected_response);
-
-        let request = mock_client.last_captured_request().unwrap();
-        assert_eq!(request.method(), "POST");
-        assert_eq!(
-            request.uri().to_string(),
-            format!("https://transcribe.{}.amazonaws.com/", region)
-        );
-        assert_eq!(
-            request.headers().get("content-type").unwrap(),
-            "application/x-amz-json-1.1"
-        );
-        assert_eq!(
-            request.headers().get("x-amz-target").unwrap(),
-            "com.amazonaws.transcribe.Transcribe.GetVocabulary"
-        );
-
-        let expected_request = GetVocabularyRequest { vocabulary_name };
-
-        let actual_request: GetVocabularyRequest = serde_json::from_slice(request.body()).unwrap();
-        assert_eq!(actual_request, expected_request);
-
-        assert!(request.headers().contains_key("x-amz-date"));
-        assert!(request.headers().contains_key("x-amz-content-sha256"));
-        assert!(request.headers().contains_key("authorization"));
-        assert!(request.headers().contains_key("host"));
-
-        let auth_header = request
-            .headers()
-            .get("authorization")
-            .unwrap()
-            .to_str()
-            .unwrap();
-        assert!(auth_header.starts_with("AWS4-HMAC-SHA256"));
-        assert!(auth_header.contains("Credential="));
-        assert!(auth_header.contains("SignedHeaders="));
-        assert!(auth_header.contains("Signature="));
-    }
-
-    #[test]
     fn test_transcribe_delete_vocabulary_request() {
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
@@ -2055,239 +1950,1155 @@ mod tests {
         assert!(auth_header.contains("Signature="));
     }
 
-    // #[test]
-    // fn test_transcribe_start_transcription_job_request() {
-    //     let access_key = "AKIAIOSFODNN7EXAMPLE";
-    //     let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
-    //     let region = "us-east-1";
-
-    //     let transcription_job_name = "test-transcription-job".to_string();
-    //     let media_file_uri = "s3://test-bucket/audio.mp3".to_string();
-    //     let language_code = Some("en-US".to_string());
-    //     let media_format = "mp3".to_string();
-
-    //     let expected_response = StartTranscriptionJobResponse {
-    //         transcription_job: TranscriptionJob {
-    //             transcription_job_name: transcription_job_name.clone(),
-    //             transcription_job_status: "IN_PROGRESS".to_string(),
-    //             language_code: language_code.clone(),
-    //             media: Some(Media {
-    //                 media_file_uri: media_file_uri.clone(),
-    //                 redacted_media_file_uri: None,
-    //             }),
-    //             media_format: Some(media_format.clone()),
-    //             media_sample_rate_hertz: None,
-    //             creation_time: Some(1234567890.0),
-    //             completion_time: None,
-    //             start_time: Some(1234567890.0),
-    //             failure_reason: None,
-    //             settings: None,
-    //             transcript: None,
-    //             tags: None,
-    //         },
-    //     };
-
-    //     let mock_client = Arc::new(MockHttpClient::new());
-
-    //     let response_json_str = serde_json::to_string(&expected_response).unwrap();
-    //     let body_bytes = Bytes::from(response_json_str.as_bytes().to_vec());
-
-    //     mock_client.expect_response(
-    //         Response::builder()
-    //             .status(StatusCode::OK)
-    //             .body(body_bytes)
-    //             .unwrap(),
-    //     );
-
-    //     let transcribe_client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
-    //         access_key.to_string(),
-    //         secret_key.to_string(),
-    //         region.to_string(),
-    //         mock_client.clone(),
-    //     );
-
-    //     let output_bucket_name = Some("test-output-bucket".to_string());
-    //     let output_key = Some("transcripts/".to_string());
-
-    //     let result = block_on(|_| async {
-    //         transcribe_client
-    //             .start_transcription_job(
-    //                 transcription_job_name.clone(),
-    //                 media_file_uri.clone(),
-    //                 language_code.clone(),
-    //                 media_format.clone(),
-    //                 output_bucket_name.clone(),
-    //                 output_key.clone(),
-    //             )
-    //             .await
-    //     });
-
-    //     assert!(result.is_ok());
-    //     let actual_response = result.unwrap();
-    //     assert_eq!(actual_response, expected_response);
-
-    //     let request = mock_client.last_captured_request().unwrap();
-    //     assert_eq!(request.method(), "POST");
-    //     assert_eq!(
-    //         request.uri().to_string(),
-    //         format!("https://transcribe.{}.amazonaws.com/", region)
-    //     );
-    //     assert_eq!(
-    //         request.headers().get("content-type").unwrap(),
-    //         "application/x-amz-json-1.1"
-    //     );
-    //     assert_eq!(
-    //         request.headers().get("x-amz-target").unwrap(),
-    //         "com.amazonaws.transcribe.Transcribe.StartTranscriptionJob"
-    //     );
-
-    //     let expected_request = StartTranscriptionJobRequest {
-    //         content_redaction: None,
-    //         identify_language: None,
-    //         identify_multiple_languages: None,
-    //         job_execution_settings: None,
-    //         kms_encryption_context: None,
-    //         language_code,
-    //         language_id_settings: None,
-    //         language_options: None,
-    //         media: Media {
-    //             media_file_uri,
-    //             redacted_media_file_uri: None,
-    //         },
-    //         media_format: Some(media_format),
-    //         media_sample_rate_hertz: None,
-    //         model_settings: None,
-    //         output_bucket_name,
-    //         output_encryption_kms_key_id: None,
-    //         output_key,
-    //         settings: None,
-    //         subtitles: None,
-    //         tags: None,
-    //         toxicity_detection: None,
-    //         transcription_job_name,
-    //     };
-
-    //     let actual_request: StartTranscriptionJobRequest =
-    //         serde_json::from_slice(request.body()).unwrap();
-    //     assert_eq!(actual_request, expected_request);
-
-    //     assert!(request.headers().contains_key("x-amz-date"));
-    //     assert!(request.headers().contains_key("x-amz-content-sha256"));
-    //     assert!(request.headers().contains_key("authorization"));
-    //     assert!(request.headers().contains_key("host"));
-
-    //     let auth_header = request
-    //         .headers()
-    //         .get("authorization")
-    //         .unwrap()
-    //         .to_str()
-    //         .unwrap();
-    //     assert!(auth_header.starts_with("AWS4-HMAC-SHA256"));
-    //     assert!(auth_header.contains("Credential="));
-    //     assert!(auth_header.contains("SignedHeaders="));
-    //     assert!(auth_header.contains("Signature="));
-    // }
-
     #[test]
-    fn test_transcribe_get_transcription_job_request() {
+    fn test_start_transcription_job_basic_request() {
+        use crate::client::{AudioConfig, AudioFormat};
+
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "us-east-1";
 
-        let expected_response = GetTranscriptionJobResponse {
-            transcription_job: TranscriptionJob {
-                transcription_job_name: "test-transcription-job".to_string(),
-                transcription_job_status: "COMPLETED".to_string(),
-                language_code: Some("en-US".to_string()),
-                media: Some(Media {
-                    media_file_uri: "s3://test-bucket/audio.mp3".to_string(),
-                    redacted_media_file_uri: None,
-                }),
-                media_format: Some("mp3".to_string()),
-                media_sample_rate_hertz: Some(16000),
-                creation_time: Some(1234567890.0),
-                completion_time: Some(1234567950.0),
-                start_time: Some(1234567890.0),
-                failure_reason: None,
-                settings: None,
-                transcript: Some(Transcript {
-                    transcript_file_uri: Some(
-                        "s3://test-output-bucket/transcripts/test-transcription-job.json"
-                            .to_string(),
-                    ),
-                    redacted_transcript_file_uri: None,
-                }),
-                tags: None,
-            },
-        };
-
         let mock_client = Arc::new(MockHttpClient::new());
 
-        let response_json_str = serde_json::to_string(&expected_response).unwrap();
-        let body_bytes = Bytes::from(response_json_str.as_bytes().to_vec());
+        let mock_response = r#"{
+               "TranscriptionJob": {
+                   "TranscriptionJobName": "test-job-basic",
+                   "TranscriptionJobStatus": "COMPLETED"
+               }
+           }"#;
 
         mock_client.expect_response(
             Response::builder()
-                .status(StatusCode::OK)
-                .body(body_bytes)
+                .status(200)
+                .body(Bytes::from(mock_response))
                 .unwrap(),
         );
 
-        let transcribe_client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
             access_key.to_string(),
             secret_key.to_string(),
             region.to_string(),
             mock_client.clone(),
         );
 
-        let transcription_job_name = "test-transcription-job".to_string();
-        let result = block_on(|_| async {
-            transcribe_client
-                .get_transcription_job(transcription_job_name.clone())
+        // Test basic audio config with no transcription config (should use identify_language)
+        let audio_config = AudioConfig {
+            format: AudioFormat::wav,
+            channels: Some(1),
+        };
+
+        let _result = block_on(|_| async {
+            client
+                .start_transcription_job(
+                    "test-job-basic".to_string(),
+                    "s3://bucket/audio.wav".to_string(),
+                    audio_config,
+                    None, // No transcription config
+                    None, // No vocabulary
+                )
                 .await
         });
 
-        assert!(result.is_ok());
-        let actual_response = result.unwrap();
-        assert_eq!(actual_response, expected_response);
-
+        // Verify the request was constructed correctly
         let request = mock_client.last_captured_request().unwrap();
-        assert_eq!(request.method(), "POST");
-        assert_eq!(
-            request.uri().to_string(),
-            format!("https://transcribe.{}.amazonaws.com/", region)
-        );
-        assert_eq!(
-            request.headers().get("content-type").unwrap(),
-            "application/x-amz-json-1.1"
-        );
-        assert_eq!(
-            request.headers().get("x-amz-target").unwrap(),
-            "com.amazonaws.transcribe.Transcribe.GetTranscriptionJob"
-        );
+        let actual_request: StartTranscriptionJobRequest =
+            serde_json::from_slice(request.body()).unwrap();
 
-        let expected_request = GetTranscriptionJobRequest {
-            transcription_job_name,
+        let expected_request = StartTranscriptionJobRequest {
+            content_redaction: None,
+            identify_language: Some(true), // Should be true when no language specified
+            identify_multiple_languages: None,
+            job_execution_settings: None,
+            kms_encryption_context: None,
+            language_code: None, // Should be None when using identify_language
+            language_id_settings: None,
+            language_options: None,
+            media: Media {
+                media_file_uri: "s3://bucket/audio.wav".to_string(),
+                redacted_media_file_uri: None,
+            },
+            media_format: Some("wav".to_string()),
+            media_sample_rate_hertz: None,
+            model_settings: None, // Should be None when using identify_language
+            output_bucket_name: None,
+            output_encryption_kms_key_id: None,
+            output_key: None,
+            settings: None, // Should be None for basic single-channel audio
+            subtitles: None,
+            tags: None,
+            toxicity_detection: None,
+            transcription_job_name: "test-job-basic".to_string(),
         };
 
-        let actual_request: GetTranscriptionJobRequest =
+        assert_eq!(
+            actual_request, expected_request,
+            "Basic request should match expected structure"
+        );
+    }
+
+    #[test]
+    fn test_start_transcription_job_with_explicit_language() {
+        use crate::client::{AudioConfig, AudioFormat, TranscriptionConfig};
+
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-west-2";
+
+        let mock_client = Arc::new(MockHttpClient::new());
+
+        let mock_response = r#"{
+                "TranscriptionJob": {
+                    "TranscriptionJobName": "test-job-lang",
+                    "TranscriptionJobStatus": "IN_PROGRESS"
+                }
+            }"#;
+
+        mock_client.expect_response(
+            Response::builder()
+                .status(200)
+                .body(Bytes::from(mock_response))
+                .unwrap(),
+        );
+
+        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client.clone(),
+        );
+
+        let audio_config = AudioConfig {
+            format: AudioFormat::mp3,
+            channels: Some(1),
+        };
+
+        let transcription_config = TranscriptionConfig {
+            language: Some("en-US".to_string()),
+            model: None,
+            enable_speaker_diarization: false,
+            vocabulary: vec![],
+        };
+
+        let _result = block_on(|_| async {
+            client
+                .start_transcription_job(
+                    "test-job-lang".to_string(),
+                    "s3://bucket/audio.mp3".to_string(),
+                    audio_config,
+                    Some(transcription_config),
+                    None,
+                )
+                .await
+        });
+
+        let request = mock_client.last_captured_request().unwrap();
+        let actual_request: StartTranscriptionJobRequest =
             serde_json::from_slice(request.body()).unwrap();
-        assert_eq!(actual_request, expected_request);
 
-        assert!(request.headers().contains_key("x-amz-date"));
-        assert!(request.headers().contains_key("x-amz-content-sha256"));
-        assert!(request.headers().contains_key("authorization"));
-        assert!(request.headers().contains_key("host"));
+        let expected_request = StartTranscriptionJobRequest {
+            content_redaction: None,
+            identify_language: None, // Should be None when explicit language provided
+            identify_multiple_languages: None,
+            job_execution_settings: None,
+            kms_encryption_context: None,
+            language_code: Some("en-US".to_string()), // Should be set
+            language_id_settings: None,
+            language_options: None,
+            media: Media {
+                media_file_uri: "s3://bucket/audio.mp3".to_string(),
+                redacted_media_file_uri: None,
+            },
+            media_format: Some("mp3".to_string()),
+            media_sample_rate_hertz: None,
+            model_settings: None, // No model specified
+            output_bucket_name: None,
+            output_encryption_kms_key_id: None,
+            output_key: None,
+            settings: None, // No settings should be set
+            subtitles: None,
+            tags: None,
+            toxicity_detection: None,
+            transcription_job_name: "test-job-lang".to_string(),
+        };
 
-        let auth_header = request
-            .headers()
-            .get("authorization")
+        assert_eq!(
+            actual_request, expected_request,
+            "Request with explicit language should match expected structure"
+        );
+    }
+
+    #[test]
+    fn test_start_transcription_job_with_model_and_vocabulary() {
+        use crate::client::{AudioConfig, AudioFormat, TranscriptionConfig};
+
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "eu-west-1";
+
+        let mock_client = Arc::new(MockHttpClient::new());
+
+        let mock_response = r#"{
+               "TranscriptionJob": {
+                   "TranscriptionJobName": "test-job-advanced",
+                   "TranscriptionJobStatus": "COMPLETED"
+               }
+           }"#;
+
+        mock_client.expect_response(
+            Response::builder()
+                .status(200)
+                .body(Bytes::from(mock_response))
+                .unwrap(),
+        );
+
+        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client.clone(),
+        );
+
+        let audio_config = AudioConfig {
+            format: AudioFormat::flac,
+            channels: Some(1),
+        };
+
+        let transcription_config = TranscriptionConfig {
+            language: Some("fr-FR".to_string()),
+            model: Some("custom-medical-model".to_string()),
+            enable_speaker_diarization: false,
+            vocabulary: vec!["A".to_string(), "B".to_string()],
+        };
+
+        let _result = block_on(|_| async {
+            client
+                .start_transcription_job(
+                    "test-job-advanced".to_string(),
+                    "s3://bucket/audio.flac".to_string(),
+                    audio_config,
+                    Some(transcription_config),
+                    Some("custom-medical-vocab-123".to_string()), // Vocabulary name provided
+                )
+                .await
+        });
+
+        let request = mock_client.last_captured_request().unwrap();
+        let actual_request: StartTranscriptionJobRequest =
+            serde_json::from_slice(request.body()).unwrap();
+
+        let expected_request = StartTranscriptionJobRequest {
+            content_redaction: None,
+            identify_language: None, // Explicit language provided
+            identify_multiple_languages: None,
+            job_execution_settings: None,
+            kms_encryption_context: None,
+            language_code: Some("fr-FR".to_string()),
+            language_id_settings: None,
+            language_options: None,
+            media: Media {
+                media_file_uri: "s3://bucket/audio.flac".to_string(),
+                redacted_media_file_uri: None,
+            },
+            media_format: Some("flac".to_string()),
+            media_sample_rate_hertz: None,
+            model_settings: Some(ModelSettings {
+                language_model_name: "custom-medical-model".to_string(),
+            }),
+            output_bucket_name: None,
+            output_encryption_kms_key_id: None,
+            output_key: None,
+            settings: Some(Settings {
+                channel_identification: None,
+                max_alternatives: None,
+                max_speaker_labels: None,
+                show_alternatives: None,
+                show_speaker_labels: None,
+                vocabulary_filter_method: None,
+                vocabulary_filter_name: None,
+                vocabulary_name: Some("custom-medical-vocab-123".to_string()),
+            }),
+            subtitles: None,
+            tags: None,
+            toxicity_detection: None,
+            transcription_job_name: "test-job-advanced".to_string(),
+        };
+
+        assert_eq!(
+            actual_request, expected_request,
+            "Request with model and vocabulary should match expected structure"
+        );
+    }
+
+    #[test]
+    fn test_start_transcription_job_with_speaker_diarization() {
+        use crate::client::{AudioConfig, AudioFormat, TranscriptionConfig};
+
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "ap-southeast-1";
+
+        let mock_client = Arc::new(MockHttpClient::new());
+
+        let mock_response = r#"{
+                "TranscriptionJob": {
+                    "TranscriptionJobName": "test-job-speakers",
+                    "TranscriptionJobStatus": "IN_PROGRESS"
+                }
+            }"#;
+
+        mock_client.expect_response(
+            Response::builder()
+                .status(200)
+                .body(Bytes::from(mock_response))
+                .unwrap(),
+        );
+
+        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client.clone(),
+        );
+
+        let audio_config = AudioConfig {
+            format: AudioFormat::ogg,
+            channels: Some(1), // Single channel
+        };
+
+        let transcription_config = TranscriptionConfig {
+            language: Some("en-AU".to_string()),
+            model: None,
+            enable_speaker_diarization: true, // Enable speaker diarization
+            vocabulary: vec![],
+        };
+
+        let _result = block_on(|_| async {
+            client
+                .start_transcription_job(
+                    "test-job-speakers".to_string(),
+                    "s3://bucket/meeting.ogg".to_string(),
+                    audio_config,
+                    Some(transcription_config),
+                    None,
+                )
+                .await
+        });
+
+        let request = mock_client.last_captured_request().unwrap();
+        let actual_request: StartTranscriptionJobRequest =
+            serde_json::from_slice(request.body()).unwrap();
+
+        let expected_request = StartTranscriptionJobRequest {
+            content_redaction: None,
+            identify_language: None,
+            identify_multiple_languages: None,
+            job_execution_settings: None,
+            kms_encryption_context: None,
+            language_code: Some("en-AU".to_string()),
+            language_id_settings: None,
+            language_options: None,
+            media: Media {
+                media_file_uri: "s3://bucket/meeting.ogg".to_string(),
+                redacted_media_file_uri: None,
+            },
+            media_format: Some("ogg".to_string()),
+            media_sample_rate_hertz: None,
+            model_settings: None,
+            output_bucket_name: None,
+            output_encryption_kms_key_id: None,
+            output_key: None,
+            settings: Some(Settings {
+                channel_identification: None, // Single channel
+                max_alternatives: None,
+                max_speaker_labels: Some(30), // Set for speaker diarization
+                show_alternatives: None,
+                show_speaker_labels: Some(true), // Enable speaker labels
+                vocabulary_filter_method: None,
+                vocabulary_filter_name: None,
+                vocabulary_name: None,
+            }),
+            subtitles: None,
+            tags: None,
+            toxicity_detection: None,
+            transcription_job_name: "test-job-speakers".to_string(),
+        };
+
+        assert_eq!(
+            actual_request, expected_request,
+            "Request with speaker diarization should match expected structure"
+        );
+    }
+
+    #[test]
+    fn test_start_transcription_job_with_multi_channel() {
+        use crate::client::{AudioConfig, AudioFormat, TranscriptionConfig};
+
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "ca-central-1";
+
+        let mock_client = Arc::new(MockHttpClient::new());
+
+        let mock_response = r#"{
+                "TranscriptionJob": {
+                    "TranscriptionJobName": "test-job-channels",
+                    "TranscriptionJobStatus": "COMPLETED"
+                }
+            }"#;
+
+        mock_client.expect_response(
+            Response::builder()
+                .status(200)
+                .body(Bytes::from(mock_response))
+                .unwrap(),
+        );
+
+        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client.clone(),
+        );
+
+        let audio_config = AudioConfig {
+            format: AudioFormat::wav,
+            channels: Some(2), // Multi-channel audio
+        };
+
+        let transcription_config = TranscriptionConfig {
+            language: Some("en-CA".to_string()),
+            model: Some("telephony-model".to_string()),
+            enable_speaker_diarization: true, // Both multi-channel and speaker diarization
+            vocabulary: vec!["A".to_string(), "B".to_string()],
+        };
+
+        let _result = block_on(|_| async {
+            client
+                .start_transcription_job(
+                    "test-job-channels".to_string(),
+                    "s3://bucket/call-recording.wav".to_string(),
+                    audio_config,
+                    Some(transcription_config),
+                    Some("telephony-vocab".to_string()),
+                )
+                .await
+        });
+
+        let request = mock_client.last_captured_request().unwrap();
+        let actual_request: StartTranscriptionJobRequest =
+            serde_json::from_slice(request.body()).unwrap();
+
+        let expected_request = StartTranscriptionJobRequest {
+            content_redaction: None,
+            identify_language: None,
+            identify_multiple_languages: None,
+            job_execution_settings: None,
+            kms_encryption_context: None,
+            language_code: Some("en-CA".to_string()),
+            language_id_settings: None,
+            language_options: None,
+            media: Media {
+                media_file_uri: "s3://bucket/call-recording.wav".to_string(),
+                redacted_media_file_uri: None,
+            },
+            media_format: Some("wav".to_string()),
+            media_sample_rate_hertz: None,
+            model_settings: Some(ModelSettings {
+                language_model_name: "telephony-model".to_string(),
+            }),
+            output_bucket_name: None,
+            output_encryption_kms_key_id: None,
+            output_key: None,
+            settings: Some(Settings {
+                channel_identification: Some(true), // Multi-channel
+                max_alternatives: None,
+                max_speaker_labels: Some(30), // Speaker diarization
+                show_alternatives: None,
+                show_speaker_labels: Some(true), // Speaker diarization
+                vocabulary_filter_method: None,
+                vocabulary_filter_name: None,
+                vocabulary_name: Some("telephony-vocab".to_string()),
+            }),
+            subtitles: None,
+            tags: None,
+            toxicity_detection: None,
+            transcription_job_name: "test-job-channels".to_string(),
+        };
+
+        assert_eq!(
+            actual_request, expected_request,
+            "Request with multi-channel and speaker diarization should match expected structure"
+        );
+    }
+
+    #[test]
+    fn test_start_transcription_job_identify_language_ignores_vocabulary_and_model_settings() {
+        use crate::client::{AudioConfig, AudioFormat};
+
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-east-1";
+
+        let mock_client = Arc::new(MockHttpClient::new());
+
+        let mock_response = r#"{
+               "TranscriptionJob": {
+                   "TranscriptionJobName": "test-job-identify",
+                   "TranscriptionJobStatus": "IN_PROGRESS"
+               }
+           }"#;
+
+        mock_client.expect_response(
+            Response::builder()
+                .status(200)
+                .body(Bytes::from(mock_response))
+                .unwrap(),
+        );
+
+        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client.clone(),
+        );
+
+        let audio_config = AudioConfig {
+            format: AudioFormat::mp3,
+            channels: Some(1),
+        };
+
+        let transcription_config = TranscriptionConfig {
+            language: None, // means identify language
+            model: Some("telephony-model".to_string()),
+            enable_speaker_diarization: false,
+            vocabulary: vec!["A".to_string(), "B".to_string()],
+        };
+
+        let _result = block_on(|_| async {
+            client
+                .start_transcription_job(
+                    "test-job-identify".to_string(),
+                    "s3://bucket/unknown-language.mp3".to_string(),
+                    audio_config,
+                    Some(transcription_config),
+                    Some("some-vocab".to_string()), // This should be ignored
+                )
+                .await
+        });
+
+        let request = mock_client.last_captured_request().unwrap();
+        let actual_request: StartTranscriptionJobRequest =
+            serde_json::from_slice(request.body()).unwrap();
+
+        let expected_request = StartTranscriptionJobRequest {
+            content_redaction: None,
+            identify_language: Some(true), // Should be true
+            identify_multiple_languages: None,
+            job_execution_settings: None,
+            kms_encryption_context: None,
+            language_code: None, // Should be None
+            language_id_settings: None,
+            language_options: None,
+            media: Media {
+                media_file_uri: "s3://bucket/unknown-language.mp3".to_string(),
+                redacted_media_file_uri: None,
+            },
+            media_format: Some("mp3".to_string()),
+            media_sample_rate_hertz: None,
+            model_settings: None, // Should be None for identify_language
+            output_bucket_name: None,
+            output_encryption_kms_key_id: None,
+            output_key: None,
+            settings: None, // Vocabulary should be ignored, so settings should be None
+            subtitles: None,
+            tags: None,
+            toxicity_detection: None,
+            transcription_job_name: "test-job-identify".to_string(),
+        };
+
+        assert_eq!(
+            actual_request, expected_request,
+            "Request with identify_language should ignore vocabulary and model settings"
+        );
+    }
+
+    #[test]
+    fn test_wait_for_vocabulary_ready_success() {
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-east-1";
+
+        let mock_client = Arc::new(MockHttpClient::new());
+
+        // First call - vocabulary is still PENDING
+        let pending_response = r#"{
+               "VocabularyName": "test-vocab",
+               "LanguageCode": "en-US",
+               "VocabularyState": "PENDING",
+               "LastModifiedTime": 1234567890.0
+           }"#;
+
+        // Second call - vocabulary is READY
+        let ready_response = r#"{
+               "VocabularyName": "test-vocab",
+               "LanguageCode": "en-US",
+               "VocabularyState": "READY",
+               "LastModifiedTime": 1234567891.0,
+               "DownloadUri": "s3://bucket/vocab.txt"
+           }"#;
+
+        mock_client.expect_response(
+            Response::builder()
+                .status(200)
+                .body(Bytes::from(pending_response))
+                .unwrap(),
+        );
+
+        mock_client.expect_response(
+            Response::builder()
+                .status(200)
+                .body(Bytes::from(ready_response))
+                .unwrap(),
+        );
+
+        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client.clone(),
+        );
+
+        // Mock runtime that tracks sleep calls
+        struct MockRuntime {
+            sleep_calls: std::cell::RefCell<Vec<Duration>>,
+        }
+
+        impl MockRuntime {
+            fn new() -> Self {
+                Self {
+                    sleep_calls: std::cell::RefCell::new(Vec::new()),
+                }
+            }
+
+            fn get_sleep_calls(&self) -> Vec<Duration> {
+                self.sleep_calls.borrow().clone()
+            }
+        }
+
+        impl golem_stt::runtime::AsyncRuntime for MockRuntime {
+            async fn sleep(&self, duration: Duration) {
+                self.sleep_calls.borrow_mut().push(duration);
+            }
+        }
+
+        let mock_runtime = MockRuntime::new();
+
+        let result = block_on(|_| async {
+            client
+                .wait_for_vocabulary_ready(&mock_runtime, "test-vocab", Duration::from_secs(300))
+                .await
+        });
+
+        assert!(result.is_ok(), "wait_for_vocabulary_ready should succeed");
+
+        assert_eq!(mock_client.captured_request_count(), 2);
+
+        let sleep_calls = mock_runtime.get_sleep_calls();
+        assert!(
+            !sleep_calls.is_empty(),
+            "Should have called sleep at least once"
+        );
+        assert_eq!(
+            sleep_calls[0],
+            Duration::from_millis(500),
+            "First sleep should be 500ms"
+        );
+
+        let captured_requests = mock_client.get_captured_requests();
+        for request in captured_requests.iter() {
+            assert_eq!(request.method(), "POST");
+            assert_eq!(
+                request.headers().get("x-amz-target").unwrap(),
+                "com.amazonaws.transcribe.Transcribe.GetVocabulary"
+            );
+
+            assert!(request.headers().contains_key("x-amz-date"));
+            assert!(request.headers().contains_key("x-amz-content-sha256"));
+            assert!(request.headers().contains_key("authorization"));
+            assert!(request.headers().contains_key("host"));
+
+            let auth_header = request
+                .headers()
+                .get("authorization")
+                .unwrap()
+                .to_str()
+                .unwrap();
+            assert!(auth_header.starts_with("AWS4-HMAC-SHA256"));
+            assert!(auth_header.contains("Credential="));
+            assert!(auth_header.contains("SignedHeaders="));
+            assert!(auth_header.contains("Signature="));
+
+            let request_body: GetVocabularyRequest =
+                serde_json::from_slice(request.body()).unwrap();
+            assert_eq!(request_body.vocabulary_name, "test-vocab");
+        }
+    }
+
+    #[test]
+    fn test_wait_for_vocabulary_ready_failure() {
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-east-1";
+
+        let mock_client = Arc::new(MockHttpClient::new());
+
+        // Vocabulary creation failed
+        let failed_response = r#"{
+                "VocabularyName": "test-vocab",
+                "LanguageCode": "en-US",
+                "VocabularyState": "FAILED",
+                "LastModifiedTime": 1234567890.0,
+                "FailureReason": "Invalid vocabulary format"
+            }"#;
+
+        mock_client.expect_response(
+            Response::builder()
+                .status(200)
+                .body(Bytes::from(failed_response))
+                .unwrap(),
+        );
+
+        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client.clone(),
+        );
+
+        struct MockRuntime;
+        impl golem_stt::runtime::AsyncRuntime for MockRuntime {
+            async fn sleep(&self, _duration: Duration) {}
+        }
+        let mock_runtime = MockRuntime;
+
+        let result = block_on(|_| async {
+            client
+                .wait_for_vocabulary_ready(&mock_runtime, "test-vocab", Duration::from_secs(300))
+                .await
+        });
+
+        // Should fail with the specific error
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        match error {
+            golem_stt::error::Error::APIBadRequest {
+                request_id,
+                provider_error,
+            } => {
+                assert_eq!(request_id, "test-vocab");
+                assert!(provider_error.contains("Invalid vocabulary format"));
+            }
+            _ => panic!("Expected APIBadRequest error"),
+        }
+    }
+
+    #[test]
+    fn test_wait_for_vocabulary_ready_timeout() {
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-east-1";
+
+        let mock_client = Arc::new(MockHttpClient::new());
+
+        // Always return PENDING to simulate timeout
+        let pending_response = r#"{
+                "VocabularyName": "test-vocab",
+                "LanguageCode": "en-US",
+                "VocabularyState": "PENDING",
+                "LastModifiedTime": 1234567890.0
+            }"#;
+
+        // Add multiple responses to allow polling before timeout
+        for _ in 0..100 {
+            mock_client.expect_response(
+                Response::builder()
+                    .status(200)
+                    .body(Bytes::from(pending_response))
+                    .unwrap(),
+            );
+        }
+
+        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client.clone(),
+        );
+
+        struct MockRuntime {
+            elapsed_time: std::cell::RefCell<Duration>,
+        }
+
+        impl MockRuntime {
+            fn new() -> Self {
+                Self {
+                    elapsed_time: std::cell::RefCell::new(Duration::from_secs(0)),
+                }
+            }
+        }
+
+        impl golem_stt::runtime::AsyncRuntime for MockRuntime {
+            async fn sleep(&self, duration: Duration) {
+                // Simulate time passing
+                let mut elapsed = self.elapsed_time.borrow_mut();
+                *elapsed += duration;
+            }
+        }
+
+        let mock_runtime = MockRuntime::new();
+
+        let result = block_on(|_| async {
+            client
+                .wait_for_vocabulary_ready(
+                    &mock_runtime,
+                    "test-vocab",
+                    Duration::from_millis(5), // Very short timeout
+                )
+                .await
+        });
+
+        assert!(
+            mock_runtime.elapsed_time.borrow().as_millis() > 0,
+            "Elapsed time should be greater than zero"
+        );
+
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        match error {
+            golem_stt::error::Error::APIBadRequest {
+                request_id,
+                provider_error,
+            } => {
+                assert_eq!(request_id, "test-vocab");
+                assert!(provider_error.contains("timed out"));
+            }
+            _ => panic!("Expected APIBadRequest timeout error"),
+        }
+    }
+
+    #[test]
+    fn test_wait_for_transcription_job_completion_success() {
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-east-1";
+
+        let mock_client = Arc::new(MockHttpClient::new());
+
+        // First call - job is IN_PROGRESS
+        let in_progress_response = r#"{
+                "TranscriptionJob": {
+                    "TranscriptionJobName": "test-job",
+                    "TranscriptionJobStatus": "IN_PROGRESS",
+                    "LanguageCode": "en-US",
+                    "Media": {
+                        "MediaFileUri": "s3://bucket/audio.wav"
+                    },
+                    "MediaFormat": "wav",
+                    "CreationTime": 1234567890.0,
+                    "StartTime": 1234567891.0
+                }
+            }"#;
+
+        // Second call - job is COMPLETED
+        let completed_response = r#"{
+                "TranscriptionJob": {
+                    "TranscriptionJobName": "test-job",
+                    "TranscriptionJobStatus": "COMPLETED",
+                    "LanguageCode": "en-US",
+                    "Media": {
+                        "MediaFileUri": "s3://bucket/audio.wav"
+                    },
+                    "MediaFormat": "wav",
+                    "CreationTime": 1234567890.0,
+                    "CompletionTime": 1234567920.0,
+                    "StartTime": 1234567891.0,
+                    "Transcript": {
+                        "TranscriptFileUri": "s3://output/transcript.json"
+                    }
+                }
+            }"#;
+
+        mock_client.expect_response(
+            Response::builder()
+                .status(200)
+                .body(Bytes::from(in_progress_response))
+                .unwrap(),
+        );
+
+        mock_client.expect_response(
+            Response::builder()
+                .status(200)
+                .body(Bytes::from(completed_response))
+                .unwrap(),
+        );
+
+        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client.clone(),
+        );
+
+        struct MockRuntime {
+            sleep_calls: std::cell::RefCell<Vec<Duration>>,
+        }
+
+        impl MockRuntime {
+            fn new() -> Self {
+                Self {
+                    sleep_calls: std::cell::RefCell::new(Vec::new()),
+                }
+            }
+
+            fn get_sleep_calls(&self) -> Vec<Duration> {
+                self.sleep_calls.borrow().clone()
+            }
+        }
+
+        impl golem_stt::runtime::AsyncRuntime for MockRuntime {
+            async fn sleep(&self, duration: Duration) {
+                self.sleep_calls.borrow_mut().push(duration);
+            }
+        }
+
+        let mock_runtime = MockRuntime::new();
+
+        let result = block_on(|_| async {
+            client
+                .wait_for_transcription_job_completion(
+                    &mock_runtime,
+                    "test-job",
+                    Duration::from_secs(3600),
+                )
+                .await
+        });
+
+        // Should succeed and return the completed job
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert_eq!(
+            response.transcription_job.transcription_job_status,
+            "COMPLETED"
+        );
+        assert!(response.transcription_job.transcript.is_some());
+        assert!(response
+            .transcription_job
+            .transcript
             .unwrap()
-            .to_str()
-            .unwrap();
-        assert!(auth_header.starts_with("AWS4-HMAC-SHA256"));
-        assert!(auth_header.contains("Credential="));
-        assert!(auth_header.contains("SignedHeaders="));
-        assert!(auth_header.contains("Signature="));
+            .transcript_file_uri
+            .is_some());
+
+        // Should have made exactly 2 API calls
+        assert_eq!(mock_client.captured_request_count(), 2);
+
+        // Should have called sleep at least once
+        let sleep_calls = mock_runtime.get_sleep_calls();
+        assert!(!sleep_calls.is_empty());
+        assert_eq!(
+            sleep_calls[0],
+            Duration::from_millis(2000),
+            "First sleep should be 2000ms"
+        );
+
+        // Verify the requests were get_transcription_job calls
+        let captured_requests = mock_client.get_captured_requests();
+        for request in captured_requests.iter() {
+            assert_eq!(request.method(), "POST");
+            assert_eq!(
+                request.headers().get("x-amz-target").unwrap(),
+                "com.amazonaws.transcribe.Transcribe.GetTranscriptionJob"
+            );
+
+            assert!(request.headers().contains_key("x-amz-date"));
+            assert!(request.headers().contains_key("x-amz-content-sha256"));
+            assert!(request.headers().contains_key("authorization"));
+            assert!(request.headers().contains_key("host"));
+
+            let auth_header = request
+                .headers()
+                .get("authorization")
+                .unwrap()
+                .to_str()
+                .unwrap();
+            assert!(auth_header.starts_with("AWS4-HMAC-SHA256"));
+            assert!(auth_header.contains("Credential="));
+            assert!(auth_header.contains("SignedHeaders="));
+            assert!(auth_header.contains("Signature="));
+
+            let request_body: GetTranscriptionJobRequest =
+                serde_json::from_slice(request.body()).unwrap();
+            assert_eq!(request_body.transcription_job_name, "test-job");
+        }
+    }
+
+    #[test]
+    fn test_wait_for_transcription_job_completion_failure() {
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-east-1";
+
+        let mock_client = Arc::new(MockHttpClient::new());
+
+        // Job failed
+        let failed_response = r#"{
+                "TranscriptionJob": {
+                    "TranscriptionJobName": "test-job",
+                    "TranscriptionJobStatus": "FAILED",
+                    "LanguageCode": "en-US",
+                    "Media": {
+                        "MediaFileUri": "s3://bucket/audio.wav"
+                    },
+                    "MediaFormat": "wav",
+                    "CreationTime": 1234567890.0,
+                    "CompletionTime": 1234567920.0,
+                    "StartTime": 1234567891.0,
+                    "FailureReason": "Unsupported audio format"
+                }
+            }"#;
+
+        mock_client.expect_response(
+            Response::builder()
+                .status(200)
+                .body(Bytes::from(failed_response))
+                .unwrap(),
+        );
+
+        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client.clone(),
+        );
+
+        struct MockRuntime;
+        impl golem_stt::runtime::AsyncRuntime for MockRuntime {
+            async fn sleep(&self, _duration: Duration) {}
+        }
+        let mock_runtime = MockRuntime;
+
+        let result = block_on(|_| async {
+            client
+                .wait_for_transcription_job_completion(
+                    &mock_runtime,
+                    "test-job",
+                    Duration::from_secs(3600),
+                )
+                .await
+        });
+
+        // Should fail with the specific error
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        match error {
+            golem_stt::error::Error::APIBadRequest {
+                request_id,
+                provider_error,
+            } => {
+                assert_eq!(request_id, "test-job");
+                assert!(provider_error.contains("Unsupported audio format"));
+            }
+            _ => panic!("Expected APIBadRequest error"),
+        }
+    }
+
+    #[test]
+    fn test_wait_for_transcription_job_completion_timeout() {
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-east-1";
+
+        let mock_client = Arc::new(MockHttpClient::new());
+
+        // Always return IN_PROGRESS to simulate timeout
+        let in_progress_response = r#"{
+            "TranscriptionJob": {
+                "TranscriptionJobName": "test-job",
+                "TranscriptionJobStatus": "IN_PROGRESS",
+                "LanguageCode": "en-US",
+                "Media": {
+                    "MediaFileUri": "s3://bucket/audio.wav"
+                },
+                "MediaFormat": "wav",
+                "CreationTime": 1234567890.0,
+                "StartTime": 1234567891.0
+            }
+        }"#;
+
+        // Add multiple responses to allow polling before timeout
+        for _ in 0..100 {
+            mock_client.expect_response(
+                Response::builder()
+                    .status(200)
+                    .body(Bytes::from(in_progress_response))
+                    .unwrap(),
+            );
+        }
+
+        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client.clone(),
+        );
+
+        struct MockRuntime {
+            elapsed_time: std::cell::RefCell<Duration>,
+        }
+
+        impl MockRuntime {
+            fn new() -> Self {
+                Self {
+                    elapsed_time: std::cell::RefCell::new(Duration::from_secs(0)),
+                }
+            }
+        }
+
+        impl golem_stt::runtime::AsyncRuntime for MockRuntime {
+            async fn sleep(&self, duration: Duration) {
+                // Simulate time passing
+                let mut elapsed = self.elapsed_time.borrow_mut();
+                *elapsed += duration;
+            }
+        }
+
+        let mock_runtime = MockRuntime::new();
+
+        let result = block_on(|_| async {
+            client
+                .wait_for_transcription_job_completion(
+                    &mock_runtime,
+                    "test-job",
+                    Duration::from_millis(5), // Very short timeout
+                )
+                .await
+        });
+
+        assert!(
+            mock_runtime.elapsed_time.borrow().as_millis() > 0,
+            "Elapsed time should be greater than zero"
+        );
+
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        match error {
+            golem_stt::error::Error::APIBadRequest {
+                request_id,
+                provider_error,
+            } => {
+                assert_eq!(request_id, "test-job");
+                assert!(provider_error.contains("timed out"));
+            }
+            _ => panic!("Expected APIBadRequest timeout error"),
+        }
     }
 }
