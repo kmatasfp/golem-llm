@@ -842,7 +842,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
 
     pub async fn get_vocabulary(
         &self,
-        vocabulary_name: String,
+        vocabulary_name: &str,
     ) -> Result<GetVocabularyResponse, golem_stt::error::Error> {
         let timestamp = Utc::now();
         let uri = format!(
@@ -851,12 +851,12 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         );
 
         let request_body = GetVocabularyRequest {
-            vocabulary_name: vocabulary_name.clone(),
+            vocabulary_name: vocabulary_name.to_string(),
         };
 
         let json_body = serde_json::to_string(&request_body).map_err(|e| {
             (
-                vocabulary_name.clone(),
+                vocabulary_name.to_string(),
                 client::Error::Generic(format!("Failed to serialize request: {}", e)),
             )
         })?;
@@ -870,14 +870,14 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
                 "com.amazonaws.transcribe.Transcribe.GetVocabulary",
             )
             .body(Bytes::from(json_body))
-            .map_err(|e| (vocabulary_name.clone(), client::Error::HttpError(e)))?;
+            .map_err(|e| (vocabulary_name.to_string(), client::Error::HttpError(e)))?;
 
         let signed_request = self
             .signer
             .sign_request(request, timestamp)
             .map_err(|err| {
                 (
-                    vocabulary_name.clone(),
+                    vocabulary_name.to_string(),
                     client::Error::Generic(format!("Failed to sign request: {}", err)),
                 )
             })?;
@@ -886,13 +886,13 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
             .http_client
             .execute(signed_request)
             .await
-            .map_err(|err| (vocabulary_name.clone(), err))?;
+            .map_err(|err| (vocabulary_name.to_string(), err))?;
 
         if response.status().is_success() {
             let vocabulary_response: GetVocabularyResponse =
                 serde_json::from_slice(response.body()).map_err(|e| {
                     (
-                        vocabulary_name.clone(),
+                        vocabulary_name.to_string(),
                         client::Error::Generic(format!("Failed to deserialize response: {}", e)),
                     )
                 })?;
@@ -903,7 +903,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
                 .unwrap_or_else(|_| "Unknown error".to_string());
 
             let status = response.status();
-            let request_id = vocabulary_name.clone();
+            let request_id = vocabulary_name.to_string();
 
             match status.as_u16() {
                 400 => Err(golem_stt::error::Error::APIBadRequest {
@@ -959,7 +959,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
 
             runtime.sleep(retry_delay).await;
 
-            let res = self.get_vocabulary(request_id.to_string()).await?;
+            let res = self.get_vocabulary(request_id).await?;
 
             match res.vocabulary_state.as_str() {
                 "READY" => return Ok(()),

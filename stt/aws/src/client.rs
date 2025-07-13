@@ -113,6 +113,7 @@ pub struct TranscribeApi<HC: HttpClient, RT: AsyncRuntime> {
 #[allow(unused)]
 impl<HC: HttpClient, RT: AsyncRuntime> TranscribeApi<HC, RT> {
     pub fn new(
+        bucket_name: String,
         access_key: String,
         secret_key: String,
         region: String,
@@ -135,7 +136,7 @@ impl<HC: HttpClient, RT: AsyncRuntime> TranscribeApi<HC, RT> {
         );
 
         Self {
-            bucket_name: format!("deepgram-transcribe-{}", region),
+            bucket_name,
             s3_client,
             transcribe_client,
             runtime,
@@ -148,8 +149,15 @@ impl<HC: HttpClient, RT: AsyncRuntime> TranscribeApi<HC, RT> {
 }
 
 impl TranscribeApi<ReqwestHttpClient, WasiAyncRuntime> {
-    pub fn live(access_key: String, secret_key: String, region: String, reactor: Reactor) -> Self {
+    pub fn live(
+        bucket_name: String,
+        access_key: String,
+        secret_key: String,
+        region: String,
+        reactor: Reactor,
+    ) -> Self {
         Self::new(
+            bucket_name,
             access_key,
             secret_key,
             region,
@@ -342,6 +350,8 @@ pub struct TranscriptionResponse {
     pub language: String,
     pub aws_transcription: TranscribeOutput,
 }
+
+// TODO MOVE TO AWS
 
 // https://docs.aws.amazon.com/transcribe/latest/dg/how-input.html#how-output
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
