@@ -36,6 +36,18 @@ reqwest = { git = "https://github.com/golemcloud/reqwest", branch = "update-july
     "multipart",
     "async",
 ] }
+# AWS Dependencies
+wasi = "0.12.1+wasi-0.2.0"
+aws-config = { version = "1.8.1", default-features = false, features = [
+    "behavior-version-latest",
+] }
+aws-types = { version = "1.3.7", default-features = false }
+aws-smithy-wasm = { version = "0.1.4", default-features = false }
+aws-smithy-types = { version = "1.3.1" }
+aws-sdk-s3 = { version = "1.96.0", default-features = false, features = [
+    "behavior-version-latest",
+] }
+aws-smithy-runtime-api = "=1.8.3"
 
 [dev-dependencies]
 aws-sigv4 = "1.2.6"

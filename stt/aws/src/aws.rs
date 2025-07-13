@@ -122,23 +122,30 @@ impl AwsSignatureV4 {
             HeaderValue::from_str(&content_sha256)?,
         );
 
-        if !parts.headers.contains_key("host") {
+        let mut headers_for_signing = parts.headers.clone();
+
+        if !headers_for_signing.contains_key("host") {
             if let Some(host) = parts.uri.host() {
                 let host_header = if let Some(port) = parts.uri.port_u16() {
-                    format!("{}:{}", host, port)
+                    if parts.uri.scheme_str() == Some("https") && port == 443 {
+                        host.to_string()
+                    } else if parts.uri.scheme_str() == Some("http") && port == 80 {
+                        host.to_string()
+                    } else {
+                        format!("{}:{}", host, port)
+                    }
                 } else {
                     host.to_string()
                 };
-                parts
-                    .headers
-                    .insert("host", HeaderValue::from_str(&host_header)?);
+
+                headers_for_signing.insert("host", HeaderValue::from_str(&host_header)?);
             }
         }
 
         let canonical_request = self.create_canonical_request(
             &parts.method,
             &parts.uri,
-            &parts.headers,
+            &headers_for_signing,
             &content_sha256,
         );
 
@@ -146,7 +153,7 @@ impl AwsSignatureV4 {
 
         let signature = self.calculate_signature(&string_to_sign, &date_stamp)?;
 
-        let signed_headers = self.get_signed_headers(&parts.headers);
+        let signed_headers = self.get_signed_headers(&headers_for_signing);
         let credential = format!(
             "{}/{}/{}/{}/aws4_request",
             self.access_key, date_stamp, self.region, self.service

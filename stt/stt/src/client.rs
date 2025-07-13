@@ -30,6 +30,7 @@ pub trait HttpClient {
     async fn execute(&self, request: Request<Bytes>) -> Result<Response<Bytes>, Error>;
 }
 
+#[derive(Debug, Clone)]
 pub struct ReqwestHttpClient {
     client: Client,
 }
