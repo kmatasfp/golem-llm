@@ -119,6 +119,16 @@ const AWS_TRANSCRIBE_SUPPORTED_LANGUAGES: [Language; 104] = [
     Language::new("zu-ZA", "Zulu", "isiZulu"),
 ];
 
+pub fn is_supported_language(language_code: &str) -> bool {
+    AWS_TRANSCRIBE_SUPPORTED_LANGUAGES
+        .iter()
+        .any(|lang| lang.code == language_code)
+}
+
+pub fn get_supported_languages() -> &'static [Language] {
+    &AWS_TRANSCRIBE_SUPPORTED_LANGUAGES
+}
+
 #[allow(non_camel_case_types)]
 #[allow(unused)]
 #[derive(Debug, Clone)]
@@ -226,16 +236,6 @@ impl<S3: S3Service, TC: TranscribeService, RT: AsyncRuntime> TranscribeApi<S3, T
             runtime,
         }
     }
-
-    pub fn is_supported_language(language_code: &str) -> bool {
-        AWS_TRANSCRIBE_SUPPORTED_LANGUAGES
-            .iter()
-            .any(|lang| lang.code == language_code)
-    }
-
-    pub fn get_supported_languages(&self) -> &[Language] {
-        &AWS_TRANSCRIBE_SUPPORTED_LANGUAGES
-    }
 }
 
 impl
@@ -289,6 +289,10 @@ impl<S3: S3Service, TC: TranscribeService, RT: AsyncRuntime>
             .transcription_config
             .as_ref()
             .and_then(|config| config.language.clone());
+        let model = request
+            .transcription_config
+            .as_ref()
+            .and_then(|config| config.model.clone());
 
         validate_request_id(&request_id).map_err(|validation_error| Error::APIBadRequest {
             request_id: request_id.to_string(),
@@ -414,6 +418,7 @@ impl<S3: S3Service, TC: TranscribeService, RT: AsyncRuntime>
                 Ok(TranscriptionResponse {
                     audio_size_bytes,
                     language: req_language.unwrap_or_default(),
+                    model,
                     aws_transcription: transcribe_output,
                 })
             } else {
@@ -454,6 +459,7 @@ impl std::fmt::Debug for TranscriptionRequest {
 pub struct TranscriptionResponse {
     pub audio_size_bytes: usize,
     pub language: String,
+    pub model: Option<String>,
     pub aws_transcription: TranscribeOutput,
 }
 
@@ -1152,7 +1158,9 @@ mod tests {
                         transcript: "Hello world".to_string(),
                     }],
                     speaker_labels: None,
+                    channel_labels: None,
                     items: vec![],
+                    audio_segments: vec![],
                 },
                 status: "COMPLETED".to_string(),
             }));
@@ -1226,7 +1234,9 @@ mod tests {
                         transcript: "Hello world".to_string(),
                     }],
                     speaker_labels: None,
+                    channel_labels: None,
                     items: vec![],
+                    audio_segments: vec![],
                 },
                 status: "COMPLETED".to_string(),
             }));
@@ -1299,7 +1309,9 @@ mod tests {
                         transcript: "Hello world".to_string(),
                     }],
                     speaker_labels: None,
+                    channel_labels: None,
                     items: vec![],
+                    audio_segments: vec![],
                 },
                 status: "COMPLETED".to_string(),
             }));
@@ -1381,7 +1393,9 @@ mod tests {
                         transcript: "Hello world".to_string(),
                     }],
                     speaker_labels: None,
+                    channel_labels: None,
                     items: vec![],
+                    audio_segments: vec![],
                 },
                 status: "COMPLETED".to_string(),
             }));
@@ -1464,7 +1478,9 @@ mod tests {
                         transcript: "Hello world".to_string(),
                     }],
                     speaker_labels: None,
+                    channel_labels: None,
                     items: vec![],
+                    audio_segments: vec![],
                 },
                 status: "COMPLETED".to_string(),
             }));

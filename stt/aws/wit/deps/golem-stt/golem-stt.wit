@@ -128,23 +128,29 @@ interface transcription {
   }
 
   record transcription-request {
+    request-id: string,
     audio: list<u8>,
     config: audio-config,
     options: option<transcribe-options>
+  }
+
+  record failed-transcription {
+    request-id: string,
+    error: stt-error,
+  }
+
+  record multi-transcription-result {
+    successes: list<transcription-result>,
+    failures: list<failed-transcription>
   }
 
   transcribe: func(
     request: transcription-request
   ) -> result<transcription-result, stt-error>;
 
-  queue-transcription: func(
+  transcribe-many: func(
     requests: list<transcription-request>
-  ) -> result<transcription-queue, stt-error>;
-
-  resource transcription-queue {
-    get-next: func() -> option<result<transcription-result, stt-error>>;
-    blocking-get-next: func() -> list<result<transcription-result, stt-error>>;
-  }
+  ) -> result<multi-transcription-result, stt-error>;
 }
 
 world stt-library {

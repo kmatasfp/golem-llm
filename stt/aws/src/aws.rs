@@ -741,12 +741,15 @@ pub struct TranscribeOutput {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct TranscribeResults {
     pub transcripts: Vec<TranscriptText>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub speaker_labels: Option<SpeakerLabels>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_labels: Option<ChannelLabels>,
     pub items: Vec<TranscribeItem>,
+    pub audio_segments: Vec<AudioSegment>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -756,7 +759,7 @@ pub struct TranscriptText {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct SpeakerLabels {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channel_label: Option<String>,
@@ -765,7 +768,7 @@ pub struct SpeakerLabels {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct SpeakerSegment {
     pub start_time: String,
     pub speaker_label: String,
@@ -775,7 +778,7 @@ pub struct SpeakerSegment {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct SpeakerItem {
     pub start_time: String,
     pub speaker_label: String,
@@ -783,7 +786,7 @@ pub struct SpeakerItem {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct TranscribeItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<i32>,
@@ -793,6 +796,8 @@ pub struct TranscribeItem {
     pub end_time: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub speaker_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_label: Option<String>,
     pub alternatives: Vec<TranscribeAlternative>,
     #[serde(rename = "type")]
     pub item_type: String, // "pronunciation" or "punctuation"
@@ -801,20 +806,38 @@ pub struct TranscribeItem {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct TranscribeAlternative {
     pub confidence: String, // Note: AWS returns this as a string, not a number
     pub content: String,
 }
 
-// Helper struct for working with word metadata
-#[derive(Debug, Clone)]
-pub struct WordMetadata {
-    pub word: String,
-    pub confidence: f64,
-    pub start_time: Option<f64>,
-    pub end_time: Option<f64>,
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct AudioSegment {
+    pub id: i32,
+    pub transcript: String,
+    pub start_time: String,
+    pub end_time: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub speaker_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_label: Option<String>,
+    pub items: Vec<i32>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct ChannelLabels {
+    pub channels: Vec<Channel>,
+    pub number_of_channels: i32,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct Channel {
+    pub channel_label: String,
+    pub items: Vec<TranscribeItem>,
 }
 
 pub trait TranscribeService {
@@ -3549,5 +3572,1299 @@ mod tests {
             }
             _ => panic!("Expected APIBadRequest timeout error"),
         }
+    }
+
+    #[test]
+    fn test_download_transcript_json_with_diarization() {
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-east-1";
+
+        let json_response = r#"{
+            "jobName": "my-first-transcription-job",
+            "accountId": "111122223333",
+            "results": {
+                "transcripts": [
+                    {
+                        "transcript": "I've been on hold for an hour. Sorry about that."
+                    }
+                ],
+                "speaker_labels": {
+                    "channel_label": "ch_0",
+                    "speakers": 2,
+                    "segments": [
+                        {
+                            "start_time": "4.87",
+                            "speaker_label": "spk_0",
+                            "end_time": "6.88",
+                            "items": [
+                                {
+                                    "start_time": "4.87",
+                                    "speaker_label": "spk_0",
+                                    "end_time": "5.02"
+                                },
+                                {
+                                    "start_time": "5.02",
+                                    "speaker_label": "spk_0",
+                                    "end_time": "5.17"
+                                },
+                                {
+                                    "start_time": "5.17",
+                                    "speaker_label": "spk_0",
+                                    "end_time": "5.29"
+                                },
+                                {
+                                    "start_time": "5.29",
+                                    "speaker_label": "spk_0",
+                                    "end_time": "5.64"
+                                },
+                                {
+                                    "start_time": "5.64",
+                                    "speaker_label": "spk_0",
+                                    "end_time": "5.84"
+                                },
+                                {
+                                    "start_time": "6.11",
+                                    "speaker_label": "spk_0",
+                                    "end_time": "6.26"
+                                },
+                                {
+                                    "start_time": "6.26",
+                                    "speaker_label": "spk_0",
+                                    "end_time": "6.88"
+                                }
+                            ]
+                        },
+                        {
+                            "start_time": "8.49",
+                            "speaker_label": "spk_1",
+                            "end_time": "9.24",
+                            "items": [
+                                {
+                                    "start_time": "8.49",
+                                    "speaker_label": "spk_1",
+                                    "end_time": "8.88"
+                                },
+                                {
+                                    "start_time": "8.88",
+                                    "speaker_label": "spk_1",
+                                    "end_time": "9.05"
+                                },
+                                {
+                                    "start_time": "9.05",
+                                    "speaker_label": "spk_1",
+                                    "end_time": "9.24"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                "items": [
+                    {
+                        "id": 0,
+                        "start_time": "4.87",
+                        "speaker_label": "spk_0",
+                        "end_time": "5.02",
+                        "alternatives": [
+                            {
+                                "confidence": "1.0",
+                                "content": "I've"
+                            }
+                        ],
+                        "type": "pronunciation"
+                    },
+                    {
+                        "id": 1,
+                        "start_time": "5.02",
+                        "speaker_label": "spk_0",
+                        "end_time": "5.17",
+                        "alternatives": [
+                            {
+                                "confidence": "1.0",
+                                "content": "been"
+                            }
+                        ],
+                        "type": "pronunciation"
+                    },
+                    {
+                        "id": 2,
+                        "start_time": "5.17",
+                        "speaker_label": "spk_0",
+                        "end_time": "5.29",
+                        "alternatives": [
+                            {
+                                "confidence": "1.0",
+                                "content": "on"
+                            }
+                        ],
+                        "type": "pronunciation"
+                    },
+                    {
+                        "id": 3,
+                        "start_time": "5.29",
+                        "speaker_label": "spk_0",
+                        "end_time": "5.64",
+                        "alternatives": [
+                            {
+                                "confidence": "1.0",
+                                "content": "hold"
+                            }
+                        ],
+                        "type": "pronunciation"
+                    },
+                    {
+                        "id": 4,
+                        "start_time": "5.64",
+                        "speaker_label": "spk_0",
+                        "end_time": "5.84",
+                        "alternatives": [
+                            {
+                                "confidence": "1.0",
+                                "content": "for"
+                            }
+                        ],
+                        "type": "pronunciation"
+                    },
+                    {
+                        "id": 5,
+                        "start_time": "6.11",
+                        "speaker_label": "spk_0",
+                        "end_time": "6.26",
+                        "alternatives": [
+                            {
+                                "confidence": "1.0",
+                                "content": "an"
+                            }
+                        ],
+                        "type": "pronunciation"
+                    },
+                    {
+                        "id": 6,
+                        "start_time": "6.26",
+                        "speaker_label": "spk_0",
+                        "end_time": "6.88",
+                        "alternatives": [
+                            {
+                                "confidence": "1.0",
+                                "content": "hour"
+                            }
+                        ],
+                        "type": "pronunciation"
+                    },
+                    {
+                        "id": 7,
+                        "speaker_label": "spk_0",
+                        "alternatives": [
+                            {
+                                "confidence": "0.0",
+                                "content": "."
+                            }
+                        ],
+                        "type": "punctuation"
+                    },
+                    {
+                        "id": 8,
+                        "start_time": "8.49",
+                        "speaker_label": "spk_1",
+                        "end_time": "8.88",
+                        "alternatives": [
+                            {
+                                "confidence": "1.0",
+                                "content": "Sorry"
+                            }
+                        ],
+                        "type": "pronunciation"
+                    },
+                    {
+                        "id": 9,
+                        "start_time": "8.88",
+                        "speaker_label": "spk_1",
+                        "end_time": "9.05",
+                        "alternatives": [
+                            {
+                                "confidence": "0.902",
+                                "content": "about"
+                            }
+                        ],
+                        "type": "pronunciation"
+                    },
+                    {
+                        "id": 10,
+                        "start_time": "9.05",
+                        "speaker_label": "spk_1",
+                        "end_time": "9.24",
+                        "alternatives": [
+                            {
+                                "confidence": "1.0",
+                                "content": "that"
+                            }
+                        ],
+                        "type": "pronunciation"
+                    },
+                    {
+                        "id": 11,
+                        "speaker_label": "spk_1",
+                        "alternatives": [
+                            {
+                                "confidence": "0.0",
+                                "content": "."
+                            }
+                        ],
+                        "type": "punctuation"
+                    }
+                ],
+                "audio_segments": [
+                    {
+                        "id": 0,
+                        "transcript": "I've been on hold for an hour.",
+                        "start_time": "4.87",
+                        "end_time": "6.88",
+                        "speaker_label": "spk_0",
+                        "items": [0, 1, 2, 3, 4, 5, 6, 7]
+                    },
+                    {
+                        "id": 1,
+                        "transcript": "Sorry about that.",
+                        "start_time": "8.49",
+                        "end_time": "9.24",
+                        "speaker_label": "spk_1",
+                        "items": [8, 9, 10, 11]
+                    }
+                ]
+            },
+            "status": "COMPLETED"
+        }"#;
+
+        let expected = TranscribeOutput {
+            job_name: "my-first-transcription-job".to_string(),
+            account_id: "111122223333".to_string(),
+            results: TranscribeResults {
+                transcripts: vec![TranscriptText {
+                    transcript: "I've been on hold for an hour. Sorry about that.".to_string(),
+                }],
+                speaker_labels: Some(SpeakerLabels {
+                    channel_label: Some("ch_0".to_string()),
+                    speakers: 2,
+                    segments: vec![
+                        SpeakerSegment {
+                            start_time: "4.87".to_string(),
+                            speaker_label: "spk_0".to_string(),
+                            end_time: "6.88".to_string(),
+                            items: Some(vec![
+                                SpeakerItem {
+                                    start_time: "4.87".to_string(),
+                                    speaker_label: "spk_0".to_string(),
+                                    end_time: "5.02".to_string(),
+                                },
+                                SpeakerItem {
+                                    start_time: "5.02".to_string(),
+                                    speaker_label: "spk_0".to_string(),
+                                    end_time: "5.17".to_string(),
+                                },
+                                SpeakerItem {
+                                    start_time: "5.17".to_string(),
+                                    speaker_label: "spk_0".to_string(),
+                                    end_time: "5.29".to_string(),
+                                },
+                                SpeakerItem {
+                                    start_time: "5.29".to_string(),
+                                    speaker_label: "spk_0".to_string(),
+                                    end_time: "5.64".to_string(),
+                                },
+                                SpeakerItem {
+                                    start_time: "5.64".to_string(),
+                                    speaker_label: "spk_0".to_string(),
+                                    end_time: "5.84".to_string(),
+                                },
+                                SpeakerItem {
+                                    start_time: "6.11".to_string(),
+                                    speaker_label: "spk_0".to_string(),
+                                    end_time: "6.26".to_string(),
+                                },
+                                SpeakerItem {
+                                    start_time: "6.26".to_string(),
+                                    speaker_label: "spk_0".to_string(),
+                                    end_time: "6.88".to_string(),
+                                },
+                            ]),
+                        },
+                        SpeakerSegment {
+                            start_time: "8.49".to_string(),
+                            speaker_label: "spk_1".to_string(),
+                            end_time: "9.24".to_string(),
+                            items: Some(vec![
+                                SpeakerItem {
+                                    start_time: "8.49".to_string(),
+                                    speaker_label: "spk_1".to_string(),
+                                    end_time: "8.88".to_string(),
+                                },
+                                SpeakerItem {
+                                    start_time: "8.88".to_string(),
+                                    speaker_label: "spk_1".to_string(),
+                                    end_time: "9.05".to_string(),
+                                },
+                                SpeakerItem {
+                                    start_time: "9.05".to_string(),
+                                    speaker_label: "spk_1".to_string(),
+                                    end_time: "9.24".to_string(),
+                                },
+                            ]),
+                        },
+                    ],
+                }),
+                items: vec![
+                    TranscribeItem {
+                        id: Some(0),
+                        start_time: Some("4.87".to_string()),
+                        end_time: Some("5.02".to_string()),
+                        speaker_label: Some("spk_0".to_string()),
+                        channel_label: None,
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "1.0".to_string(),
+                            content: "I've".to_string(),
+                        }],
+                        item_type: "pronunciation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(1),
+                        start_time: Some("5.02".to_string()),
+                        end_time: Some("5.17".to_string()),
+                        speaker_label: Some("spk_0".to_string()),
+                        channel_label: None,
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "1.0".to_string(),
+                            content: "been".to_string(),
+                        }],
+                        item_type: "pronunciation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(2),
+                        start_time: Some("5.17".to_string()),
+                        end_time: Some("5.29".to_string()),
+                        speaker_label: Some("spk_0".to_string()),
+                        channel_label: None,
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "1.0".to_string(),
+                            content: "on".to_string(),
+                        }],
+                        item_type: "pronunciation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(3),
+                        start_time: Some("5.29".to_string()),
+                        end_time: Some("5.64".to_string()),
+                        speaker_label: Some("spk_0".to_string()),
+                        channel_label: None,
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "1.0".to_string(),
+                            content: "hold".to_string(),
+                        }],
+                        item_type: "pronunciation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(4),
+                        start_time: Some("5.64".to_string()),
+                        end_time: Some("5.84".to_string()),
+                        speaker_label: Some("spk_0".to_string()),
+                        channel_label: None,
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "1.0".to_string(),
+                            content: "for".to_string(),
+                        }],
+                        item_type: "pronunciation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(5),
+                        start_time: Some("6.11".to_string()),
+                        end_time: Some("6.26".to_string()),
+                        speaker_label: Some("spk_0".to_string()),
+                        channel_label: None,
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "1.0".to_string(),
+                            content: "an".to_string(),
+                        }],
+                        item_type: "pronunciation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(6),
+                        start_time: Some("6.26".to_string()),
+                        end_time: Some("6.88".to_string()),
+                        speaker_label: Some("spk_0".to_string()),
+                        channel_label: None,
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "1.0".to_string(),
+                            content: "hour".to_string(),
+                        }],
+                        item_type: "pronunciation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(7),
+                        start_time: None,
+                        end_time: None,
+                        speaker_label: Some("spk_0".to_string()),
+                        channel_label: None,
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "0.0".to_string(),
+                            content: ".".to_string(),
+                        }],
+                        item_type: "punctuation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(8),
+                        start_time: Some("8.49".to_string()),
+                        end_time: Some("8.88".to_string()),
+                        speaker_label: Some("spk_1".to_string()),
+                        channel_label: None,
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "1.0".to_string(),
+                            content: "Sorry".to_string(),
+                        }],
+                        item_type: "pronunciation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(9),
+                        start_time: Some("8.88".to_string()),
+                        end_time: Some("9.05".to_string()),
+                        speaker_label: Some("spk_1".to_string()),
+                        channel_label: None,
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "0.902".to_string(),
+                            content: "about".to_string(),
+                        }],
+                        item_type: "pronunciation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(10),
+                        start_time: Some("9.05".to_string()),
+                        end_time: Some("9.24".to_string()),
+                        speaker_label: Some("spk_1".to_string()),
+                        channel_label: None,
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "1.0".to_string(),
+                            content: "that".to_string(),
+                        }],
+                        item_type: "pronunciation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(11),
+                        start_time: None,
+                        end_time: None,
+                        speaker_label: Some("spk_1".to_string()),
+                        channel_label: None,
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "0.0".to_string(),
+                            content: ".".to_string(),
+                        }],
+                        item_type: "punctuation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                ],
+                audio_segments: vec![
+                    AudioSegment {
+                        id: 0,
+                        transcript: "I've been on hold for an hour.".to_string(),
+                        start_time: "4.87".to_string(),
+                        end_time: "6.88".to_string(),
+                        speaker_label: Some("spk_0".to_string()),
+                        channel_label: None,
+                        items: vec![0, 1, 2, 3, 4, 5, 6, 7],
+                    },
+                    AudioSegment {
+                        id: 1,
+                        transcript: "Sorry about that.".to_string(),
+                        start_time: "8.49".to_string(),
+                        end_time: "9.24".to_string(),
+                        speaker_label: Some("spk_1".to_string()),
+                        channel_label: None,
+                        items: vec![8, 9, 10, 11],
+                    },
+                ],
+                channel_labels: None,
+            },
+            status: "COMPLETED".to_string(),
+        };
+
+        let mock_client = MockHttpClient::new();
+        mock_client.expect_response(
+            http::Response::builder()
+                .status(200)
+                .body(bytes::Bytes::from(json_response))
+                .unwrap(),
+        );
+
+        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client,
+        );
+
+        let result = block_on(|_| async {
+            client
+                .download_transcript_json("test-job", "https://example.com/transcript.json")
+                .await
+                .expect("Failed to download transcript")
+        });
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_download_transcript_json_with_multi_channel() {
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-east-1";
+
+        let json_response = r#"{
+        "jobName": "my-first-transcription-job",
+        "accountId": "111122223333",
+        "results": {
+            "transcripts": [
+                {
+                    "transcript": "I've been on hold for an hour. Sorry about that."
+                }
+            ],
+            "channel_labels": {
+                "channels": [
+                    {
+                        "channel_label": "ch_0",
+                        "items": [
+                            {
+                                "channel_label": "ch_0",
+                                "start_time": "4.86",
+                                "end_time": "5.01",
+                                "alternatives": [
+                                    {
+                                        "confidence": "1.0",
+                                        "content": "I've"
+                                    }
+                                ],
+                                "type": "pronunciation"
+                            },
+                            {
+                                "channel_label": "ch_0",
+                                "start_time": "5.01",
+                                "end_time": "5.16",
+                                "alternatives": [
+                                    {
+                                        "confidence": "1.0",
+                                        "content": "been"
+                                    }
+                                ],
+                                "type": "pronunciation"
+                            },
+                            {
+                                "channel_label": "ch_0",
+                                "start_time": "5.16",
+                                "end_time": "5.28",
+                                "alternatives": [
+                                    {
+                                        "confidence": "1.0",
+                                        "content": "on"
+                                    }
+                                ],
+                                "type": "pronunciation"
+                            },
+                            {
+                                "channel_label": "ch_0",
+                                "start_time": "5.28",
+                                "end_time": "5.62",
+                                "alternatives": [
+                                    {
+                                        "confidence": "1.0",
+                                        "content": "hold"
+                                    }
+                                ],
+                                "type": "pronunciation"
+                            },
+                            {
+                                "channel_label": "ch_0",
+                                "start_time": "5.62",
+                                "end_time": "5.83",
+                                "alternatives": [
+                                    {
+                                        "confidence": "1.0",
+                                        "content": "for"
+                                    }
+                                ],
+                                "type": "pronunciation"
+                            },
+                            {
+                                "channel_label": "ch_0",
+                                "start_time": "6.1",
+                                "end_time": "6.25",
+                                "alternatives": [
+                                    {
+                                        "confidence": "1.0",
+                                        "content": "an"
+                                    }
+                                ],
+                                "type": "pronunciation"
+                            },
+                            {
+                                "channel_label": "ch_0",
+                                "start_time": "6.25",
+                                "end_time": "6.87",
+                                "alternatives": [
+                                    {
+                                        "confidence": "1.0",
+                                        "content": "hour"
+                                    }
+                                ],
+                                "type": "pronunciation"
+                            },
+                            {
+                                "channel_label": "ch_0",
+                                "language_code": "en-US",
+                                "alternatives": [
+                                    {
+                                        "confidence": "0.0",
+                                        "content": "."
+                                    }
+                                ],
+                                "type": "punctuation"
+                            }
+                        ]
+                    },
+                    {
+                    "channel_label": "ch_1",
+                        "items": [
+                            {
+                                "channel_label": "ch_1",
+                                "start_time": "8.5",
+                                "end_time": "8.89",
+                                "alternatives": [
+                                    {
+                                        "confidence": "1.0",
+                                        "content": "Sorry"
+                                    }
+                                ],
+                                "type": "pronunciation"
+                            },
+                            {
+                                "channel_label": "ch_1",
+                                "start_time": "8.89",
+                                "end_time": "9.06",
+                                "alternatives": [
+                                    {
+                                        "confidence": "0.9176",
+                                        "content": "about"
+                                    }
+                                ],
+                                "type": "pronunciation"
+                            },
+                            {
+                                "channel_label": "ch_1",
+                                "start_time": "9.06",
+                                "end_time": "9.25",
+                                "alternatives": [
+                                    {
+                                        "confidence": "1.0",
+                                        "content": "that"
+                                    }
+                                ],
+                                "type": "pronunciation"
+                            },
+                            {
+                                "channel_label": "ch_1",
+                                "alternatives": [
+                                    {
+                                        "confidence": "0.0",
+                                        "content": "."
+                                    }
+                                ],
+                                "type": "punctuation"
+                            }
+                        ]
+                    }
+                ],
+                "number_of_channels": 2
+            },
+            "items": [
+                {
+                    "id": 0,
+                    "channel_label": "ch_0",
+                    "start_time": "4.86",
+                    "end_time": "5.01",
+                    "alternatives": [
+                        {
+                            "confidence": "1.0",
+                            "content": "I've"
+                        }
+                    ],
+                    "type": "pronunciation"
+                },
+                {
+                    "id": 1,
+                    "channel_label": "ch_0",
+                    "start_time": "5.01",
+                    "end_time": "5.16",
+                    "alternatives": [
+                        {
+                            "confidence": "1.0",
+                            "content": "been"
+                        }
+                    ],
+                    "type": "pronunciation"
+                },
+                {
+                    "id": 2,
+                    "channel_label": "ch_0",
+                    "start_time": "5.16",
+                    "end_time": "5.28",
+                    "alternatives": [
+                        {
+                            "confidence": "1.0",
+                            "content": "on"
+                        }
+                    ],
+                    "type": "pronunciation"
+                },
+                {
+                    "id": 3,
+                    "channel_label": "ch_0",
+                    "start_time": "5.28",
+                    "end_time": "5.62",
+                    "alternatives": [
+                        {
+                            "confidence": "1.0",
+                            "content": "hold"
+                        }
+                    ],
+                    "type": "pronunciation"
+                },
+                {
+                    "id": 4,
+                    "channel_label": "ch_0",
+                    "start_time": "5.62",
+                    "end_time": "5.83",
+                    "alternatives": [
+                        {
+                            "confidence": "1.0",
+                            "content": "for"
+                        }
+                    ],
+                    "type": "pronunciation"
+                },
+                {
+                    "id": 5,
+                    "channel_label": "ch_0",
+                    "start_time": "6.1",
+                    "end_time": "6.25",
+                    "alternatives": [
+                        {
+                            "confidence": "1.0",
+                            "content": "an"
+                        }
+                    ],
+                    "type": "pronunciation"
+                },
+                {
+                    "id": 6,
+                    "channel_label": "ch_0",
+                    "start_time": "6.25",
+                    "end_time": "6.87",
+                    "alternatives": [
+                        {
+                            "confidence": "1.0",
+                            "content": "hour"
+                        }
+                    ],
+                    "type": "pronunciation"
+                },
+                {
+                    "id": 7,
+                    "channel_label": "ch_0",
+                    "alternatives": [
+                        {
+                            "confidence": "0.0",
+                            "content": "."
+                        }
+                    ],
+                    "type": "punctuation"
+                },
+                {
+                    "id": 8,
+                    "channel_label": "ch_1",
+                    "start_time": "8.5",
+                    "end_time": "8.89",
+                    "alternatives": [
+                        {
+                            "confidence": "1.0",
+                            "content": "Sorry"
+                        }
+                    ],
+                    "type": "pronunciation"
+                },
+                {
+                    "id": 9,
+                    "channel_label": "ch_1",
+                    "start_time": "8.89",
+                    "end_time": "9.06",
+                    "alternatives": [
+                        {
+                            "confidence": "0.9176",
+                            "content": "about"
+                        }
+                    ],
+                    "type": "pronunciation"
+                },
+                {
+                    "id": 10,
+                    "channel_label": "ch_1",
+                    "start_time": "9.06",
+                    "end_time": "9.25",
+                    "alternatives": [
+                        {
+                            "confidence": "1.0",
+                            "content": "that"
+                        }
+                    ],
+                    "type": "pronunciation"
+                },
+                {
+                    "id": 11,
+                    "channel_label": "ch_1",
+                    "alternatives": [
+                        {
+                            "confidence": "0.0",
+                            "content": "."
+                        }
+                    ],
+                    "type": "punctuation"
+                }
+            ],
+            "audio_segments": [
+                {
+                    "id": 0,
+                    "transcript": "I've been on hold for an hour.",
+                    "start_time": "4.86",
+                    "end_time": "6.87",
+                    "channel_label": "ch_0",
+                    "items": [
+                        0,
+                        1,
+                        2,
+                        3,
+                        4,
+                        5,
+                        6,
+                        7
+                    ]
+                },
+                {
+                    "id": 1,
+                    "transcript": "Sorry about that.",
+                    "start_time": "8.5",
+                    "end_time": "9.25",
+                    "channel_label": "ch_1",
+                    "items": [
+                        8,
+                        9,
+                        10,
+                        11
+                    ]
+                }
+            ]
+        },
+        "status": "COMPLETED"
+    }"#;
+
+        let expected = TranscribeOutput {
+            job_name: "my-first-transcription-job".to_string(),
+            account_id: "111122223333".to_string(),
+            results: TranscribeResults {
+                transcripts: vec![TranscriptText {
+                    transcript: "I've been on hold for an hour. Sorry about that.".to_string(),
+                }],
+                speaker_labels: None,
+                channel_labels: Some(ChannelLabels {
+                    channels: vec![
+                        Channel {
+                            channel_label: "ch_0".to_string(),
+                            items: vec![
+                                TranscribeItem {
+                                    id: None,
+                                    start_time: Some("4.86".to_string()),
+                                    end_time: Some("5.01".to_string()),
+                                    speaker_label: None,
+                                    channel_label: Some("ch_0".to_string()),
+                                    alternatives: vec![TranscribeAlternative {
+                                        confidence: "1.0".to_string(),
+                                        content: "I've".to_string(),
+                                    }],
+                                    item_type: "pronunciation".to_string(),
+                                    vocabulary_filter_match: None,
+                                },
+                                TranscribeItem {
+                                    id: None,
+                                    start_time: Some("5.01".to_string()),
+                                    end_time: Some("5.16".to_string()),
+                                    speaker_label: None,
+                                    channel_label: Some("ch_0".to_string()),
+                                    alternatives: vec![TranscribeAlternative {
+                                        confidence: "1.0".to_string(),
+                                        content: "been".to_string(),
+                                    }],
+                                    item_type: "pronunciation".to_string(),
+                                    vocabulary_filter_match: None,
+                                },
+                                TranscribeItem {
+                                    id: None,
+                                    start_time: Some("5.16".to_string()),
+                                    end_time: Some("5.28".to_string()),
+                                    speaker_label: None,
+                                    channel_label: Some("ch_0".to_string()),
+                                    alternatives: vec![TranscribeAlternative {
+                                        confidence: "1.0".to_string(),
+                                        content: "on".to_string(),
+                                    }],
+                                    item_type: "pronunciation".to_string(),
+                                    vocabulary_filter_match: None,
+                                },
+                                TranscribeItem {
+                                    id: None,
+                                    start_time: Some("5.28".to_string()),
+                                    end_time: Some("5.62".to_string()),
+                                    speaker_label: None,
+                                    channel_label: Some("ch_0".to_string()),
+                                    alternatives: vec![TranscribeAlternative {
+                                        confidence: "1.0".to_string(),
+                                        content: "hold".to_string(),
+                                    }],
+                                    item_type: "pronunciation".to_string(),
+                                    vocabulary_filter_match: None,
+                                },
+                                TranscribeItem {
+                                    id: None,
+                                    start_time: Some("5.62".to_string()),
+                                    end_time: Some("5.83".to_string()),
+                                    speaker_label: None,
+                                    channel_label: Some("ch_0".to_string()),
+                                    alternatives: vec![TranscribeAlternative {
+                                        confidence: "1.0".to_string(),
+                                        content: "for".to_string(),
+                                    }],
+                                    item_type: "pronunciation".to_string(),
+                                    vocabulary_filter_match: None,
+                                },
+                                TranscribeItem {
+                                    id: None,
+                                    start_time: Some("6.1".to_string()),
+                                    end_time: Some("6.25".to_string()),
+                                    speaker_label: None,
+                                    channel_label: Some("ch_0".to_string()),
+                                    alternatives: vec![TranscribeAlternative {
+                                        confidence: "1.0".to_string(),
+                                        content: "an".to_string(),
+                                    }],
+                                    item_type: "pronunciation".to_string(),
+                                    vocabulary_filter_match: None,
+                                },
+                                TranscribeItem {
+                                    id: None,
+                                    start_time: Some("6.25".to_string()),
+                                    end_time: Some("6.87".to_string()),
+                                    speaker_label: None,
+                                    channel_label: Some("ch_0".to_string()),
+                                    alternatives: vec![TranscribeAlternative {
+                                        confidence: "1.0".to_string(),
+                                        content: "hour".to_string(),
+                                    }],
+                                    item_type: "pronunciation".to_string(),
+                                    vocabulary_filter_match: None,
+                                },
+                                TranscribeItem {
+                                    id: None,
+                                    start_time: None,
+                                    end_time: None,
+                                    speaker_label: None,
+                                    channel_label: Some("ch_0".to_string()),
+                                    alternatives: vec![TranscribeAlternative {
+                                        confidence: "0.0".to_string(),
+                                        content: ".".to_string(),
+                                    }],
+                                    item_type: "punctuation".to_string(),
+                                    vocabulary_filter_match: None,
+                                },
+                            ],
+                        },
+                        Channel {
+                            channel_label: "ch_1".to_string(),
+                            items: vec![
+                                TranscribeItem {
+                                    id: None,
+                                    start_time: Some("8.5".to_string()),
+                                    end_time: Some("8.89".to_string()),
+                                    speaker_label: None,
+                                    channel_label: Some("ch_1".to_string()),
+                                    alternatives: vec![TranscribeAlternative {
+                                        confidence: "1.0".to_string(),
+                                        content: "Sorry".to_string(),
+                                    }],
+                                    item_type: "pronunciation".to_string(),
+                                    vocabulary_filter_match: None,
+                                },
+                                TranscribeItem {
+                                    id: None,
+                                    start_time: Some("8.89".to_string()),
+                                    end_time: Some("9.06".to_string()),
+                                    speaker_label: None,
+                                    channel_label: Some("ch_1".to_string()),
+                                    alternatives: vec![TranscribeAlternative {
+                                        confidence: "0.9176".to_string(),
+                                        content: "about".to_string(),
+                                    }],
+                                    item_type: "pronunciation".to_string(),
+                                    vocabulary_filter_match: None,
+                                },
+                                TranscribeItem {
+                                    id: None,
+                                    start_time: Some("9.06".to_string()),
+                                    end_time: Some("9.25".to_string()),
+                                    speaker_label: None,
+                                    channel_label: Some("ch_1".to_string()),
+                                    alternatives: vec![TranscribeAlternative {
+                                        confidence: "1.0".to_string(),
+                                        content: "that".to_string(),
+                                    }],
+                                    item_type: "pronunciation".to_string(),
+                                    vocabulary_filter_match: None,
+                                },
+                                TranscribeItem {
+                                    id: None,
+                                    start_time: None,
+                                    end_time: None,
+                                    speaker_label: None,
+                                    channel_label: Some("ch_1".to_string()),
+                                    alternatives: vec![TranscribeAlternative {
+                                        confidence: "0.0".to_string(),
+                                        content: ".".to_string(),
+                                    }],
+                                    item_type: "punctuation".to_string(),
+                                    vocabulary_filter_match: None,
+                                },
+                            ],
+                        },
+                    ],
+                    number_of_channels: 2,
+                }),
+                items: vec![
+                    TranscribeItem {
+                        id: Some(0),
+                        start_time: Some("4.86".to_string()),
+                        end_time: Some("5.01".to_string()),
+                        speaker_label: None,
+                        channel_label: Some("ch_0".to_string()),
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "1.0".to_string(),
+                            content: "I've".to_string(),
+                        }],
+                        item_type: "pronunciation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(1),
+                        start_time: Some("5.01".to_string()),
+                        end_time: Some("5.16".to_string()),
+                        speaker_label: None,
+                        channel_label: Some("ch_0".to_string()),
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "1.0".to_string(),
+                            content: "been".to_string(),
+                        }],
+                        item_type: "pronunciation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(2),
+                        start_time: Some("5.16".to_string()),
+                        end_time: Some("5.28".to_string()),
+                        speaker_label: None,
+                        channel_label: Some("ch_0".to_string()),
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "1.0".to_string(),
+                            content: "on".to_string(),
+                        }],
+                        item_type: "pronunciation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(3),
+                        start_time: Some("5.28".to_string()),
+                        end_time: Some("5.62".to_string()),
+                        speaker_label: None,
+                        channel_label: Some("ch_0".to_string()),
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "1.0".to_string(),
+                            content: "hold".to_string(),
+                        }],
+                        item_type: "pronunciation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(4),
+                        start_time: Some("5.62".to_string()),
+                        end_time: Some("5.83".to_string()),
+                        speaker_label: None,
+                        channel_label: Some("ch_0".to_string()),
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "1.0".to_string(),
+                            content: "for".to_string(),
+                        }],
+                        item_type: "pronunciation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(5),
+                        start_time: Some("6.1".to_string()),
+                        end_time: Some("6.25".to_string()),
+                        speaker_label: None,
+                        channel_label: Some("ch_0".to_string()),
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "1.0".to_string(),
+                            content: "an".to_string(),
+                        }],
+                        item_type: "pronunciation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(6),
+                        start_time: Some("6.25".to_string()),
+                        end_time: Some("6.87".to_string()),
+                        speaker_label: None,
+                        channel_label: Some("ch_0".to_string()),
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "1.0".to_string(),
+                            content: "hour".to_string(),
+                        }],
+                        item_type: "pronunciation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(7),
+                        start_time: None,
+                        end_time: None,
+                        speaker_label: None,
+                        channel_label: Some("ch_0".to_string()),
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "0.0".to_string(),
+                            content: ".".to_string(),
+                        }],
+                        item_type: "punctuation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(8),
+                        start_time: Some("8.5".to_string()),
+                        end_time: Some("8.89".to_string()),
+                        speaker_label: None,
+                        channel_label: Some("ch_1".to_string()),
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "1.0".to_string(),
+                            content: "Sorry".to_string(),
+                        }],
+                        item_type: "pronunciation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(9),
+                        start_time: Some("8.89".to_string()),
+                        end_time: Some("9.06".to_string()),
+                        speaker_label: None,
+                        channel_label: Some("ch_1".to_string()),
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "0.9176".to_string(),
+                            content: "about".to_string(),
+                        }],
+                        item_type: "pronunciation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(10),
+                        start_time: Some("9.06".to_string()),
+                        end_time: Some("9.25".to_string()),
+                        speaker_label: None,
+                        channel_label: Some("ch_1".to_string()),
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "1.0".to_string(),
+                            content: "that".to_string(),
+                        }],
+                        item_type: "pronunciation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                    TranscribeItem {
+                        id: Some(11),
+                        start_time: None,
+                        end_time: None,
+                        speaker_label: None,
+                        channel_label: Some("ch_1".to_string()),
+                        alternatives: vec![TranscribeAlternative {
+                            confidence: "0.0".to_string(),
+                            content: ".".to_string(),
+                        }],
+                        item_type: "punctuation".to_string(),
+                        vocabulary_filter_match: None,
+                    },
+                ],
+                audio_segments: vec![
+                    AudioSegment {
+                        id: 0,
+                        transcript: "I've been on hold for an hour.".to_string(),
+                        start_time: "4.86".to_string(),
+                        end_time: "6.87".to_string(),
+                        speaker_label: None,
+                        channel_label: Some("ch_0".to_string()),
+                        items: vec![0, 1, 2, 3, 4, 5, 6, 7],
+                    },
+                    AudioSegment {
+                        id: 1,
+                        transcript: "Sorry about that.".to_string(),
+                        start_time: "8.5".to_string(),
+                        end_time: "9.25".to_string(),
+                        speaker_label: None,
+                        channel_label: Some("ch_1".to_string()),
+                        items: vec![8, 9, 10, 11],
+                    },
+                ],
+            },
+            status: "COMPLETED".to_string(),
+        };
+
+        let mock_client = MockHttpClient::new();
+        mock_client.expect_response(
+            http::Response::builder()
+                .status(200)
+                .body(bytes::Bytes::from(json_response))
+                .unwrap(),
+        );
+
+        // Create transcribe client
+        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client,
+        );
+
+        let result = block_on(|_| async {
+            client
+                .download_transcript_json("test-job", "https://example.com/transcript.json")
+                .await
+                .expect("Failed to download transcript")
+        });
+
+        assert_eq!(result, expected);
     }
 }
