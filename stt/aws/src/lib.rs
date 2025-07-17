@@ -70,3 +70,5 @@ impl TranscriptionGuest for Component {
         todo!()
     }
 }
+
+golem_stt::export_stt!(Component with_types_in golem_stt);
