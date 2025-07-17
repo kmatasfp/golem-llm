@@ -16,7 +16,7 @@ use std::{
 };
 
 use crate::{
-    client::{AudioConfig, TranscribeOutput, TranscriptionConfig},
+    client::{AudioConfig, TranscriptionConfig},
     error::Error,
 };
 
@@ -708,6 +708,93 @@ pub struct GetTranscriptionJobRequest {
 #[serde(rename_all = "PascalCase")]
 pub struct GetTranscriptionJobResponse {
     pub transcription_job: TranscriptionJob,
+}
+
+// https://docs.aws.amazon.com/transcribe/latest/dg/how-input.html#how-output
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscribeOutput {
+    pub job_name: String,
+    pub account_id: String,
+    pub results: TranscribeResults,
+    pub status: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscribeResults {
+    pub transcripts: Vec<TranscriptText>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speaker_labels: Option<SpeakerLabels>,
+    pub items: Vec<TranscribeItem>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptText {
+    pub transcript: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerLabels {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_label: Option<String>,
+    pub speakers: i32,
+    pub segments: Vec<SpeakerSegment>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerSegment {
+    pub start_time: String,
+    pub speaker_label: String,
+    pub end_time: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub items: Option<Vec<SpeakerItem>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerItem {
+    pub start_time: String,
+    pub speaker_label: String,
+    pub end_time: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscribeItem {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speaker_label: Option<String>,
+    pub alternatives: Vec<TranscribeAlternative>,
+    #[serde(rename = "type")]
+    pub item_type: String, // "pronunciation" or "punctuation"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vocabulary_filter_match: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscribeAlternative {
+    pub confidence: String, // Note: AWS returns this as a string, not a number
+    pub content: String,
+}
+
+// Helper struct for working with word metadata
+#[derive(Debug, Clone)]
+pub struct WordMetadata {
+    pub word: String,
+    pub confidence: f64,
+    pub start_time: Option<f64>,
+    pub end_time: Option<f64>,
+    pub speaker_label: Option<String>,
 }
 
 pub struct TranscribeClient<HC: golem_stt::client::HttpClient> {
@@ -1463,8 +1550,8 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
             .map_err(|err| (transcription_job_name.to_string(), err))?;
 
         if response.status().is_success() {
-            let transcript_json: crate::client::TranscribeOutput =
-                serde_json::from_slice(response.body()).map_err(|e| {
+            let transcript_json: TranscribeOutput = serde_json::from_slice(response.body())
+                .map_err(|e| {
                     golem_stt::error::Error::Client(
                         transcription_job_name.to_string(),
                         client::Error::Generic(format!("Failed to deserialize response: {}", e)),
