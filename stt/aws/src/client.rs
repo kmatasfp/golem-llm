@@ -1,8 +1,8 @@
-use std::{rc::Rc, sync::Arc, time::Duration};
+use std::{rc::Rc, time::Duration};
 
-use crate::aws::{S3Client, TranscribeClient, TranscribeOutput};
+use crate::aws::{S3Client, S3Service, TranscribeClient, TranscribeOutput, TranscribeService};
 use golem_stt::{
-    client::{HttpClient, ReqwestHttpClient, SttProviderClient},
+    client::{ReqwestHttpClient, SttProviderClient},
     error::Error,
     runtime::AsyncRuntime,
     runtime::WasiAyncRuntime,
@@ -102,38 +102,16 @@ pub struct TranscriptionConfig {
     pub vocabulary: Vec<String>,
 }
 
-pub struct TranscribeApi<HC: HttpClient, RT: AsyncRuntime> {
+pub struct TranscribeApi<S3: S3Service, TC: TranscribeService, RT: AsyncRuntime> {
     bucket_name: String,
-    s3_client: S3Client<HC>,
-    transcribe_client: TranscribeClient<HC>,
+    s3_client: S3,
+    transcribe_client: TC,
     runtime: RT,
 }
 
 #[allow(unused)]
-impl<HC: HttpClient, RT: AsyncRuntime> TranscribeApi<HC, RT> {
-    pub fn new(
-        bucket_name: String,
-        access_key: String,
-        secret_key: String,
-        region: String,
-        http_client: impl Into<Arc<HC>>,
-        runtime: RT,
-    ) -> Self {
-        let http_client = http_client.into();
-
-        let s3_client = S3Client::new(
-            access_key.clone(),
-            secret_key.clone(),
-            region.clone(),
-            http_client.clone(),
-        );
-        let transcribe_client = TranscribeClient::new(
-            access_key.clone(),
-            secret_key.clone(),
-            region.clone(),
-            http_client.clone(),
-        );
-
+impl<S3: S3Service, TC: TranscribeService, RT: AsyncRuntime> TranscribeApi<S3, TC, RT> {
+    pub fn new(bucket_name: String, s3_client: S3, transcribe_client: TC, runtime: RT) -> Self {
         Self {
             bucket_name,
             s3_client,
@@ -147,7 +125,9 @@ impl<HC: HttpClient, RT: AsyncRuntime> TranscribeApi<HC, RT> {
     // }
 }
 
-impl TranscribeApi<ReqwestHttpClient, WasiAyncRuntime> {
+impl
+    TranscribeApi<S3Client<ReqwestHttpClient>, TranscribeClient<ReqwestHttpClient>, WasiAyncRuntime>
+{
     pub fn live(
         bucket_name: String,
         access_key: String,
@@ -155,20 +135,34 @@ impl TranscribeApi<ReqwestHttpClient, WasiAyncRuntime> {
         region: String,
         reactor: Reactor,
     ) -> Self {
+        let reqwest_http_client = ReqwestHttpClient::new(reactor.clone());
+
+        let s3_client = S3Client::new(
+            access_key.clone(),
+            secret_key.clone(),
+            region.clone(),
+            reqwest_http_client.clone(),
+        );
+
+        let transcribe_client = TranscribeClient::new(
+            access_key.clone(),
+            secret_key.clone(),
+            region.clone(),
+            reqwest_http_client.clone(),
+        );
+
         Self::new(
             bucket_name,
-            access_key,
-            secret_key,
-            region,
-            ReqwestHttpClient::new(reactor.clone()),
+            s3_client,
+            transcribe_client,
             WasiAyncRuntime::new(reactor.clone()),
         )
     }
 }
 
-impl<HC: HttpClient, RT: AsyncRuntime>
+impl<S3: S3Service, TC: TranscribeService, RT: AsyncRuntime>
     SttProviderClient<TranscriptionRequest, TranscriptionResponse, Error>
-    for TranscribeApi<HC, RT>
+    for TranscribeApi<S3, TC, RT>
 {
     async fn transcribe_audio(
         &self,
@@ -352,6 +346,20 @@ pub struct TranscriptionResponse {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        cell::{Ref, RefCell},
+        collections::VecDeque,
+    };
+
+    use golem_stt::client;
+    use wasi_async_runtime::block_on;
+
+    use crate::aws::{
+        CreateVocabularyResponse, GetTranscriptionJobResponse, GetVocabularyResponse, S3Service,
+        StartTranscriptionJobResponse, TranscribeResults, Transcript, TranscriptText,
+        TranscriptionJob,
+    };
+
     use super::*;
 
     #[test]
@@ -505,6 +513,1049 @@ mod tests {
                 expected_error_substring,
                 error_msg
             );
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct S3PutOperation {
+        request_id: String,
+        bucket: String,
+        object_name: String,
+        content_size: usize,
+    }
+
+    #[derive(Debug, Clone)]
+    struct S3DeleteOperation {
+        request_id: String,
+        bucket: String,
+        object_name: String,
+    }
+
+    #[derive(Debug, Clone)]
+    struct CreateVocabularyOperation {
+        vocabulary_name: String,
+        language_code: String,
+        phrases: Vec<String>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct StartTranscriptionOperation {
+        job_name: String,
+        media_uri: String,
+        audio_config: AudioConfig,
+        transcription_config: Option<TranscriptionConfig>,
+        vocabulary_name: Option<String>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct DownloadTranscriptOperation {
+        job_name: String,
+        transcript_uri: String,
+    }
+
+    struct MockS3Client {
+        pub put_object_responses: RefCell<VecDeque<Result<(), Error>>>,
+        pub delete_object_responses: RefCell<VecDeque<Result<(), Error>>>,
+        pub captured_put_operations: RefCell<Vec<S3PutOperation>>,
+        pub captured_delete_operations: RefCell<Vec<S3DeleteOperation>>,
+    }
+
+    #[allow(unused)]
+    impl MockS3Client {
+        pub fn new() -> Self {
+            Self {
+                put_object_responses: RefCell::new(VecDeque::new()),
+                delete_object_responses: RefCell::new(VecDeque::new()),
+                captured_put_operations: RefCell::new(Vec::new()),
+                captured_delete_operations: RefCell::new(Vec::new()),
+            }
+        }
+
+        pub fn expect_put_object_response(&self, response: Result<(), Error>) {
+            self.put_object_responses.borrow_mut().push_back(response);
+        }
+
+        pub fn expect_delete_object_response(&self, response: Result<(), Error>) {
+            self.delete_object_responses
+                .borrow_mut()
+                .push_back(response);
+        }
+
+        pub fn get_captured_put_operations(&self) -> Ref<Vec<S3PutOperation>> {
+            self.captured_put_operations.borrow()
+        }
+
+        pub fn get_captured_delete_operations(&self) -> Ref<Vec<S3DeleteOperation>> {
+            self.captured_delete_operations.borrow()
+        }
+
+        pub fn clear_captured_operations(&self) {
+            self.captured_put_operations.borrow_mut().clear();
+            self.captured_delete_operations.borrow_mut().clear();
+        }
+    }
+    #[allow(unused)]
+    impl S3Service for MockS3Client {
+        async fn put_object(
+            &self,
+            request_id: &str,
+            bucket: &str,
+            object_name: &str,
+            content: Bytes,
+        ) -> Result<(), Error> {
+            self.captured_put_operations
+                .borrow_mut()
+                .push(S3PutOperation {
+                    request_id: request_id.to_string(),
+                    bucket: bucket.to_string(),
+                    object_name: object_name.to_string(),
+                    content_size: content.len(),
+                });
+
+            self.put_object_responses
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(Err((
+                    request_id.to_string(),
+                    client::Error::Generic("unexpected error".to_string()),
+                )
+                    .into()))
+        }
+
+        async fn delete_object(
+            &self,
+            request_id: &str,
+            bucket: &str,
+            object_name: &str,
+        ) -> Result<(), Error> {
+            self.captured_delete_operations
+                .borrow_mut()
+                .push(S3DeleteOperation {
+                    request_id: request_id.to_string(),
+                    bucket: bucket.to_string(),
+                    object_name: object_name.to_string(),
+                });
+
+            self.delete_object_responses
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(Err((
+                    request_id.to_string(),
+                    client::Error::Generic("unexpected error".to_string()),
+                )
+                    .into()))
+        }
+    }
+
+    struct MockTranscribeClient {
+        pub create_vocabulary_responses: RefCell<VecDeque<Result<CreateVocabularyResponse, Error>>>,
+        pub get_vocabulary_responses: RefCell<VecDeque<Result<GetVocabularyResponse, Error>>>,
+        pub start_transcription_responses:
+            RefCell<VecDeque<Result<StartTranscriptionJobResponse, Error>>>,
+        pub get_transcription_responses:
+            RefCell<VecDeque<Result<GetTranscriptionJobResponse, Error>>>,
+        pub download_transcript_responses: RefCell<VecDeque<Result<TranscribeOutput, Error>>>,
+        pub delete_vocabulary_responses: RefCell<VecDeque<Result<(), Error>>>,
+        pub captured_create_vocabulary: RefCell<Vec<CreateVocabularyOperation>>,
+        pub captured_get_vocabulary: RefCell<Vec<String>>,
+        pub captured_start_transcription: RefCell<Vec<StartTranscriptionOperation>>,
+        pub captured_get_transcription: RefCell<Vec<String>>,
+        pub captured_download_transcript: RefCell<Vec<DownloadTranscriptOperation>>,
+        pub captured_delete_vocabulary: RefCell<Vec<String>>,
+    }
+
+    #[allow(unused)]
+    impl MockTranscribeClient {
+        pub fn new() -> Self {
+            Self {
+                create_vocabulary_responses: RefCell::new(VecDeque::new()),
+                get_vocabulary_responses: RefCell::new(VecDeque::new()),
+                start_transcription_responses: RefCell::new(VecDeque::new()),
+                get_transcription_responses: RefCell::new(VecDeque::new()),
+                download_transcript_responses: RefCell::new(VecDeque::new()),
+                delete_vocabulary_responses: RefCell::new(VecDeque::new()),
+                captured_create_vocabulary: RefCell::new(Vec::new()),
+                captured_get_vocabulary: RefCell::new(Vec::new()),
+                captured_start_transcription: RefCell::new(Vec::new()),
+                captured_get_transcription: RefCell::new(Vec::new()),
+                captured_download_transcript: RefCell::new(Vec::new()),
+                captured_delete_vocabulary: RefCell::new(Vec::new()),
+            }
+        }
+
+        pub fn expect_create_vocabulary_response(
+            &self,
+            response: Result<CreateVocabularyResponse, Error>,
+        ) {
+            self.create_vocabulary_responses
+                .borrow_mut()
+                .push_back(response);
+        }
+
+        pub fn expect_get_vocabulary_response(
+            &self,
+            response: Result<GetVocabularyResponse, Error>,
+        ) {
+            self.get_vocabulary_responses
+                .borrow_mut()
+                .push_back(response);
+        }
+
+        pub fn expect_start_transcription_response(
+            &self,
+            response: Result<StartTranscriptionJobResponse, Error>,
+        ) {
+            self.start_transcription_responses
+                .borrow_mut()
+                .push_back(response);
+        }
+
+        pub fn expect_get_transcription_response(
+            &self,
+            response: Result<GetTranscriptionJobResponse, Error>,
+        ) {
+            self.get_transcription_responses
+                .borrow_mut()
+                .push_back(response);
+        }
+
+        pub fn expect_download_transcript_response(
+            &self,
+            response: Result<TranscribeOutput, Error>,
+        ) {
+            self.download_transcript_responses
+                .borrow_mut()
+                .push_back(response);
+        }
+
+        pub fn expect_delete_vocabulary_response(&self, response: Result<(), Error>) {
+            self.delete_vocabulary_responses
+                .borrow_mut()
+                .push_back(response);
+        }
+
+        pub fn get_captured_create_vocabulary(&self) -> Ref<Vec<CreateVocabularyOperation>> {
+            self.captured_create_vocabulary.borrow()
+        }
+
+        pub fn get_captured_start_transcription(&self) -> Ref<Vec<StartTranscriptionOperation>> {
+            self.captured_start_transcription.borrow()
+        }
+
+        pub fn get_captured_download_transcript(&self) -> Ref<Vec<DownloadTranscriptOperation>> {
+            self.captured_download_transcript.borrow()
+        }
+
+        pub fn clear_captured_operations(&self) {
+            self.captured_create_vocabulary.borrow_mut().clear();
+            self.captured_get_vocabulary.borrow_mut().clear();
+            self.captured_start_transcription.borrow_mut().clear();
+            self.captured_get_transcription.borrow_mut().clear();
+            self.captured_download_transcript.borrow_mut().clear();
+            self.captured_delete_vocabulary.borrow_mut().clear();
+        }
+    }
+
+    impl TranscribeService for MockTranscribeClient {
+        async fn create_vocabulary(
+            &self,
+            vocabulary_name: String,
+            language_code: String,
+            phrases: Vec<String>,
+        ) -> Result<CreateVocabularyResponse, Error> {
+            self.captured_create_vocabulary
+                .borrow_mut()
+                .push(CreateVocabularyOperation {
+                    vocabulary_name: vocabulary_name.clone(),
+                    language_code: language_code.clone(),
+                    phrases: phrases.clone(),
+                });
+
+            self.create_vocabulary_responses
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(Err((
+                    vocabulary_name.clone(),
+                    golem_stt::client::Error::Generic("unexpected error".to_string()),
+                )
+                    .into()))
+        }
+
+        async fn get_vocabulary(
+            &self,
+            vocabulary_name: &str,
+        ) -> Result<GetVocabularyResponse, Error> {
+            self.captured_get_vocabulary
+                .borrow_mut()
+                .push(vocabulary_name.to_string());
+
+            self.get_vocabulary_responses
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(Err((
+                    vocabulary_name.to_string(),
+                    golem_stt::client::Error::Generic("unexpected error".to_string()),
+                )
+                    .into()))
+        }
+
+        async fn wait_for_vocabulary_ready<RT: AsyncRuntime>(
+            &self,
+            _runtime: &RT,
+            _request_id: &str,
+            _max_wait_time: std::time::Duration,
+        ) -> Result<(), Error> {
+            Ok(())
+        }
+
+        async fn delete_vocabulary(&self, vocabulary_name: &str) -> Result<(), Error> {
+            self.captured_delete_vocabulary
+                .borrow_mut()
+                .push(vocabulary_name.to_string());
+
+            self.delete_vocabulary_responses
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(Err((
+                    vocabulary_name.to_string(),
+                    golem_stt::client::Error::Generic("unexpected error".to_string()),
+                )
+                    .into()))
+        }
+
+        async fn start_transcription_job(
+            &self,
+            transcription_job_name: String,
+            media_file_uri: String,
+            audio_config: AudioConfig,
+            transcription_config: Option<TranscriptionConfig>,
+            vocabulary_name: Option<String>,
+        ) -> Result<StartTranscriptionJobResponse, Error> {
+            self.captured_start_transcription
+                .borrow_mut()
+                .push(StartTranscriptionOperation {
+                    job_name: transcription_job_name.clone(),
+                    media_uri: media_file_uri.clone(),
+                    audio_config: audio_config.clone(),
+                    transcription_config: transcription_config.clone(),
+                    vocabulary_name: vocabulary_name.clone(),
+                });
+
+            self.start_transcription_responses
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(Err((
+                    transcription_job_name.clone(),
+                    golem_stt::client::Error::Generic("unexpected error".to_string()),
+                )
+                    .into()))
+        }
+
+        async fn get_transcription_job(
+            &self,
+            transcription_job_name: String,
+        ) -> Result<GetTranscriptionJobResponse, Error> {
+            self.captured_get_transcription
+                .borrow_mut()
+                .push(transcription_job_name.clone());
+
+            self.get_transcription_responses
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(Err((
+                    transcription_job_name.clone(),
+                    golem_stt::client::Error::Generic("unexpected error".to_string()),
+                )
+                    .into()))
+        }
+
+        async fn wait_for_transcription_job_completion<RT: AsyncRuntime>(
+            &self,
+            _runtime: &RT,
+            transcription_job_name: &str,
+            _max_wait_time: std::time::Duration,
+        ) -> Result<GetTranscriptionJobResponse, Error> {
+            self.get_transcription_job(transcription_job_name.to_string())
+                .await
+        }
+
+        async fn download_transcript_json(
+            &self,
+            transcription_job_name: &str,
+            transcript_uri: &str,
+        ) -> Result<TranscribeOutput, Error> {
+            self.captured_download_transcript
+                .borrow_mut()
+                .push(DownloadTranscriptOperation {
+                    job_name: transcription_job_name.to_string(),
+                    transcript_uri: transcript_uri.to_string(),
+                });
+
+            self.download_transcript_responses
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(Err((
+                    transcription_job_name.to_string(),
+                    golem_stt::client::Error::Generic("unexpected error".to_string()),
+                )
+                    .into()))
+        }
+    }
+
+    struct MockRuntime;
+
+    impl AsyncRuntime for MockRuntime {
+        async fn sleep(&self, _duration: std::time::Duration) {}
+    }
+
+    fn create_mock_transcribe_api() -> TranscribeApi<MockS3Client, MockTranscribeClient, MockRuntime>
+    {
+        TranscribeApi {
+            bucket_name: "test-bucket".to_string(),
+            s3_client: MockS3Client::new(),
+            transcribe_client: MockTranscribeClient::new(),
+            runtime: MockRuntime,
+        }
+    }
+
+    #[test]
+    fn test_transcribe_audio_invalid_request_id_returns_error() {
+        let api = create_mock_transcribe_api();
+
+        let request = TranscriptionRequest {
+            request_id: "invalid request id".to_string(), // spaces are invalid
+            audio: Bytes::from("test audio"),
+            audio_config: AudioConfig {
+                format: AudioFormat::wav,
+                channels: Some(1),
+            },
+            transcription_config: None,
+        };
+
+        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        assert!(result.is_err());
+
+        if let Err(Error::APIBadRequest { provider_error, .. }) = result {
+            assert!(provider_error.contains("Invalid request ID"));
+        } else {
+            panic!("Expected APIBadRequest error");
+        }
+    }
+
+    #[test]
+    fn test_transcribe_audio_vocabulary_without_language_returns_error() {
+        let api = create_mock_transcribe_api();
+
+        let request = TranscriptionRequest {
+            request_id: "test-123".to_string(),
+            audio: Bytes::from("test audio"),
+            audio_config: AudioConfig {
+                format: AudioFormat::wav,
+                channels: Some(1),
+            },
+            transcription_config: Some(TranscriptionConfig {
+                language: None, // No language specified
+                model: None,
+                enable_speaker_diarization: false,
+                vocabulary: vec!["word1".to_string(), "word2".to_string()], // But vocabulary provided
+            }),
+        };
+
+        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        assert!(result.is_err());
+
+        if let Err(Error::APIBadRequest { provider_error, .. }) = result {
+            assert!(provider_error
+                .contains("Vocabulary can only be used when a specific language is provided"));
+        } else {
+            panic!("Expected APIBadRequest error");
+        }
+    }
+
+    #[test]
+    fn test_transcribe_audio_model_without_language_returns_error() {
+        let api = create_mock_transcribe_api();
+
+        let request = TranscriptionRequest {
+            request_id: "test-123".to_string(),
+            audio: Bytes::from("test audio"),
+            audio_config: AudioConfig {
+                format: AudioFormat::wav,
+                channels: Some(1),
+            },
+            transcription_config: Some(TranscriptionConfig {
+                language: None,                             // No language specified
+                model: Some("en-US_Telephony".to_string()), // But model provided
+                enable_speaker_diarization: false,
+                vocabulary: vec![],
+            }),
+        };
+
+        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        assert!(result.is_err());
+
+        if let Err(Error::APIBadRequest { provider_error, .. }) = result {
+            assert!(provider_error
+                .contains("Model settings can only be used when a specific language is provided"));
+        } else {
+            panic!("Expected APIBadRequest error");
+        }
+    }
+
+    #[test]
+    fn test_transcribe_audio_uploads_to_s3() {
+        let api = create_mock_transcribe_api();
+
+        api.s3_client.expect_put_object_response(Ok(()));
+        api.transcribe_client
+            .expect_start_transcription_response(Ok(StartTranscriptionJobResponse {
+                transcription_job: TranscriptionJob {
+                    transcription_job_name: "test-123".to_string(),
+                    transcription_job_status: "COMPLETED".to_string(),
+                    language_code: None,
+                    media: None,
+                    media_format: None,
+                    media_sample_rate_hertz: None,
+                    creation_time: None,
+                    completion_time: None,
+                    start_time: None,
+                    failure_reason: None,
+                    settings: None,
+                    transcript: Some(Transcript {
+                        transcript_file_uri: Some(
+                            "https://example.com/transcript.json".to_string(),
+                        ),
+                        redacted_transcript_file_uri: None,
+                    }),
+                    tags: None,
+                },
+            }));
+        api.transcribe_client
+            .expect_download_transcript_response(Ok(TranscribeOutput {
+                job_name: "test-123".to_string(),
+                account_id: "123456789".to_string(),
+                results: TranscribeResults {
+                    transcripts: vec![TranscriptText {
+                        transcript: "Hello world".to_string(),
+                    }],
+                    speaker_labels: None,
+                    items: vec![],
+                },
+                status: "COMPLETED".to_string(),
+            }));
+        api.transcribe_client
+            .expect_delete_vocabulary_response(Ok(()));
+        api.s3_client.expect_delete_object_response(Ok(()));
+
+        let request = TranscriptionRequest {
+            request_id: "test-123".to_string(),
+            audio: Bytes::from("test audio data"),
+            audio_config: AudioConfig {
+                format: AudioFormat::wav,
+                channels: Some(1),
+            },
+            transcription_config: None,
+        };
+
+        let _ = block_on(|_| async { api.transcribe_audio(request).await });
+
+        let captured_puts = api.s3_client.get_captured_put_operations();
+        assert_eq!(captured_puts.len(), 1);
+        let put_op = &captured_puts[0];
+        assert_eq!(put_op.request_id, "test-123");
+        assert_eq!(put_op.bucket, "test-bucket");
+        assert_eq!(put_op.object_name, "test-123/audio.wav");
+        assert_eq!(put_op.content_size, 15);
+    }
+
+    #[test]
+    fn test_transcribe_audio_creates_vocabulary_when_provided() {
+        let api = create_mock_transcribe_api();
+
+        api.s3_client.expect_put_object_response(Ok(()));
+        api.transcribe_client
+            .expect_create_vocabulary_response(Ok(CreateVocabularyResponse {
+                vocabulary_name: "test-123".to_string(),
+                language_code: "en-US".to_string(),
+                vocabulary_state: "READY".to_string(),
+                last_modified_time: None,
+                failure_reason: None,
+            }));
+        api.transcribe_client
+            .expect_start_transcription_response(Ok(StartTranscriptionJobResponse {
+                transcription_job: TranscriptionJob {
+                    transcription_job_name: "test-123".to_string(),
+                    transcription_job_status: "COMPLETED".to_string(),
+                    language_code: None,
+                    media: None,
+                    media_format: None,
+                    media_sample_rate_hertz: None,
+                    creation_time: None,
+                    completion_time: None,
+                    start_time: None,
+                    failure_reason: None,
+                    settings: None,
+                    transcript: Some(Transcript {
+                        transcript_file_uri: Some(
+                            "https://example.com/transcript.json".to_string(),
+                        ),
+                        redacted_transcript_file_uri: None,
+                    }),
+                    tags: None,
+                },
+            }));
+        api.transcribe_client
+            .expect_download_transcript_response(Ok(TranscribeOutput {
+                job_name: "test-123".to_string(),
+                account_id: "123456789".to_string(),
+                results: TranscribeResults {
+                    transcripts: vec![TranscriptText {
+                        transcript: "Hello world".to_string(),
+                    }],
+                    speaker_labels: None,
+                    items: vec![],
+                },
+                status: "COMPLETED".to_string(),
+            }));
+        api.transcribe_client
+            .expect_delete_vocabulary_response(Ok(()));
+        api.s3_client.expect_delete_object_response(Ok(()));
+
+        let request = TranscriptionRequest {
+            request_id: "test-123".to_string(),
+            audio: Bytes::from("test audio"),
+            audio_config: AudioConfig {
+                format: AudioFormat::mp3,
+                channels: Some(1),
+            },
+            transcription_config: Some(TranscriptionConfig {
+                language: Some("en-US".to_string()),
+                model: None,
+                enable_speaker_diarization: false,
+                vocabulary: vec!["custom".to_string(), "words".to_string()],
+            }),
+        };
+
+        let _ = block_on(|_| async { api.transcribe_audio(request).await });
+
+        let captured_vocabulary = api.transcribe_client.get_captured_create_vocabulary();
+        assert_eq!(captured_vocabulary.len(), 1);
+        let vocab_op = &captured_vocabulary[0];
+        assert_eq!(vocab_op.vocabulary_name, "test-123");
+        assert_eq!(vocab_op.language_code, "en-US");
+        assert_eq!(
+            vocab_op.phrases,
+            vec!["custom".to_string(), "words".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_transcribe_audio_starts_transcription_job() {
+        let api = create_mock_transcribe_api();
+
+        api.s3_client.expect_put_object_response(Ok(()));
+        api.transcribe_client
+            .expect_start_transcription_response(Ok(StartTranscriptionJobResponse {
+                transcription_job: TranscriptionJob {
+                    transcription_job_name: "test-123".to_string(),
+                    transcription_job_status: "COMPLETED".to_string(),
+                    language_code: None,
+                    media: None,
+                    media_format: None,
+                    media_sample_rate_hertz: None,
+                    creation_time: None,
+                    completion_time: None,
+                    start_time: None,
+                    failure_reason: None,
+                    settings: None,
+                    transcript: Some(Transcript {
+                        transcript_file_uri: Some(
+                            "https://example.com/transcript.json".to_string(),
+                        ),
+                        redacted_transcript_file_uri: None,
+                    }),
+                    tags: None,
+                },
+            }));
+        api.transcribe_client
+            .expect_download_transcript_response(Ok(TranscribeOutput {
+                job_name: "test-123".to_string(),
+                account_id: "123456789".to_string(),
+                results: TranscribeResults {
+                    transcripts: vec![TranscriptText {
+                        transcript: "Hello world".to_string(),
+                    }],
+                    speaker_labels: None,
+                    items: vec![],
+                },
+                status: "COMPLETED".to_string(),
+            }));
+        api.transcribe_client
+            .expect_delete_vocabulary_response(Ok(()));
+        api.s3_client.expect_delete_object_response(Ok(()));
+
+        let request = TranscriptionRequest {
+            request_id: "test-123".to_string(),
+            audio: Bytes::from("test audio"),
+            audio_config: AudioConfig {
+                format: AudioFormat::flac,
+                channels: Some(2),
+            },
+            transcription_config: Some(TranscriptionConfig {
+                language: Some("es-ES".to_string()),
+                model: Some("en-US_Telephony".to_string()),
+                enable_speaker_diarization: true,
+                vocabulary: vec![],
+            }),
+        };
+
+        let _ = block_on(|_| async { api.transcribe_audio(request).await });
+
+        let captured_transcription = api.transcribe_client.get_captured_start_transcription();
+        assert_eq!(captured_transcription.len(), 1);
+        let transcription_op = &captured_transcription[0];
+        assert_eq!(transcription_op.job_name, "test-123");
+        assert_eq!(
+            transcription_op.media_uri,
+            "s3://test-bucket/test-123/audio.flac"
+        );
+        assert_eq!(transcription_op.audio_config.format.to_string(), "flac");
+        assert_eq!(transcription_op.audio_config.channels, Some(2));
+        assert!(
+            transcription_op
+                .transcription_config
+                .as_ref()
+                .unwrap()
+                .enable_speaker_diarization
+        );
+        assert_eq!(transcription_op.vocabulary_name, None);
+    }
+
+    #[test]
+    fn test_transcribe_audio_downloads_transcript_and_returns_response() {
+        let api = create_mock_transcribe_api();
+
+        api.s3_client.expect_put_object_response(Ok(()));
+        api.transcribe_client
+            .expect_start_transcription_response(Ok(StartTranscriptionJobResponse {
+                transcription_job: TranscriptionJob {
+                    transcription_job_name: "test-123".to_string(),
+                    transcription_job_status: "COMPLETED".to_string(),
+                    language_code: None,
+                    media: None,
+                    media_format: None,
+                    media_sample_rate_hertz: None,
+                    creation_time: None,
+                    completion_time: None,
+                    start_time: None,
+                    failure_reason: None,
+                    settings: None,
+                    transcript: Some(Transcript {
+                        transcript_file_uri: Some(
+                            "https://example.com/transcript.json".to_string(),
+                        ),
+                        redacted_transcript_file_uri: None,
+                    }),
+                    tags: None,
+                },
+            }));
+        api.transcribe_client
+            .expect_download_transcript_response(Ok(TranscribeOutput {
+                job_name: "test-123".to_string(),
+                account_id: "123456789".to_string(),
+                results: TranscribeResults {
+                    transcripts: vec![TranscriptText {
+                        transcript: "Hello world".to_string(),
+                    }],
+                    speaker_labels: None,
+                    items: vec![],
+                },
+                status: "COMPLETED".to_string(),
+            }));
+        api.transcribe_client
+            .expect_delete_vocabulary_response(Ok(()));
+        api.s3_client.expect_delete_object_response(Ok(()));
+
+        let request = TranscriptionRequest {
+            request_id: "test-123".to_string(),
+            audio: Bytes::from("test audio data"),
+            audio_config: AudioConfig {
+                format: AudioFormat::ogg,
+                channels: Some(1),
+            },
+            transcription_config: Some(TranscriptionConfig {
+                language: Some("fr-FR".to_string()),
+                model: None,
+                enable_speaker_diarization: false,
+                vocabulary: vec![],
+            }),
+        };
+
+        let response = block_on(|_| async { api.transcribe_audio(request).await.unwrap() });
+
+        assert_eq!(response.audio_size_bytes, 15);
+        assert_eq!(response.language, "fr-FR");
+
+        let captured_downloads = api.transcribe_client.get_captured_download_transcript();
+        assert_eq!(captured_downloads.len(), 1);
+        let download_op = &captured_downloads[0];
+        assert_eq!(download_op.job_name, "test-123");
+        assert_eq!(
+            download_op.transcript_uri,
+            "https://example.com/transcript.json"
+        );
+    }
+
+    #[test]
+    fn test_transcribe_audio_cleans_up_resources() {
+        let api = create_mock_transcribe_api();
+
+        api.s3_client.expect_put_object_response(Ok(()));
+        api.transcribe_client
+            .expect_create_vocabulary_response(Ok(CreateVocabularyResponse {
+                vocabulary_name: "test-123".to_string(),
+                language_code: "en-US".to_string(),
+                vocabulary_state: "READY".to_string(),
+                last_modified_time: None,
+                failure_reason: None,
+            }));
+        api.transcribe_client
+            .expect_start_transcription_response(Ok(StartTranscriptionJobResponse {
+                transcription_job: TranscriptionJob {
+                    transcription_job_name: "test-123".to_string(),
+                    transcription_job_status: "COMPLETED".to_string(),
+                    language_code: None,
+                    media: None,
+                    media_format: None,
+                    media_sample_rate_hertz: None,
+                    creation_time: None,
+                    completion_time: None,
+                    start_time: None,
+                    failure_reason: None,
+                    settings: None,
+                    transcript: Some(Transcript {
+                        transcript_file_uri: Some(
+                            "https://example.com/transcript.json".to_string(),
+                        ),
+                        redacted_transcript_file_uri: None,
+                    }),
+                    tags: None,
+                },
+            }));
+        api.transcribe_client
+            .expect_download_transcript_response(Ok(TranscribeOutput {
+                job_name: "test-123".to_string(),
+                account_id: "123456789".to_string(),
+                results: TranscribeResults {
+                    transcripts: vec![TranscriptText {
+                        transcript: "Hello world".to_string(),
+                    }],
+                    speaker_labels: None,
+                    items: vec![],
+                },
+                status: "COMPLETED".to_string(),
+            }));
+        api.transcribe_client
+            .expect_delete_vocabulary_response(Ok(()));
+        api.s3_client.expect_delete_object_response(Ok(()));
+
+        let request = TranscriptionRequest {
+            request_id: "test-123".to_string(),
+            audio: Bytes::from("test audio"),
+            audio_config: AudioConfig {
+                format: AudioFormat::wav,
+                channels: Some(1),
+            },
+            transcription_config: Some(TranscriptionConfig {
+                language: Some("en-US".to_string()),
+                model: None,
+                enable_speaker_diarization: false,
+                vocabulary: vec!["word1".to_string()],
+            }),
+        };
+
+        let _ = block_on(|_| async { api.transcribe_audio(request).await });
+
+        // Check vocabulary was deleted
+        let captured_vocab_deletes = api.transcribe_client.captured_delete_vocabulary.borrow();
+        assert_eq!(captured_vocab_deletes.len(), 1);
+        assert_eq!(captured_vocab_deletes[0], "test-123");
+
+        // Check S3 object was deleted
+        let captured_deletes = api.s3_client.get_captured_delete_operations();
+        assert_eq!(captured_deletes.len(), 1);
+        let delete_op = &captured_deletes[0];
+        assert_eq!(delete_op.request_id, "test-123");
+        assert_eq!(delete_op.bucket, "test-bucket");
+        assert_eq!(delete_op.object_name, "test-123/audio.wav");
+    }
+
+    #[test]
+    fn test_transcribe_audio_s3_upload_failure() {
+        let api = create_mock_transcribe_api();
+
+        api.s3_client
+            .expect_put_object_response(Err(Error::APIInternalServerError {
+                request_id: "test-123".to_string(),
+                provider_error: "S3 upload failed".to_string(),
+            }));
+
+        let request = TranscriptionRequest {
+            request_id: "test-123".to_string(),
+            audio: Bytes::from("test audio"),
+            audio_config: AudioConfig {
+                format: AudioFormat::wav,
+                channels: Some(1),
+            },
+            transcription_config: None,
+        };
+
+        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        assert!(result.is_err());
+
+        if let Err(Error::APIInternalServerError { provider_error, .. }) = result {
+            assert!(provider_error.contains("S3 upload failed"));
+        } else {
+            panic!("Expected APIInternalServerError");
+        }
+    }
+
+    #[test]
+    fn test_transcribe_audio_vocabulary_creation_failure() {
+        let api = create_mock_transcribe_api();
+
+        api.s3_client.expect_put_object_response(Ok(()));
+        api.transcribe_client
+            .expect_create_vocabulary_response(Ok(CreateVocabularyResponse {
+                vocabulary_name: "test-123".to_string(),
+                language_code: "en-US".to_string(),
+                vocabulary_state: "FAILED".to_string(),
+                last_modified_time: None,
+                failure_reason: Some("Invalid vocabulary words".to_string()),
+            }));
+
+        let request = TranscriptionRequest {
+            request_id: "test-123".to_string(),
+            audio: Bytes::from("test audio"),
+            audio_config: AudioConfig {
+                format: AudioFormat::wav,
+                channels: Some(1),
+            },
+            transcription_config: Some(TranscriptionConfig {
+                language: Some("en-US".to_string()),
+                model: None,
+                enable_speaker_diarization: false,
+                vocabulary: vec!["invalid".to_string()],
+            }),
+        };
+
+        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        assert!(result.is_err());
+
+        if let Err(Error::APIBadRequest { provider_error, .. }) = result {
+            assert!(provider_error.contains("Vocabulary creation failed"));
+            assert!(provider_error.contains("Invalid vocabulary words"));
+        } else {
+            panic!("Expected APIBadRequest error");
+        }
+    }
+
+    #[test]
+    fn test_transcribe_audio_transcription_job_failure() {
+        let api = create_mock_transcribe_api();
+
+        api.s3_client.expect_put_object_response(Ok(()));
+        api.transcribe_client
+            .expect_start_transcription_response(Ok(StartTranscriptionJobResponse {
+                transcription_job: TranscriptionJob {
+                    transcription_job_name: "test-123".to_string(),
+                    transcription_job_status: "FAILED".to_string(),
+                    language_code: None,
+                    media: None,
+                    media_format: None,
+                    media_sample_rate_hertz: None,
+                    creation_time: None,
+                    completion_time: None,
+                    start_time: None,
+                    failure_reason: Some("Audio format not supported".to_string()),
+                    settings: None,
+                    transcript: None,
+                    tags: None,
+                },
+            }));
+
+        let request = TranscriptionRequest {
+            request_id: "test-123".to_string(),
+            audio: Bytes::from("test audio"),
+            audio_config: AudioConfig {
+                format: AudioFormat::wav,
+                channels: Some(1),
+            },
+            transcription_config: None,
+        };
+
+        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        assert!(result.is_err());
+
+        if let Err(Error::APIBadRequest { provider_error, .. }) = result {
+            assert!(provider_error.contains("Transcription job creation failed"));
+            assert!(provider_error.contains("Audio format not supported"));
+        } else {
+            panic!("Expected APIBadRequest error");
+        }
+    }
+
+    #[test]
+    fn test_transcribe_audio_transcript_download_failure() {
+        let api = create_mock_transcribe_api();
+
+        api.s3_client.expect_put_object_response(Ok(()));
+        api.transcribe_client
+            .expect_start_transcription_response(Ok(StartTranscriptionJobResponse {
+                transcription_job: TranscriptionJob {
+                    transcription_job_name: "test-123".to_string(),
+                    transcription_job_status: "COMPLETED".to_string(),
+                    language_code: None,
+                    media: None,
+                    media_format: None,
+                    media_sample_rate_hertz: None,
+                    creation_time: None,
+                    completion_time: None,
+                    start_time: None,
+                    failure_reason: None,
+                    settings: None,
+                    transcript: Some(Transcript {
+                        transcript_file_uri: Some(
+                            "https://example.com/transcript.json".to_string(),
+                        ),
+                        redacted_transcript_file_uri: None,
+                    }),
+                    tags: None,
+                },
+            }));
+        api.transcribe_client
+            .expect_download_transcript_response(Err(Error::APINotFound {
+                request_id: "test-123".to_string(),
+                provider_error: "Transcript file not found".to_string(),
+            }));
+
+        let request = TranscriptionRequest {
+            request_id: "test-123".to_string(),
+            audio: Bytes::from("test audio"),
+            audio_config: AudioConfig {
+                format: AudioFormat::wav,
+                channels: Some(1),
+            },
+            transcription_config: None,
+        };
+
+        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        assert!(result.is_err());
+
+        if let Err(Error::APINotFound { provider_error, .. }) = result {
+            assert!(provider_error.contains("Transcript file not found"));
+        } else {
+            panic!("Expected APINotFound error");
         }
     }
 }

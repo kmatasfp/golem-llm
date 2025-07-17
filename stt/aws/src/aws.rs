@@ -337,6 +337,24 @@ impl AwsSignatureV4 {
     }
 }
 
+#[allow(async_fn_in_trait)]
+pub trait S3Service {
+    async fn put_object(
+        &self,
+        request_id: &str,
+        bucket: &str,
+        object_name: &str,
+        content: Bytes,
+    ) -> Result<(), golem_stt::error::Error>;
+
+    async fn delete_object(
+        &self,
+        request_id: &str,
+        bucket: &str,
+        object_name: &str,
+    ) -> Result<(), golem_stt::error::Error>;
+}
+
 pub struct S3Client<HC: HttpClient> {
     http_client: Arc<HC>,
     signer: AwsSignatureV4,
@@ -354,8 +372,10 @@ impl<HC: HttpClient> S3Client<HC> {
             signer: AwsSignatureV4::for_s3(access_key, secret_key, region),
         }
     }
+}
 
-    pub async fn put_object(
+impl<HC: HttpClient> S3Service for S3Client<HC> {
+    async fn put_object(
         &self,
         request_id: &str,
         bucket: &str,
@@ -419,7 +439,7 @@ impl<HC: HttpClient> S3Client<HC> {
         }
     }
 
-    pub async fn delete_object(
+    async fn delete_object(
         &self,
         request_id: &str,
         bucket: &str,
@@ -797,6 +817,57 @@ pub struct WordMetadata {
     pub speaker_label: Option<String>,
 }
 
+pub trait TranscribeService {
+    async fn create_vocabulary(
+        &self,
+        vocabulary_name: String,
+        language_code: String,
+        phrases: Vec<String>,
+    ) -> Result<crate::aws::CreateVocabularyResponse, golem_stt::error::Error>;
+
+    async fn get_vocabulary(
+        &self,
+        vocabulary_name: &str,
+    ) -> Result<crate::aws::GetVocabularyResponse, golem_stt::error::Error>;
+
+    async fn wait_for_vocabulary_ready<RT: AsyncRuntime>(
+        &self,
+        runtime: &RT,
+        request_id: &str,
+        max_wait_time: Duration,
+    ) -> Result<(), golem_stt::error::Error>;
+
+    async fn delete_vocabulary(&self, vocabulary_name: &str)
+        -> Result<(), golem_stt::error::Error>;
+
+    async fn start_transcription_job(
+        &self,
+        transcription_job_name: String,
+        media_file_uri: String,
+        audio_config: AudioConfig,
+        transcription_config: Option<TranscriptionConfig>,
+        vocabulary_name: Option<String>,
+    ) -> Result<crate::aws::StartTranscriptionJobResponse, golem_stt::error::Error>;
+
+    async fn get_transcription_job(
+        &self,
+        transcription_job_name: String,
+    ) -> Result<crate::aws::GetTranscriptionJobResponse, golem_stt::error::Error>;
+
+    async fn wait_for_transcription_job_completion<RT: AsyncRuntime>(
+        &self,
+        runtime: &RT,
+        transcription_job_name: &str,
+        max_wait_time: Duration,
+    ) -> Result<crate::aws::GetTranscriptionJobResponse, golem_stt::error::Error>;
+
+    async fn download_transcript_json(
+        &self,
+        transcription_job_name: &str,
+        transcript_uri: &str,
+    ) -> Result<TranscribeOutput, golem_stt::error::Error>;
+}
+
 pub struct TranscribeClient<HC: golem_stt::client::HttpClient> {
     http_client: std::sync::Arc<HC>,
     signer: AwsSignatureV4,
@@ -814,8 +885,9 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
             signer: AwsSignatureV4::for_transcribe(access_key, secret_key, region),
         }
     }
-
-    pub async fn create_vocabulary(
+}
+impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<HC> {
+    async fn create_vocabulary(
         &self,
         vocabulary_name: String,
         language_code: String,
@@ -927,7 +999,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         }
     }
 
-    pub async fn get_vocabulary(
+    async fn get_vocabulary(
         &self,
         vocabulary_name: &str,
     ) -> Result<GetVocabularyResponse, golem_stt::error::Error> {
@@ -1026,7 +1098,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         }
     }
 
-    pub async fn wait_for_vocabulary_ready<RT: AsyncRuntime>(
+    async fn wait_for_vocabulary_ready<RT: AsyncRuntime>(
         &self,
         runtime: &RT,
         request_id: &str,
@@ -1076,7 +1148,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         }
     }
 
-    pub async fn delete_vocabulary(
+    async fn delete_vocabulary(
         &self,
         vocabulary_name: &str,
     ) -> Result<(), golem_stt::error::Error> {
@@ -1173,7 +1245,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         }
     }
 
-    pub async fn start_transcription_job(
+    async fn start_transcription_job(
         &self,
         transcription_job_name: String,
         media_file_uri: String,
@@ -1363,7 +1435,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         }
     }
 
-    pub async fn get_transcription_job(
+    async fn get_transcription_job(
         &self,
         transcription_job_name: String,
     ) -> Result<GetTranscriptionJobResponse, golem_stt::error::Error> {
@@ -1469,7 +1541,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         }
     }
 
-    pub async fn wait_for_transcription_job_completion<RT: AsyncRuntime>(
+    async fn wait_for_transcription_job_completion<RT: AsyncRuntime>(
         &self,
         runtime: &RT,
         transcription_job_name: &str,
@@ -1526,7 +1598,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
         }
     }
 
-    pub async fn download_transcript_json(
+    async fn download_transcript_json(
         &self,
         transcription_job_name: &str,
         transcript_uri: &str,
