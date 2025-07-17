@@ -4,13 +4,120 @@ use crate::aws::{S3Client, S3Service, TranscribeClient, TranscribeOutput, Transc
 use golem_stt::{
     client::{ReqwestHttpClient, SttProviderClient},
     error::Error,
-    runtime::AsyncRuntime,
-    runtime::WasiAyncRuntime,
+    languages::Language,
+    runtime::{AsyncRuntime, WasiAyncRuntime},
 };
 
 use bytes::Bytes;
 use log::trace;
 use wasi_async_runtime::Reactor;
+
+const AWS_TRANSCRIBE_SUPPORTED_LANGUAGES: [Language; 104] = [
+    Language::new("ab-GE", "Abkhaz", "აფხაზური"),
+    Language::new("af-ZA", "Afrikaans", "Afrikaans"),
+    Language::new("ar-AE", "Arabic, Gulf", "العربية الخليجية"),
+    Language::new("ar-SA", "Arabic, Modern Standard", "العربية الفصحى"),
+    Language::new("hy-AM", "Armenian", "հայերեն"),
+    Language::new("ast-ES", "Asturian", "asturianu"),
+    Language::new("az-AZ", "Azerbaijani", "azərbaycan dili"),
+    Language::new("ba-RU", "Bashkir", "башҡорт теле"),
+    Language::new("eu-ES", "Basque", "euskera"),
+    Language::new("be-BY", "Belarusian", "беларуская"),
+    Language::new("bn-IN", "Bengali", "বাংলা"),
+    Language::new("bs-BA", "Bosnian", "bosanski"),
+    Language::new("bg-BG", "Bulgarian", "български"),
+    Language::new("ca-ES", "Catalan", "català"),
+    Language::new("ckb-IR", "Central Kurdish, Iran", "کوردیی ناوەندی"),
+    Language::new("ckb-IQ", "Central Kurdish, Iraq", "کوردیی ناوەندی"),
+    Language::new("zh-HK", "Chinese, Cantonese", "廣東話"),
+    Language::new("zh-CN", "Chinese, Simplified", "中文（简体）"),
+    Language::new("zh-TW", "Chinese, Traditional", "中文（繁體）"),
+    Language::new("hr-HR", "Croatian", "hrvatski"),
+    Language::new("cs-CZ", "Czech", "čeština"),
+    Language::new("da-DK", "Danish", "dansk"),
+    Language::new("nl-NL", "Dutch", "Nederlands"),
+    Language::new("en-AU", "English, Australian", "English (Australia)"),
+    Language::new("en-GB", "English, British", "English (United Kingdom)"),
+    Language::new("en-IN", "English, Indian", "English (India)"),
+    Language::new("en-IE", "English, Irish", "English (Ireland)"),
+    Language::new("en-NZ", "English, New Zealand", "English (New Zealand)"),
+    Language::new("en-AB", "English, Scottish", "English (Scotland)"),
+    Language::new("en-ZA", "English, South African", "English (South Africa)"),
+    Language::new("en-US", "English, US", "English (United States)"),
+    Language::new("en-WL", "English, Welsh", "English (Wales)"),
+    Language::new("et-EE", "Estonian", "eesti"),
+    Language::new("et-ET", "Estonian", "eesti"),
+    Language::new("fa-IR", "Farsi", "فارسی"),
+    Language::new("fi-FI", "Finnish", "suomi"),
+    Language::new("fr-FR", "French", "français"),
+    Language::new("fr-CA", "French, Canadian", "français (Canada)"),
+    Language::new("gl-ES", "Galician", "galego"),
+    Language::new("ka-GE", "Georgian", "ქართული"),
+    Language::new("de-DE", "German", "Deutsch"),
+    Language::new("de-CH", "German, Swiss", "Deutsch (Schweiz)"),
+    Language::new("el-GR", "Greek", "ελληνικά"),
+    Language::new("gu-IN", "Gujarati", "ગુજરાતી"),
+    Language::new("ha-NG", "Hausa", "Hausa"),
+    Language::new("he-IL", "Hebrew", "עברית"),
+    Language::new("hi-IN", "Hindi, Indian", "हिन्दी"),
+    Language::new("hu-HU", "Hungarian", "magyar"),
+    Language::new("is-IS", "Icelandic", "íslenska"),
+    Language::new("id-ID", "Indonesian", "Bahasa Indonesia"),
+    Language::new("it-IT", "Italian", "italiano"),
+    Language::new("ja-JP", "Japanese", "日本語"),
+    Language::new("kab-DZ", "Kabyle", "Taqbaylit"),
+    Language::new("kn-IN", "Kannada", "ಕನ್ನಡ"),
+    Language::new("kk-KZ", "Kazakh", "қазақ тілі"),
+    Language::new("rw-RW", "Kinyarwanda", "Ikinyarwanda"),
+    Language::new("ko-KR", "Korean", "한국어"),
+    Language::new("ky-KG", "Kyrgyz", "кыргызча"),
+    Language::new("lv-LV", "Latvian", "latviešu"),
+    Language::new("lt-LT", "Lithuanian", "lietuvių"),
+    Language::new("lg-IN", "Luganda", "Luganda"),
+    Language::new("mk-MK", "Macedonian", "македонски"),
+    Language::new("ms-MY", "Malay", "Bahasa Melayu"),
+    Language::new("ml-IN", "Malayalam", "മലയാളം"),
+    Language::new("mt-MT", "Maltese", "Malti"),
+    Language::new("mr-IN", "Marathi", "मराठी"),
+    Language::new("mhr-RU", "Meadow Mari", "олык марий"),
+    Language::new("mn-MN", "Mongolian", "монгол"),
+    Language::new("no-NO", "Norwegian Bokmål", "norsk"),
+    Language::new("or-IN", "Odia/Oriya", "ଓଡ଼ିଆ"),
+    Language::new("ps-AF", "Pashto", "پښتو"),
+    Language::new("pl-PL", "Polish", "polski"),
+    Language::new("pt-PT", "Portuguese", "português"),
+    Language::new("pt-BR", "Portuguese, Brazilian", "português (Brasil)"),
+    Language::new("pa-IN", "Punjabi", "ਪੰਜਾਬੀ"),
+    Language::new("ro-RO", "Romanian", "română"),
+    Language::new("ru-RU", "Russian", "русский"),
+    Language::new("sr-RS", "Serbian", "српски"),
+    Language::new("si-LK", "Sinhala", "සිංහල"),
+    Language::new("sk-SK", "Slovak", "slovenčina"),
+    Language::new("sl-SI", "Slovenian", "slovenščina"),
+    Language::new("so-SO", "Somali", "Soomaali"),
+    Language::new("es-ES", "Spanish", "español"),
+    Language::new("es-US", "Spanish, US", "español (Estados Unidos)"),
+    Language::new("su-ID", "Sundanese", "basa Sunda"),
+    Language::new("sw-KE", "Swahili, Kenya", "Kiswahili (Kenya)"),
+    Language::new("sw-BI", "Swahili, Burundi", "Kiswahili (Burundi)"),
+    Language::new("sw-RW", "Swahili, Rwanda", "Kiswahili (Rwanda)"),
+    Language::new("sw-TZ", "Swahili, Tanzania", "Kiswahili (Tanzania)"),
+    Language::new("sw-UG", "Swahili, Uganda", "Kiswahili (Uganda)"),
+    Language::new("sv-SE", "Swedish", "svenska"),
+    Language::new("tl-PH", "Tagalog/Filipino", "Tagalog"),
+    Language::new("ta-IN", "Tamil", "தமிழ்"),
+    Language::new("tt-RU", "Tatar", "татарча"),
+    Language::new("te-IN", "Telugu", "తెలుగు"),
+    Language::new("th-TH", "Thai", "ไทย"),
+    Language::new("tr-TR", "Turkish", "Türkçe"),
+    Language::new("uk-UA", "Ukrainian", "українська"),
+    Language::new("ug-CN", "Uyghur", "ئۇيغۇرچە"),
+    Language::new("uz-UZ", "Uzbek", "oʻzbekcha"),
+    Language::new("vi-VN", "Vietnamese", "Tiếng Việt"),
+    Language::new("cy-WL", "Welsh", "Cymraeg"),
+    Language::new("wo-SN", "Wolof", "Wolof"),
+    Language::new("zu-ZA", "Zulu", "isiZulu"),
+];
 
 #[allow(non_camel_case_types)]
 #[allow(unused)]
@@ -120,9 +227,15 @@ impl<S3: S3Service, TC: TranscribeService, RT: AsyncRuntime> TranscribeApi<S3, T
         }
     }
 
-    // pub fn get_supported_languages(&self) -> &[Language] {
-    //     &AWS_TRANSCRIBE_SUPPORTED_LANGUAGES
-    // }
+    pub fn is_supported_language(language_code: &str) -> bool {
+        AWS_TRANSCRIBE_SUPPORTED_LANGUAGES
+            .iter()
+            .any(|lang| lang.code == language_code)
+    }
+
+    pub fn get_supported_languages(&self) -> &[Language] {
+        &AWS_TRANSCRIBE_SUPPORTED_LANGUAGES
+    }
 }
 
 impl
