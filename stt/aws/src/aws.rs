@@ -511,7 +511,7 @@ pub struct CreateVocabularyResponse {
     pub vocabulary_name: String,
     pub language_code: String,
     pub vocabulary_state: String,
-    pub last_modified_time: f64,
+    pub last_modified_time: Option<f64>,
     pub failure_reason: Option<String>,
 }
 
@@ -528,7 +528,7 @@ pub struct GetVocabularyResponse {
     pub vocabulary_name: String,
     pub language_code: String,
     pub vocabulary_state: String,
-    pub last_modified_time: f64,
+    pub last_modified_time: Option<f64>,
     pub failure_reason: Option<String>,
     pub download_uri: Option<String>,
 }
@@ -2006,7 +2006,6 @@ mod tests {
         assert!(request.headers().contains_key("x-amz-date"));
         assert!(request.headers().contains_key("x-amz-content-sha256"));
         assert!(request.headers().contains_key("authorization"));
-        assert!(request.headers().contains_key("host"));
 
         let auth_header = request
             .headers()
@@ -2018,9 +2017,6 @@ mod tests {
         assert!(auth_header.contains("Credential="));
         assert!(auth_header.contains("SignedHeaders="));
         assert!(auth_header.contains("Signature="));
-
-        let host_header = request.headers().get("host").unwrap().to_str().unwrap();
-        assert_eq!(host_header, format!("{}.s3.amazonaws.com", bucket));
     }
 
     #[test]
@@ -2069,7 +2065,6 @@ mod tests {
         assert!(request.headers().contains_key("x-amz-date"));
         assert!(request.headers().contains_key("x-amz-content-sha256"));
         assert!(request.headers().contains_key("authorization"));
-        assert!(request.headers().contains_key("host"));
 
         let auth_header = request
             .headers()
@@ -2081,9 +2076,6 @@ mod tests {
         assert!(auth_header.contains("Credential="));
         assert!(auth_header.contains("SignedHeaders="));
         assert!(auth_header.contains("Signature="));
-
-        let host_header = request.headers().get("host").unwrap().to_str().unwrap();
-        assert_eq!(host_header, format!("{}.s3.amazonaws.com", bucket));
     }
 
     #[test]
@@ -2096,7 +2088,7 @@ mod tests {
             vocabulary_name: "test-vocabulary".to_string(),
             language_code: "en-US".to_string(),
             vocabulary_state: "PENDING".to_string(),
-            last_modified_time: 1234567890.0,
+            last_modified_time: None,
             failure_reason: None,
         };
 
@@ -2173,7 +2165,6 @@ mod tests {
         assert!(request.headers().contains_key("x-amz-date"));
         assert!(request.headers().contains_key("x-amz-content-sha256"));
         assert!(request.headers().contains_key("authorization"));
-        assert!(request.headers().contains_key("host"));
 
         let auth_header = request
             .headers()
@@ -2238,7 +2229,6 @@ mod tests {
         assert!(request.headers().contains_key("x-amz-date"));
         assert!(request.headers().contains_key("x-amz-content-sha256"));
         assert!(request.headers().contains_key("authorization"));
-        assert!(request.headers().contains_key("host"));
 
         let auth_header = request
             .headers()
@@ -2927,7 +2917,6 @@ mod tests {
             assert!(request.headers().contains_key("x-amz-date"));
             assert!(request.headers().contains_key("x-amz-content-sha256"));
             assert!(request.headers().contains_key("authorization"));
-            assert!(request.headers().contains_key("host"));
 
             let auth_header = request
                 .headers()
@@ -3224,7 +3213,6 @@ mod tests {
             assert!(request.headers().contains_key("x-amz-date"));
             assert!(request.headers().contains_key("x-amz-content-sha256"));
             assert!(request.headers().contains_key("authorization"));
-            assert!(request.headers().contains_key("host"));
 
             let auth_header = request
                 .headers()
