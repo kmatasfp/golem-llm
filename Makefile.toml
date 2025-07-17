@@ -137,19 +137,9 @@ script = '''
 
 is_portable = eq ${1} "--portable"
 
-# LLM targets
-llm_targets = array llm_openai llm_anthropic llm_grok llm_openrouter llm_ollama
-for target in ${llm_targets}
-    if is_portable
-        cp target/wasm32-wasip1/debug/golem_${target}.wasm components/debug/golem_${target}-portable.wasm
-    else
-        cp target/wasm32-wasip1/debug/golem_${target}.wasm components/debug/golem_${target}.wasm
-    end
-end
+targets = array llm_openai llm_anthropic llm_grok llm_openrouter llm_ollama web_search_brave web_search_google web_search_serper web_search_tavily
 
-# WebSearch targets - use correct target names that match the actual WASM files
-websearch_targets = array web_search_brave web_search_google web_search_serper web_search_tavily
-for target in ${websearch_targets}
+for target in ${targets}
     if is_portable
         cp target/wasm32-wasip1/debug/golem_${target}.wasm components/debug/golem_${target}-portable.wasm
     else
@@ -164,19 +154,9 @@ script = '''
 
 is_portable = eq ${1} "--portable"
 
-# LLM targets
-llm_targets = array llm_openai llm_anthropic llm_grok llm_openrouter llm_ollama
-for target in ${llm_targets}
-    if is_portable
-        cp target/wasm32-wasip1/release/golem_${target}.wasm components/release/golem_${target}-portable.wasm
-    else
-        cp target/wasm32-wasip1/release/golem_${target}.wasm components/release/golem_${target}.wasm
-    end
-end
+targets = array llm_openai llm_anthropic llm_grok llm_openrouter llm_ollama websearch_brave websearch_google websearch_serper websearch_tavily
 
-# WebSearch targets
-websearch_targets = array  websearch_brave websearch_google websearch_serper websearch_tavily
-for target in ${websearch_targets}
+for target in ${targets}
     if is_portable
         cp target/wasm32-wasip1/release/golem_${target}.wasm components/release/golem_${target}-portable.wasm
     else

@@ -1,6 +1,8 @@
 #[allow(static_mut_refs)]
 mod bindings;
 
+use golem_rust::atomically;
+use crate::bindings::test::helper_client::test_helper_client::TestHelperApi;
 use crate::bindings::exports::test::websearch_exports::test_websearch_api::*;
 use crate::bindings::golem::web_search::web_search;
 use crate::bindings::golem::web_search::types::{
@@ -110,7 +112,9 @@ impl Guest for Component {
         }
     }
 
-    /// test2 demonstrates paginated search using search sessions
+    /// test2 simulates a crash during a streaming web search response, but only first time.
+    /// It demonstrates paginated search using search sessions.
+    /// after the automatic recovery it will continue and finish the request successfully.
     fn test2() -> String {
         let params = SearchParams {
             query: "Rust programming language tutorials".to_string(),
@@ -139,6 +143,8 @@ impl Guest for Component {
 
         let mut output = String::new();
         output.push_str("Search session started successfully!\n\n");
+        let name = std::env::var("GOLEM_WORKER_NAME").unwrap();
+        let round = 0;
 
         // Get first page
         println!("Getting first page...");
@@ -155,6 +161,17 @@ impl Guest for Component {
                 println!("{}", error_msg);
                 output.push_str(&format!("{}\n\n", error_msg));
             }
+        }
+
+        // Crash simulation before getting second page
+        if round == 2 {
+            atomically(|| {
+                let client = TestHelperApi::new(&name);
+                let answer = client.blocking_inc_and_get();
+                if answer == 1 {
+                    panic!("Simulating crash")
+                }
+            });
         }
 
         // Get second page

@@ -30,6 +30,10 @@ path = "wit-generated"
 [package.metadata.component.target.dependencies]
 "golem:web-search" = { path = "wit-generated/deps/golem-websearch" }
 "test:websearch-exports" = { path = "wit-generated/deps/test_websearch-exports" }
+"wasi:io" = { path = "wit-generated/deps/io" }
+"wasi:clocks" = { path = "wit-generated/deps/clocks" }
+"golem:rpc" = { path = "wit-generated/deps/golem-rpc" }
+"test:helper-client" = { path = "wit-generated/deps/test_helper-client" }
 
 [package.metadata.component.bindings]
 # See https://github.com/bytecodealliance/cargo-component/blob/main/src/metadata.rs#L62
