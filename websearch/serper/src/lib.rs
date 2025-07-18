@@ -1,104 +1,73 @@
 mod client;
 mod conversions;
 
+use std::cell::RefCell;
+
 use crate::client::{SearchRequest, SerperSearchApi};
 use crate::conversions::{params_to_request, response_to_results, validate_search_params};
-use golem_rust::wasm_rpc::Pollable;
-use golem_web_search::durability::ExtendedwebsearchGuest;
-use golem_web_search::event_source::error::EventSourceSearchError;
 use golem_web_search::golem::web_search::web_search::{
     Guest, GuestSearchSession, SearchError, SearchMetadata, SearchParams, SearchResult,
     SearchSession,
 };
-use golem_web_search::session_stream::{GuestSearchStream, SearchStreamState};
+
 use golem_web_search::LOGGING_STATE;
-use log::trace;
-use std::cell::{Ref, RefCell, RefMut};
 
-struct SerperSearchStream {
-    _api: RefCell<Option<SerperSearchApi>>,
-    _current_request: RefCell<Option<SearchRequest>>,
-    _original_params: RefCell<Option<SearchParams>>,
-    _current_start_index: RefCell<u32>,
-    _last_metadata: RefCell<Option<SearchMetadata>>,
-    _has_more_results: RefCell<bool>,
-    finished: RefCell<bool>,
-    failure: Option<EventSourceSearchError>,
+struct SerperSearch {
+    client: SerperSearchApi,
+    request: SearchRequest,
+    params: SearchParams,
+    finished: bool,
+    metadata: Option<SearchMetadata>,
 }
 
-impl SerperSearchStream {
-    pub fn new(
-        api: SerperSearchApi,
-        request: SearchRequest,
-        params: SearchParams,
-    ) -> GuestSearchStream<Self> {
-        GuestSearchStream::new(SerperSearchStream {
-            _api: RefCell::new(Some(api)),
-            _current_request: RefCell::new(Some(request)),
-            _original_params: RefCell::new(Some(params)),
-            _current_start_index: RefCell::new(0),
-            finished: RefCell::new(false),
-            failure: None,
-            _last_metadata: RefCell::new(None),
-            _has_more_results: RefCell::new(true),
-        })
+impl SerperSearch {
+    fn new(client: SerperSearchApi, request: SearchRequest, params: SearchParams) -> Self {
+        Self {
+            client,
+            request,
+            params,
+            finished: false,
+            metadata: None,
+        }
     }
 
-    pub fn _failed(error: EventSourceSearchError) -> GuestSearchStream<Self> {
-        GuestSearchStream::new(SerperSearchStream {
-            _api: RefCell::new(None),
-            _current_request: RefCell::new(None),
-            _original_params: RefCell::new(None),
-            _current_start_index: RefCell::new(0),
-            finished: RefCell::new(true),
-            failure: Some(error),
-            _last_metadata: RefCell::new(None),
-            _has_more_results: RefCell::new(false),
-        })
+    fn next_page(&mut self) -> Result<Vec<SearchResult>, SearchError> {
+        if self.finished {
+            return Ok(vec![]);
+        }
+
+        let response = self.client.search(self.request.clone())?;
+        let (results, metadata) = response_to_results(response, &self.params);
+
+        self.metadata = metadata;
+        self.finished = true;
+
+        Ok(results)
+    }
+
+    fn get_metadata(&self) -> Option<SearchMetadata> {
+        self.metadata.clone()
     }
 }
 
-impl SearchStreamState for SerperSearchStream {
-    fn failure(&self) -> &Option<EventSourceSearchError> {
-        &self.failure
+// Create a wrapper that implements GuestSearchSession properly
+struct SerperSearchSession(RefCell<SerperSearch>);
+
+impl SerperSearchSession {
+    fn new(search: SerperSearch) -> Self {
+        Self(RefCell::new(search))
+    }
+}
+
+impl GuestSearchSession for SerperSearchSession {
+    fn next_page(&self) -> Result<Vec<SearchResult>, SearchError> {
+        let mut search = self.0.borrow_mut();
+        search.next_page()
     }
 
-    fn is_finished(&self) -> bool {
-        *self.finished.borrow()
-    }
-
-    fn set_finished(&self) {
-        *self.finished.borrow_mut() = true;
-    }
-
-    fn stream(
-        &self,
-    ) -> Ref<
-        Option<
-            Box<
-                dyn golem_web_search::event_source::stream::WebsearchStream<
-                    Item = golem_web_search::event_source::types::WebsearchStreamEntry,
-                    Error = golem_web_search::event_source::error::StreamError<reqwest::Error>,
-                >,
-            >,
-        >,
-    > {
-        unimplemented!()
-    }
-
-    fn stream_mut(
-        &self,
-    ) -> RefMut<
-        Option<
-            Box<
-                dyn golem_web_search::event_source::stream::WebsearchStream<
-                        Item = golem_web_search::event_source::types::WebsearchStreamEntry,
-                        Error = golem_web_search::event_source::error::StreamError<reqwest::Error>,
-                    > + '_,
-            >,
-        >,
-    > {
-        unimplemented!()
+    fn get_metadata(&self) -> Option<SearchMetadata> {
+        let search = self.0.borrow();
+        search.get_metadata()
     }
 }
 
@@ -121,41 +90,32 @@ impl SerperSearchComponent {
         validate_search_params(&params)?;
 
         let client = Self::create_client()?;
-        let mut request = params_to_request(params.clone())?;
-        request.start = Some(0);
-        trace!("Executing one-shot Serper Search: {request:?}");
+        let request = params_to_request(params.clone())?;
 
-        match client.search(request) {
-            Ok(response) => {
-                let (results, metadata) = response_to_results(response, &params, 0);
-                Ok((results, metadata))
-            }
-            Err(err) => Err(err),
-        }
+        let response = client.search(request)?;
+        let (results, metadata) = response_to_results(response, &params);
+
+        Ok((results, metadata))
     }
 
-    fn start_search_session(
-        params: SearchParams,
-    ) -> Result<GuestSearchStream<SerperSearchStream>, SearchError> {
+    fn start_search_session(params: SearchParams) -> Result<SerperSearchSession, SearchError> {
         validate_search_params(&params)?;
 
         let client = Self::create_client()?;
         let request = params_to_request(params.clone())?;
 
-        Ok(SerperSearchStream::new(client, request, params))
+        let search = SerperSearch::new(client, request, params);
+        Ok(SerperSearchSession::new(search))
     }
 }
-
-pub struct SerperSearchSession(GuestSearchStream<SerperSearchStream>);
 
 impl Guest for SerperSearchComponent {
     type SearchSession = SerperSearchSession;
 
     fn start_search(params: SearchParams) -> Result<SearchSession, SearchError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
-
         match Self::start_search_session(params) {
-            Ok(session) => Ok(SearchSession::new(SerperSearchSession(session))),
+            Ok(session) => Ok(SearchSession::new(session)),
             Err(err) => Err(err),
         }
     }
@@ -164,92 +124,7 @@ impl Guest for SerperSearchComponent {
         params: SearchParams,
     ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
-
         Self::execute_search(params)
-    }
-}
-
-impl ExtendedwebsearchGuest for SerperSearchComponent {
-    fn unwrapped_search_session(params: SearchParams) -> Result<SerperSearchSession, SearchError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
-
-        Self::start_search_session(params).map(SerperSearchSession)
-    }
-
-    fn subscribe(session: &Self::SearchSession) -> Pollable {
-        session.0.subscribe()
-    }
-}
-
-impl GuestSearchSession for SerperSearchSession {
-    fn next_page(&self) -> Result<Vec<SearchResult>, SearchError> {
-        let stream = self.0.state();
-        // Check if the stream has failed
-        if let Some(error) = stream.failure() {
-            return Err(SearchError::BackendError(format!(
-                "Stream failed: {error:?}"
-            )));
-        }
-        if stream.is_finished() {
-            return Ok(vec![]);
-        }
-        let api_ref = stream._api.borrow();
-        let request_ref = stream._current_request.borrow();
-        let params_ref = stream._original_params.borrow();
-        let start_index_ref = stream._current_start_index.borrow();
-        let api = match api_ref.as_ref() {
-            Some(api) => api,
-            None => {
-                stream.set_finished();
-                return Err(SearchError::BackendError(
-                    "API client not available".to_string(),
-                ));
-            }
-        };
-        let mut request = match request_ref.as_ref() {
-            Some(req) => req.clone(),
-            None => {
-                stream.set_finished();
-                return Err(SearchError::BackendError(
-                    "Request not available".to_string(),
-                ));
-            }
-        };
-        let params = match params_ref.as_ref() {
-            Some(p) => p,
-            None => {
-                stream.set_finished();
-                return Err(SearchError::BackendError(
-                    "Original params not available".to_string(),
-                ));
-            }
-        };
-        request.start = Some(*start_index_ref);
-        trace!("Executing paginated Serper Search: {request:?}");
-        match api.search(request.clone()) {
-            Ok(response) => {
-                let (results, metadata) = response_to_results(response, params, *start_index_ref);
-                let max_results = params.max_results.unwrap_or(10);
-                let new_start = *start_index_ref + max_results;
-                drop(start_index_ref);
-                *stream._current_start_index.borrow_mut() = new_start;
-                if let Some(meta) = metadata.as_ref() {
-                    *stream._last_metadata.borrow_mut() = Some(meta.clone());
-                }
-                if results.len() < (max_results as usize) {
-                    stream.set_finished();
-                }
-                Ok(results)
-            }
-            Err(err) => {
-                stream.set_finished();
-                Err(err)
-            }
-        }
-    }
-    fn get_metadata(&self) -> Option<SearchMetadata> {
-        let stream = self.0.state();
-        stream._last_metadata.borrow().clone()
     }
 }
 

@@ -1,7 +1,8 @@
 use golem_web_search::error::from_reqwest_error;
 use golem_web_search::golem::web_search::web_search::SearchError;
 use log::trace;
-use reqwest::{Client, Method, Response};
+use reqwest::Method;
+use reqwest::{Client, Response};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -17,7 +18,7 @@ pub struct SerperSearchApi {
 impl SerperSearchApi {
     pub fn new(api_key: String) -> Self {
         let client = Client::builder()
-            .user_agent("Golem-Web-Search-Serper/1.0")
+            .user_agent("Golem-Web-Search/1.0")
             .build()
             .expect("Failed to initialize HTTP client");
 
@@ -27,7 +28,7 @@ impl SerperSearchApi {
     pub fn search(&self, request: SearchRequest) -> Result<SearchResponse, SearchError> {
         trace!("Sending request to Serper Search API: {request:?}");
 
-        let response: Response = self
+        let response = self
             .client
             .request(Method::POST, BASE_URL)
             .header("X-API-KEY", &self.api_key)
@@ -44,36 +45,16 @@ impl SerperSearchApi {
 pub struct SearchRequest {
     pub q: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub gl: Option<String>, // Country code (e.g., "us", "uk", "in")
+    pub gl: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub hl: Option<String>, // Language code (e.g., "en", "es", "fr")
+    pub hl: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub num: Option<u32>, // Number of results (1-100)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub start: Option<u32>, // Starting index for pagination
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub safe: Option<String>, // Safe search: "active", "off"
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tbm: Option<String>, // Search type: "isch" for images, "nws" for news
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tbs: Option<String>, // Time-based search filters
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub autocorrect: Option<bool>, // Enable/disable autocorrect
+    pub num: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResponse {
     pub organic: Vec<SearchResult>,
-    #[serde(rename = "peopleAlsoAsk")]
-    pub people_also_ask: Option<Vec<PeopleAlsoAsk>>,
-    #[serde(rename = "relatedSearches")]
-    pub related_searches: Option<Vec<RelatedSearch>>,
-    pub images: Option<Vec<ImageResult>>,
-    pub news: Option<Vec<NewsResult>>,
-    #[serde(rename = "answerBox")]
-    pub answer_box: Option<AnswerBox>,
-    #[serde(rename = "knowledgeGraph")]
-    pub knowledge_graph: Option<KnowledgeGraph>,
     #[serde(rename = "searchParameters")]
     pub search_parameters: SearchParameters,
 }
@@ -83,81 +64,7 @@ pub struct SearchResult {
     pub title: String,
     pub link: String,
     pub snippet: String,
-    #[serde(rename = "displayLink")]
-    pub display_link: Option<String>,
     pub position: u32,
-    pub date: Option<String>,
-    #[serde(rename = "sitelinks")]
-    pub site_links: Option<Vec<SiteLink>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SiteLink {
-    pub title: String,
-    pub link: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PeopleAlsoAsk {
-    pub question: String,
-    pub answer: String,
-    pub title: String,
-    pub link: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RelatedSearch {
-    pub query: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImageResult {
-    pub title: String,
-    #[serde(rename = "imageUrl")]
-    pub image_url: String,
-    #[serde(rename = "imageWidth")]
-    pub image_width: Option<u32>,
-    #[serde(rename = "imageHeight")]
-    pub image_height: Option<u32>,
-    #[serde(rename = "thumbnailUrl")]
-    pub thumbnail_url: Option<String>,
-    pub source: String,
-    pub link: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NewsResult {
-    pub title: String,
-    pub link: String,
-    pub snippet: String,
-    pub date: String,
-    pub source: String,
-    #[serde(rename = "imageUrl")]
-    pub image_url: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AnswerBox {
-    pub title: Option<String>,
-    pub answer: String,
-    pub link: Option<String>,
-    pub snippet: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KnowledgeGraph {
-    pub title: String,
-    #[serde(rename = "type")]
-    pub kg_type: Option<String>,
-    pub website: Option<String>,
-    #[serde(rename = "imageUrl")]
-    pub image_url: Option<String>,
-    pub description: Option<String>,
-    #[serde(rename = "descriptionSource")]
-    pub description_source: Option<String>,
-    #[serde(rename = "descriptionLink")]
-    pub description_link: Option<String>,
-    pub attributes: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,10 +73,6 @@ pub struct SearchParameters {
     #[serde(rename = "type")]
     pub search_type: String,
     pub engine: String,
-    pub gl: Option<String>,
-    pub hl: Option<String>,
-    pub num: Option<u32>,
-    pub start: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -198,7 +101,6 @@ fn parse_response<T: DeserializeOwned + Debug>(response: Response) -> Result<T, 
                     401 => SearchError::BackendError("Invalid API key".to_string()),
                     403 => SearchError::BackendError("API access forbidden".to_string()),
                     429 => SearchError::RateLimited(60), // Default to 60 seconds
-                    500 => SearchError::BackendError("Server error".to_string()),
                     _ => SearchError::BackendError(format!(
                         "Request failed with {}: {}",
                         status, error_body.message

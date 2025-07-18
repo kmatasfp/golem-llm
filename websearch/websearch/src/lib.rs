@@ -1,10 +1,7 @@
 pub mod config;
 pub mod durability;
 pub mod error;
-pub mod session_stream;
-
-#[allow(dead_code)]
-pub mod event_source;
+pub mod types;
 
 wit_bindgen::generate!({
     path: "../wit",
