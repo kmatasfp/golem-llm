@@ -1,31 +1,26 @@
 pub mod error;
-pub mod types;
-pub mod stream;
 mod event_stream;
 mod ndjson_stream;
 mod parser;
+pub mod stream;
+pub mod types;
 mod utf8_stream;
-pub use error::{ StreamError };
-pub use types::{
-    SearchResult,
-    ImageResult,
-    SearchMetadata,
-    SafeSearchLevel,
-    RateLimitInfo,
-    StreamEnd,
-};
-use crate::event_source::stream::WebsearchStream;
 use crate::event_source::event_stream::SseWebsearchStream;
+use crate::event_source::stream::WebsearchStream;
 use crate::event_source::types::WebsearchStreamEntry;
-pub use ndjson_stream::NdJsonWebsearchStream;
-pub use parser::{ RawEventLine, is_bom, is_lf, line };
-pub use stream::{ StreamType };
-pub use utf8_stream::Utf8Stream;
+pub use error::StreamError;
 use golem_rust::wasm_rpc::Pollable;
-use reqwest::{ Response, StatusCode };
+pub use ndjson_stream::NdJsonWebsearchStream;
+pub use parser::{is_bom, is_lf, line, RawEventLine};
 use reqwest::header::HeaderValue;
-use std::task::Poll;
+use reqwest::{Response, StatusCode};
 use std::error::Error as StdError;
+use std::task::Poll;
+pub use stream::StreamType;
+pub use types::{
+    ImageResult, RateLimitInfo, SafeSearchLevel, SearchMetadata, SearchResult, StreamEnd,
+};
+pub use utf8_stream::Utf8Stream;
 
 /// Represents connection state of an [`EventSource`]
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
@@ -52,7 +47,7 @@ impl EventSource {
                 let handle = unsafe {
                     std::mem::transmute::<
                         reqwest::InputStream,
-                        golem_rust::bindings::wasi::io::streams::InputStream
+                        golem_rust::bindings::wasi::io::streams::InputStream,
                     >(response.get_raw_input_stream())
                 };
 
@@ -84,7 +79,11 @@ impl EventSource {
 
     /// Returns current state of stream
     pub fn ready_state(&self) -> ReadyState {
-        if self.is_closed { ReadyState::Closed } else { ReadyState::Open }
+        if self.is_closed {
+            ReadyState::Closed
+        } else {
+            ReadyState::Open
+        }
     }
 
     /// Returns a `Pollable` object for event-driven readiness
@@ -102,22 +101,22 @@ impl EventSource {
         }
 
         match &mut self.stream {
-            StreamType::EventStream(s) =>
-                match s.poll_next() {
-                    Poll::Ready(Some(Ok(event))) =>
-                        Poll::Ready(Some(Ok(Event::Message(Box::new(event))))),
-                    Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(Box::new(err)))),
-                    Poll::Ready(None) => Poll::Ready(None),
-                    Poll::Pending => Poll::Pending,
+            StreamType::EventStream(s) => match s.poll_next() {
+                Poll::Ready(Some(Ok(event))) => {
+                    Poll::Ready(Some(Ok(Event::Message(Box::new(event)))))
                 }
-            StreamType::NdJsonStream(s) =>
-                match s.poll_next() {
-                    Poll::Ready(Some(Ok(event))) =>
-                        Poll::Ready(Some(Ok(Event::Message(Box::new(event))))),
-                    Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(Box::new(err)))),
-                    Poll::Ready(None) => Poll::Ready(None),
-                    Poll::Pending => Poll::Pending,
+                Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(Box::new(err)))),
+                Poll::Ready(None) => Poll::Ready(None),
+                Poll::Pending => Poll::Pending,
+            },
+            StreamType::NdJsonStream(s) => match s.poll_next() {
+                Poll::Ready(Some(Ok(event))) => {
+                    Poll::Ready(Some(Ok(Event::Message(Box::new(event)))))
                 }
+                Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(Box::new(err)))),
+                Poll::Ready(None) => Poll::Ready(None),
+                Poll::Pending => Poll::Pending,
+            },
         }
     }
 }
@@ -173,20 +172,20 @@ fn check_response(response: Response) -> Result<Response, Box<dyn StdError + Sen
         .and_then(|h| h.to_str().ok())
         .and_then(|s| s.parse::<mime::Mime>().ok())
         .map(|mime_type| {
-            matches!((mime_type.type_(), mime_type.subtype()), (mime::TEXT, mime::EVENT_STREAM)) ||
-                mime_type.subtype().as_str().contains("ndjson")
+            matches!(
+                (mime_type.type_(), mime_type.subtype()),
+                (mime::TEXT, mime::EVENT_STREAM)
+            ) || mime_type.subtype().as_str().contains("ndjson")
         })
         .unwrap_or(false);
 
     if is_valid {
         Ok(response)
     } else {
-        Err(
-            Box::new(
-                EventSourceError::InvalidContentType(
-                    content_type.cloned().unwrap_or_else(|| HeaderValue::from_static(""))
-                )
-            )
-        )
+        Err(Box::new(EventSourceError::InvalidContentType(
+            content_type
+                .cloned()
+                .unwrap_or_else(|| HeaderValue::from_static("")),
+        )))
     }
 }

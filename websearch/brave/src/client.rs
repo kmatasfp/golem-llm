@@ -1,10 +1,10 @@
-use golem_web_search::error::{ from_reqwest_error, error_from_status };
+use golem_web_search::error::{error_from_status, from_reqwest_error};
 use golem_web_search::golem::web_search::web_search::SearchError;
-use log::{ trace, warn };
-use reqwest::{ Client, Response };
+use log::{trace, warn};
 use reqwest::Method;
+use reqwest::{Client, Response};
 use serde::de::DeserializeOwned;
-use serde::{ Deserialize, Serialize };
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::time::Duration;
 
@@ -36,8 +36,7 @@ impl BraveSearchApi {
         trace!("Sending request to Brave Search API: {request:?}");
 
         // Build URL using reqwest's built-in URL builder for better encoding
-        let mut url = reqwest::Url
-            ::parse(BASE_URL)
+        let mut url = reqwest::Url::parse(BASE_URL)
             .map_err(|e| SearchError::BackendError(format!("Invalid base URL: {}", e)))?;
 
         {
@@ -114,7 +113,8 @@ impl BraveSearchApi {
 
         trace!("Final URL: {}", url.as_str());
 
-        let response: Response = self.client
+        let response: Response = self
+            .client
             .request(Method::GET, url)
             .header("X-Subscription-Token", &self.api_key)
             .header("Accept", "application/json")
@@ -587,23 +587,26 @@ fn parse_response<T: DeserializeOwned + Debug>(response: Response) -> Result<T, 
         // Try to get the response body as text for better debugging
         match response.text() {
             Ok(body_text) => {
-                warn!("Received {} response from Brave Search API. Body: {}", status, body_text);
+                warn!(
+                    "Received {} response from Brave Search API. Body: {}",
+                    status, body_text
+                );
 
                 // Try to parse as ErrorResponse first
                 if let Ok(error_body) = serde_json::from_str::<ErrorResponse>(&body_text) {
                     Err(error_from_status(status, Some(error_body.message)))
                 } else {
                     // If we can't parse the error, include the raw body
-                    Err(
-                        SearchError::BackendError(
-                            format!("Request failed with status {}: {}", status, body_text)
-                        )
-                    )
+                    Err(SearchError::BackendError(format!(
+                        "Request failed with status {}: {}",
+                        status, body_text
+                    )))
                 }
             }
-            Err(_) => {
-                Err(SearchError::BackendError(format!("Request failed with status {}", status)))
-            }
+            Err(_) => Err(SearchError::BackendError(format!(
+                "Request failed with status {}",
+                status
+            ))),
         }
     }
 }

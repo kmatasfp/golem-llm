@@ -3,15 +3,10 @@ mod conversions;
 
 use std::cell::RefCell;
 
-use crate::client::{ SearchRequest, TavilySearchApi };
-use crate::conversions::{ params_to_request, response_to_results, validate_search_params };
+use crate::client::{SearchRequest, TavilySearchApi};
+use crate::conversions::{params_to_request, response_to_results, validate_search_params};
 use golem_web_search::golem::web_search::web_search::{
-    Guest,
-    GuestSearchSession,
-    SearchError,
-    SearchMetadata,
-    SearchParams,
-    SearchResult,
+    Guest, GuestSearchSession, SearchError, SearchMetadata, SearchParams, SearchResult,
     SearchSession,
 };
 
@@ -81,26 +76,22 @@ impl TavilySearchComponent {
     const API_KEY_VAR: &'static str = "TAVILY_API_KEY";
 
     fn create_client() -> Result<TavilySearchApi, SearchError> {
-        let api_key = std::env
-            ::var(Self::API_KEY_VAR)
-            .map_err(|_| {
-                SearchError::BackendError("TAVILY_API_KEY environment variable not set".to_string())
-            })?;
+        let api_key = std::env::var(Self::API_KEY_VAR).map_err(|_| {
+            SearchError::BackendError("TAVILY_API_KEY environment variable not set".to_string())
+        })?;
 
         Ok(TavilySearchApi::new(api_key))
     }
 
     // Add getter for API key
     fn get_api_key() -> Result<String, SearchError> {
-        std::env
-            ::var(Self::API_KEY_VAR)
-            .map_err(|_| {
-                SearchError::BackendError("TAVILY_API_KEY environment variable not set".to_string())
-            })
+        std::env::var(Self::API_KEY_VAR).map_err(|_| {
+            SearchError::BackendError("TAVILY_API_KEY environment variable not set".to_string())
+        })
     }
 
     fn execute_search(
-        params: SearchParams
+        params: SearchParams,
     ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
         validate_search_params(&params)?;
 
@@ -139,7 +130,7 @@ impl Guest for TavilySearchComponent {
     }
 
     fn search_once(
-        params: SearchParams
+        params: SearchParams,
     ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
         Self::execute_search(params)

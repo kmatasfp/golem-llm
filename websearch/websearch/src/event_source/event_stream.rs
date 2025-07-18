@@ -1,13 +1,13 @@
-use std::task::Poll;
 use crate::event_source::stream::WebsearchStream;
+use crate::event_source::types::{SearchMetadata, SearchResult, StreamEnd, WebsearchStreamEntry};
 use crate::event_source::{
-    parser::{ is_bom, line, RawEventLine },
-    utf8_stream::Utf8Stream,
     error::StreamError,
+    parser::{is_bom, line, RawEventLine},
+    utf8_stream::Utf8Stream,
 };
-use crate::event_source::types::{ SearchMetadata, SearchResult, StreamEnd, WebsearchStreamEntry };
+use std::task::Poll;
 
-use golem_rust::bindings::wasi::io::streams::{ InputStream, StreamError as WasiStreamError };
+use golem_rust::bindings::wasi::io::streams::{InputStream, StreamError as WasiStreamError};
 use golem_rust::wasm_rpc::Pollable;
 use log::trace;
 use serde_json::from_str;
@@ -212,7 +212,7 @@ impl SseWebsearchStream {
 
 fn try_parse<E>(
     buf: &mut String,
-    builder: &mut EventBuilder
+    builder: &mut EventBuilder,
 ) -> Result<Option<WebsearchStreamEntry>, StreamError<E>> {
     if buf.is_empty() {
         return Ok(None);

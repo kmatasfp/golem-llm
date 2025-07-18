@@ -1,24 +1,19 @@
 mod client;
 mod conversions;
 
-use crate::client::{ SerperSearchApi, SearchRequest };
-use crate::conversions::{ params_to_request, response_to_results, validate_search_params };
-use golem_web_search::durability::{ ExtendedwebsearchGuest };
+use crate::client::{SearchRequest, SerperSearchApi};
+use crate::conversions::{params_to_request, response_to_results, validate_search_params};
+use golem_rust::wasm_rpc::Pollable;
+use golem_web_search::durability::ExtendedwebsearchGuest;
+use golem_web_search::event_source::error::EventSourceSearchError;
 use golem_web_search::golem::web_search::web_search::{
-    Guest,
-    GuestSearchSession,
-    SearchError,
-    SearchMetadata,
-    SearchParams,
-    SearchResult,
+    Guest, GuestSearchSession, SearchError, SearchMetadata, SearchParams, SearchResult,
     SearchSession,
 };
-use golem_web_search::session_stream::{ GuestSearchStream, SearchStreamState };
+use golem_web_search::session_stream::{GuestSearchStream, SearchStreamState};
 use golem_web_search::LOGGING_STATE;
-use golem_rust::wasm_rpc::Pollable;
 use log::trace;
-use std::cell::{ Ref, RefCell, RefMut };
-use golem_web_search::event_source::error::EventSourceSearchError;
+use std::cell::{Ref, RefCell, RefMut};
 
 struct SerperSearchStream {
     _api: RefCell<Option<SerperSearchApi>>,
@@ -35,7 +30,7 @@ impl SerperSearchStream {
     pub fn new(
         api: SerperSearchApi,
         request: SearchRequest,
-        params: SearchParams
+        params: SearchParams,
     ) -> GuestSearchStream<Self> {
         GuestSearchStream::new(SerperSearchStream {
             _api: RefCell::new(Some(api)),
@@ -77,32 +72,31 @@ impl SearchStreamState for SerperSearchStream {
     }
 
     fn stream(
-        &self
+        &self,
     ) -> Ref<
         Option<
             Box<
                 dyn golem_web_search::event_source::stream::WebsearchStream<
                     Item = golem_web_search::event_source::types::WebsearchStreamEntry,
-                    Error = golem_web_search::event_source::error::StreamError<reqwest::Error>
-                >
-            >
-        >
+                    Error = golem_web_search::event_source::error::StreamError<reqwest::Error>,
+                >,
+            >,
+        >,
     > {
         unimplemented!()
     }
 
     fn stream_mut(
-        &self
+        &self,
     ) -> RefMut<
         Option<
             Box<
                 dyn golem_web_search::event_source::stream::WebsearchStream<
-                    Item = golem_web_search::event_source::types::WebsearchStreamEntry,
-                    Error = golem_web_search::event_source::error::StreamError<reqwest::Error>
-                > +
-                    '_
-            >
-        >
+                        Item = golem_web_search::event_source::types::WebsearchStreamEntry,
+                        Error = golem_web_search::event_source::error::StreamError<reqwest::Error>,
+                    > + '_,
+            >,
+        >,
     > {
         unimplemented!()
     }
@@ -114,24 +108,22 @@ impl SerperSearchComponent {
     const API_KEY_VAR: &'static str = "SERPER_API_KEY";
 
     fn create_client() -> Result<SerperSearchApi, SearchError> {
-        let api_key = std::env
-            ::var(Self::API_KEY_VAR)
-            .map_err(|_|
-                SearchError::BackendError("SERPER_API_KEY environment variable not set".to_string())
-            )?;
+        let api_key = std::env::var(Self::API_KEY_VAR).map_err(|_| {
+            SearchError::BackendError("SERPER_API_KEY environment variable not set".to_string())
+        })?;
 
         Ok(SerperSearchApi::new(api_key))
     }
 
     fn execute_search(
-        params: SearchParams
+        params: SearchParams,
     ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
         validate_search_params(&params)?;
 
         let client = Self::create_client()?;
         let mut request = params_to_request(params.clone())?;
         request.start = Some(0);
-        trace!("Executing one-shot Serper Search: {:?}", request);
+        trace!("Executing one-shot Serper Search: {request:?}");
 
         match client.search(request) {
             Ok(response) => {
@@ -143,7 +135,7 @@ impl SerperSearchComponent {
     }
 
     fn start_search_session(
-        params: SearchParams
+        params: SearchParams,
     ) -> Result<GuestSearchStream<SerperSearchStream>, SearchError> {
         validate_search_params(&params)?;
 
@@ -169,7 +161,7 @@ impl Guest for SerperSearchComponent {
     }
 
     fn search_once(
-        params: SearchParams
+        params: SearchParams,
     ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
@@ -194,7 +186,9 @@ impl GuestSearchSession for SerperSearchSession {
         let stream = self.0.state();
         // Check if the stream has failed
         if let Some(error) = stream.failure() {
-            return Err(SearchError::BackendError(format!("Stream failed: {:?}", error)));
+            return Err(SearchError::BackendError(format!(
+                "Stream failed: {error:?}"
+            )));
         }
         if stream.is_finished() {
             return Ok(vec![]);
@@ -207,25 +201,31 @@ impl GuestSearchSession for SerperSearchSession {
             Some(api) => api,
             None => {
                 stream.set_finished();
-                return Err(SearchError::BackendError("API client not available".to_string()));
+                return Err(SearchError::BackendError(
+                    "API client not available".to_string(),
+                ));
             }
         };
         let mut request = match request_ref.as_ref() {
             Some(req) => req.clone(),
             None => {
                 stream.set_finished();
-                return Err(SearchError::BackendError("Request not available".to_string()));
+                return Err(SearchError::BackendError(
+                    "Request not available".to_string(),
+                ));
             }
         };
         let params = match params_ref.as_ref() {
             Some(p) => p,
             None => {
                 stream.set_finished();
-                return Err(SearchError::BackendError("Original params not available".to_string()));
+                return Err(SearchError::BackendError(
+                    "Original params not available".to_string(),
+                ));
             }
         };
         request.start = Some(*start_index_ref);
-        trace!("Executing paginated Serper Search: {:?}", request);
+        trace!("Executing paginated Serper Search: {request:?}");
         match api.search(request.clone()) {
             Ok(response) => {
                 let (results, metadata) = response_to_results(response, params, *start_index_ref);

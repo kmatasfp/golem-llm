@@ -14,7 +14,7 @@ pub enum SearchError {
 pub fn with_search_config<R>(
     key: impl AsRef<OsStr>,
     fail: impl FnOnce(SearchError) -> R,
-    succeed: impl FnOnce(String) -> R
+    succeed: impl FnOnce(String) -> R,
 ) -> R {
     let key_str = key.as_ref().to_string_lossy().to_string();
     match std::env::var(&key) {

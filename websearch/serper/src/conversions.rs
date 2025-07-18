@@ -1,10 +1,7 @@
-use crate::client::{ SearchRequest, SearchResponse, SearchResult as SerperSearchResult };
-use golem_web_search::golem::web_search::types::{ ImageResult, SafeSearchLevel, TimeRange };
+use crate::client::{SearchRequest, SearchResponse, SearchResult as SerperSearchResult};
+use golem_web_search::golem::web_search::types::{ImageResult, SafeSearchLevel, TimeRange};
 use golem_web_search::golem::web_search::web_search::{
-    SearchParams,
-    SearchResult,
-    SearchMetadata,
-    SearchError,
+    SearchError, SearchMetadata, SearchParams, SearchResult,
 };
 
 pub fn params_to_request(params: SearchParams) -> Result<SearchRequest, SearchError> {
@@ -51,20 +48,18 @@ pub fn params_to_request(params: SearchParams) -> Result<SearchRequest, SearchEr
     });
 
     // Convert safe search level
-    let safe = params.safe_search.map(|level| {
-        match level {
-            SafeSearchLevel::Off => "off".to_string(),
-            SafeSearchLevel::Medium | SafeSearchLevel::High => "active".to_string(),
-        }
+    let safe = params.safe_search.map(|level| match level {
+        SafeSearchLevel::Off => "off".to_string(),
+        SafeSearchLevel::Medium | SafeSearchLevel::High => "active".to_string(),
     });
 
     // Convert time range to Google time-based search filter
     let tbs = params.time_range.map(|range| {
         match range {
-            TimeRange::Day => "qdr:d".to_string(), // Past day
-            TimeRange::Week => "qdr:w".to_string(), // Past week
+            TimeRange::Day => "qdr:d".to_string(),   // Past day
+            TimeRange::Week => "qdr:w".to_string(),  // Past week
             TimeRange::Month => "qdr:m".to_string(), // Past month
-            TimeRange::Year => "qdr:y".to_string(), // Past year
+            TimeRange::Year => "qdr:y".to_string(),  // Past year
         }
     });
 
@@ -83,7 +78,7 @@ pub fn params_to_request(params: SearchParams) -> Result<SearchRequest, SearchEr
             // Add site: operators for included domains
             let site_filters: Vec<String> = include_domains
                 .iter()
-                .map(|domain| format!("site:{}", domain))
+                .map(|domain| format!("site:{domain}"))
                 .collect();
             query = format!("{} ({})", query, site_filters.join(" OR "));
         }
@@ -94,7 +89,7 @@ pub fn params_to_request(params: SearchParams) -> Result<SearchRequest, SearchEr
             // Add -site: operators for excluded domains
             let exclude_filters: Vec<String> = exclude_domains
                 .iter()
-                .map(|domain| format!("-site:{}", domain))
+                .map(|domain| format!("-site:{domain}"))
                 .collect();
             query = format!("{} {}", query, exclude_filters.join(" "));
         }
@@ -116,15 +111,21 @@ pub fn params_to_request(params: SearchParams) -> Result<SearchRequest, SearchEr
 pub fn response_to_results(
     response: SearchResponse,
     original_params: &SearchParams,
-    start_index: u32
+    start_index: u32,
 ) -> (Vec<SearchResult>, Option<SearchMetadata>) {
     let mut results = Vec::new();
 
     // If we have an answer box, create a special result for it
     if let Some(answer_box) = &response.answer_box {
         let answer_result = SearchResult {
-            title: answer_box.title.clone().unwrap_or_else(|| "Answer".to_string()),
-            url: answer_box.link.clone().unwrap_or_else(|| "https://google.com".to_string()),
+            title: answer_box
+                .title
+                .clone()
+                .unwrap_or_else(|| "Answer".to_string()),
+            url: answer_box
+                .link
+                .clone()
+                .unwrap_or_else(|| "https://google.com".to_string()),
             snippet: answer_box.answer.clone(),
             display_url: Some("google.com".to_string()),
             source: Some("Google Answer Box".to_string()),
@@ -139,13 +140,11 @@ pub fn response_to_results(
 
     // Process organic search results
     for item in &response.organic {
-        results.push(
-            serper_result_to_search_result(
-                item,
-                original_params.include_images.unwrap_or(false),
-                &response.images
-            )
-        );
+        results.push(serper_result_to_search_result(
+            item,
+            original_params.include_images.unwrap_or(false),
+            &response.images,
+        ));
     }
 
     // Add image results if requested and available
@@ -161,12 +160,10 @@ pub fn response_to_results(
                     score: Some((0.8 - (index as f32) * 0.05) as f64), // Slightly lower score for images
                     html_snippet: None,
                     date_published: None,
-                    images: Some(
-                        vec![ImageResult {
-                            url: img.image_url.clone(),
-                            description: Some(img.title.clone()),
-                        }]
-                    ),
+                    images: Some(vec![ImageResult {
+                        url: img.image_url.clone(),
+                        description: Some(img.title.clone()),
+                    }]),
                     content_chunks: None,
                 };
                 results.push(image_result);
@@ -181,7 +178,7 @@ pub fn response_to_results(
 fn serper_result_to_search_result(
     item: &SerperSearchResult,
     include_images: bool,
-    response_images: &Option<Vec<crate::client::ImageResult>>
+    response_images: &Option<Vec<crate::client::ImageResult>>,
 ) -> SearchResult {
     let mut images = None;
     let mut content_chunks = None;
@@ -199,7 +196,7 @@ fn serper_result_to_search_result(
                             url: img.image_url.clone(),
                             description: Some(img.title.clone()),
                         })
-                        .collect()
+                        .collect(),
                 );
             }
         }
@@ -231,7 +228,10 @@ fn serper_result_to_search_result(
         title: item.title.clone(),
         url: item.link.clone(),
         snippet: item.snippet.clone(),
-        display_url: item.display_link.clone().or_else(|| extract_domain(&item.link)),
+        display_url: item
+            .display_link
+            .clone()
+            .or_else(|| extract_domain(&item.link)),
         source: extract_domain(&item.link),
         score: Some(score.max(0.1) as f64), // Ensure minimum score
         html_snippet: None,
@@ -252,7 +252,7 @@ fn extract_domain(url: &str) -> Option<String> {
 fn create_search_metadata(
     response: &SearchResponse,
     params: &SearchParams,
-    start_index: u32
+    start_index: u32,
 ) -> SearchMetadata {
     // Serper doesn't provide total results count directly, so we estimate
     let total_results = if response.organic.len() >= (params.max_results.unwrap_or(10) as usize) {
@@ -287,11 +287,9 @@ pub fn validate_search_params(params: &SearchParams) -> Result<(), SearchError> 
 
     if let Some(max_results) = params.max_results {
         if max_results > 100 {
-            return Err(
-                SearchError::UnsupportedFeature(
-                    "max_results cannot exceed 100 for Serper Search".to_string()
-                )
-            );
+            return Err(SearchError::UnsupportedFeature(
+                "max_results cannot exceed 100 for Serper Search".to_string(),
+            ));
         }
         if max_results == 0 {
             return Err(SearchError::InvalidQuery);

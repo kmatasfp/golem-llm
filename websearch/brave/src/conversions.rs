@@ -1,91 +1,20 @@
-use crate::client::{ SearchRequest, SearchResponse, WebResult, ImageResult as BraveImageResult };
-use golem_web_search::golem::web_search::types::{ ImageResult, SafeSearchLevel, TimeRange };
+use crate::client::{ImageResult as BraveImageResult, SearchRequest, SearchResponse, WebResult};
+use golem_web_search::golem::web_search::types::{ImageResult, SafeSearchLevel, TimeRange};
 use golem_web_search::golem::web_search::web_search::{
-    SearchError,
-    SearchMetadata,
-    SearchParams,
-    SearchResult,
+    SearchError, SearchMetadata, SearchParams, SearchResult,
 };
-use log::{ trace, warn };
+use log::{trace, warn};
 
 const ALLOWED_COUNTRIES: &[&str] = &[
-    "AR",
-    "AU",
-    "AT",
-    "BE",
-    "BR",
-    "CA",
-    "CL",
-    "DK",
-    "FI",
-    "FR",
-    "DE",
-    "HK",
-    "IN",
-    "ID",
-    "IT",
-    "JP",
-    "KR",
-    "MY",
-    "MX",
-    "NL",
-    "NZ",
-    "NO",
-    "CN",
-    "PL",
-    "PT",
-    "PH",
-    "RU",
-    "SA",
-    "ZA",
-    "ES",
-    "SE",
-    "CH",
-    "TW",
-    "TR",
-    "GB",
-    "US",
-    "ALL",
+    "AR", "AU", "AT", "BE", "BR", "CA", "CL", "DK", "FI", "FR", "DE", "HK", "IN", "ID", "IT", "JP",
+    "KR", "MY", "MX", "NL", "NZ", "NO", "CN", "PL", "PT", "PH", "RU", "SA", "ZA", "ES", "SE", "CH",
+    "TW", "TR", "GB", "US", "ALL",
 ];
 const ALLOWED_UI_LANGS: &[&str] = &[
-    "es-AR",
-    "en-AU",
-    "de-AT",
-    "nl-BE",
-    "fr-BE",
-    "pt-BR",
-    "en-CA",
-    "fr-CA",
-    "es-CL",
-    "da-DK",
-    "fi-FI",
-    "fr-FR",
-    "de-DE",
-    "zh-HK",
-    "en-IN",
-    "en-ID",
-    "it-IT",
-    "ja-JP",
-    "ko-KR",
-    "en-MY",
-    "es-MX",
-    "nl-NL",
-    "en-NZ",
-    "no-NO",
-    "zh-CN",
-    "pl-PL",
-    "en-PH",
-    "ru-RU",
-    "en-ZA",
-    "es-ES",
-    "sv-SE",
-    "fr-CH",
-    "de-CH",
-    "zh-TW",
-    "tr-TR",
-    "en-GB",
-    "en-US",
-    "es-US",
+    "es-AR", "en-AU", "de-AT", "nl-BE", "fr-BE", "pt-BR", "en-CA", "fr-CA", "es-CL", "da-DK",
+    "fi-FI", "fr-FR", "de-DE", "zh-HK", "en-IN", "en-ID", "it-IT", "ja-JP", "ko-KR", "en-MY",
+    "es-MX", "nl-NL", "en-NZ", "no-NO", "zh-CN", "pl-PL", "en-PH", "ru-RU", "en-ZA", "es-ES",
+    "sv-SE", "fr-CH", "de-CH", "zh-TW", "tr-TR", "en-GB", "en-US", "es-US",
 ];
 const ALLOWED_RESULT_FILTERS: &[&str] = &[
     "discussions",
@@ -112,21 +41,17 @@ pub fn params_to_request(params: SearchParams) -> Result<SearchRequest, SearchEr
         return Err(SearchError::InvalidQuery);
     }
 
-    let safesearch = params.safe_search.map(|level| {
-        match level {
-            SafeSearchLevel::Off => "off".to_string(),
-            SafeSearchLevel::Medium => "moderate".to_string(),
-            SafeSearchLevel::High => "strict".to_string(),
-        }
+    let safesearch = params.safe_search.map(|level| match level {
+        SafeSearchLevel::Off => "off".to_string(),
+        SafeSearchLevel::Medium => "moderate".to_string(),
+        SafeSearchLevel::High => "strict".to_string(),
     });
 
-    let freshness = params.time_range.map(|range| {
-        match range {
-            TimeRange::Day => "pd".to_string(),
-            TimeRange::Week => "pw".to_string(),
-            TimeRange::Month => "pm".to_string(),
-            TimeRange::Year => "py".to_string(),
-        }
+    let freshness = params.time_range.map(|range| match range {
+        TimeRange::Day => "pd".to_string(),
+        TimeRange::Week => "pw".to_string(),
+        TimeRange::Month => "pm".to_string(),
+        TimeRange::Year => "py".to_string(),
     });
 
     // Validate max_results
@@ -166,8 +91,9 @@ pub fn params_to_request(params: SearchParams) -> Result<SearchRequest, SearchEr
     // Validate and set ui_lang and search_lang (never both)
     let (ui_lang, search_lang) = match params.language.as_deref() {
         Some(lang) if ALLOWED_UI_LANGS.contains(&lang) => (Some(lang.to_string()), None),
-        Some(lang) if lang.len() == 2 && lang.chars().all(|c| c.is_ascii_alphabetic()) =>
-            (None, Some(lang.to_string())),
+        Some(lang) if lang.len() == 2 && lang.chars().all(|c| c.is_ascii_alphabetic()) => {
+            (None, Some(lang.to_string()))
+        }
         _ => (None, None),
     };
 
@@ -215,7 +141,7 @@ fn build_result_filter(params: &SearchParams) -> Option<String> {
 
 pub fn response_to_results(
     response: SearchResponse,
-    original_params: &SearchParams
+    original_params: &SearchParams,
 ) -> (Vec<SearchResult>, Option<SearchMetadata>) {
     let mut results = Vec::new();
 
@@ -225,13 +151,11 @@ pub fn response_to_results(
     if let Some(ref web_results) = response.web {
         trace!("Processing {} web results", web_results.results.len());
         for (index, item) in web_results.results.iter().enumerate() {
-            if
-                let Ok(result) = web_result_to_search_result(
-                    item,
-                    index,
-                    original_params.include_images.unwrap_or(false)
-                )
-            {
+            if let Ok(result) = web_result_to_search_result(
+                item,
+                index,
+                original_params.include_images.unwrap_or(false),
+            ) {
                 results.push(result);
             } else {
                 warn!("Failed to convert web result at index {}", index);
@@ -260,11 +184,13 @@ pub fn response_to_results(
 fn web_result_to_search_result(
     item: &WebResult,
     index: usize,
-    include_images: bool
+    include_images: bool,
 ) -> Result<SearchResult, SearchError> {
     // Validate required fields
     if item.title.is_empty() || item.url.is_empty() {
-        return Err(SearchError::BackendError("Invalid result: missing title or URL".to_string()));
+        return Err(SearchError::BackendError(
+            "Invalid result: missing title or URL".to_string(),
+        ));
     }
 
     let mut images = None;
@@ -274,12 +200,10 @@ fn web_result_to_search_result(
     if include_images {
         if let Some(thumbnail) = &item.thumbnail {
             if !thumbnail.src.is_empty() {
-                images = Some(
-                    vec![ImageResult {
-                        url: thumbnail.src.clone(),
-                        description: Some("Thumbnail".to_string()),
-                    }]
-                );
+                images = Some(vec![ImageResult {
+                    url: thumbnail.src.clone(),
+                    description: Some("Thumbnail".to_string()),
+                }]);
             }
         }
     }
@@ -292,7 +216,7 @@ fn web_result_to_search_result(
             extra_snippets
                 .iter()
                 .filter(|s| !s.trim().is_empty())
-                .cloned()
+                .cloned(),
         );
     }
 
@@ -337,26 +261,22 @@ fn web_result_to_search_result(
 
 fn image_result_to_search_result(
     item: &BraveImageResult,
-    index: usize
+    index: usize,
 ) -> Result<SearchResult, SearchError> {
     if item.title.is_empty() || item.url.is_empty() {
-        return Err(
-            SearchError::BackendError("Invalid image result: missing title or URL".to_string())
-        );
+        return Err(SearchError::BackendError(
+            "Invalid image result: missing title or URL".to_string(),
+        ));
     }
 
-    let images = Some(
-        vec![ImageResult {
-            url: item.url.clone(),
-            description: Some(
-                if let Some(properties) = &item.properties {
-                    format!("{}x{}", properties.width, properties.height)
-                } else {
-                    "Image".to_string()
-                }
-            ),
-        }]
-    );
+    let images = Some(vec![ImageResult {
+        url: item.url.clone(),
+        description: Some(if let Some(properties) = &item.properties {
+            format!("{}x{}", properties.width, properties.height)
+        } else {
+            "Image".to_string()
+        }),
+    }]);
 
     Ok(SearchResult {
         title: item.title.clone(),
@@ -416,12 +336,14 @@ fn create_search_metadata(response: &SearchResponse, params: &SearchParams) -> S
         Some(params.max_results.unwrap_or(10) * 10)
     } else {
         // Count actual results
-        let web_count = response.web
+        let web_count = response
+            .web
             .as_ref()
             .map(|w| w.results.len() as u32)
             .unwrap_or(0);
         let image_count = if params.include_images == Some(true) {
-            response.images
+            response
+                .images
                 .as_ref()
                 .map(|i| i.results.len() as u32)
                 .unwrap_or(0)
@@ -460,7 +382,7 @@ pub fn _create_pagination_request(original_request: SearchRequest, offset: u32) 
 pub fn _extract_next_page_offset(
     response: &SearchResponse,
     current_offset: u32,
-    count: u32
+    count: u32,
 ) -> Option<u32> {
     if response.query.more_results_available {
         let next_offset = current_offset + count;
@@ -494,9 +416,8 @@ pub fn validate_search_params(params: &SearchParams) -> Result<(), SearchError> 
 
     // Language validation
     if let Some(ref language) = params.language {
-        if
-            !language.is_empty() &&
-            (language.len() != 2 || !language.chars().all(|c| c.is_ascii_alphabetic()))
+        if !language.is_empty()
+            && (language.len() != 2 || !language.chars().all(|c| c.is_ascii_alphabetic()))
         {
             return Err(SearchError::InvalidQuery);
         }
@@ -504,9 +425,8 @@ pub fn validate_search_params(params: &SearchParams) -> Result<(), SearchError> 
 
     // Region validation
     if let Some(ref region) = params.region {
-        if
-            !region.is_empty() &&
-            (region.len() != 2 || !region.chars().all(|c| c.is_ascii_alphabetic()))
+        if !region.is_empty()
+            && (region.len() != 2 || !region.chars().all(|c| c.is_ascii_alphabetic()))
         {
             return Err(SearchError::InvalidQuery);
         }

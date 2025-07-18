@@ -1,27 +1,19 @@
 mod client;
 mod conversions;
 
-use crate::client::{ BraveSearchApi, SearchRequest };
+use crate::client::{BraveSearchApi, SearchRequest};
 use crate::conversions::{
-    _create_pagination_request,
-    _extract_next_page_offset,
-    params_to_request,
-    response_to_results,
+    _create_pagination_request, _extract_next_page_offset, params_to_request, response_to_results,
     validate_search_params,
 };
 use golem_web_search::golem::web_search::web_search::{
-    Guest,
-    GuestSearchSession,
-    SearchError,
-    SearchMetadata,
-    SearchParams,
-    SearchResult,
+    Guest, GuestSearchSession, SearchError, SearchMetadata, SearchParams, SearchResult,
     SearchSession,
 };
-use golem_web_search::session_stream::{ GuestSearchStream, SearchStreamState };
+use golem_web_search::session_stream::{GuestSearchStream, SearchStreamState};
 use golem_web_search::LOGGING_STATE;
 use log::trace;
-use std::cell::{ RefCell };
+use std::cell::RefCell;
 
 use golem_rust::wasm_rpc::Pollable;
 use golem_web_search::durability::ExtendedwebsearchGuest;
@@ -33,17 +25,15 @@ impl BraveSearchComponent {
     const API_KEY_VAR: &'static str = "BRAVE_API_KEY";
 
     fn create_client() -> Result<BraveSearchApi, SearchError> {
-        let api_key = std::env
-            ::var(Self::API_KEY_VAR)
-            .map_err(|_| {
-                SearchError::BackendError("BRAVE_API_KEY environment variable not set".to_string())
-            })?;
+        let api_key = std::env::var(Self::API_KEY_VAR).map_err(|_| {
+            SearchError::BackendError("BRAVE_API_KEY environment variable not set".to_string())
+        })?;
 
         Ok(BraveSearchApi::new(api_key))
     }
 
     fn start_search_session(
-        params: SearchParams
+        params: SearchParams,
     ) -> Result<GuestSearchStream<BraveSearchStream>, SearchError> {
         validate_search_params(&params)?;
 
@@ -54,7 +44,7 @@ impl BraveSearchComponent {
     }
 
     fn execute_search(
-        params: SearchParams
+        params: SearchParams,
     ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
         validate_search_params(&params)?;
 
@@ -87,7 +77,7 @@ impl BraveSearchStream {
     pub fn new(
         api: BraveSearchApi,
         request: SearchRequest,
-        params: SearchParams
+        params: SearchParams,
     ) -> GuestSearchStream<Self> {
         GuestSearchStream::new(BraveSearchStream {
             _api: RefCell::new(Some(api)),
@@ -125,12 +115,8 @@ impl BraveSearchStream {
         let params = self._original_params.borrow();
         let current_offset = *self._current_offset.borrow();
 
-        if
-            let (Some(api), Some(request), Some(params)) = (
-                api.as_ref(),
-                request.as_ref(),
-                params.as_ref(),
-            )
+        if let (Some(api), Some(request), Some(params)) =
+            (api.as_ref(), request.as_ref(), params.as_ref())
         {
             trace!("Executing Brave Search with offset: {}", current_offset);
 
@@ -143,12 +129,8 @@ impl BraveSearchStream {
                     *self._last_metadata.borrow_mut() = metadata;
 
                     let current_count = request.count.unwrap_or(20);
-                    if
-                        let Some(next_offset) = _extract_next_page_offset(
-                            &response,
-                            current_offset,
-                            current_count
-                        )
+                    if let Some(next_offset) =
+                        _extract_next_page_offset(&response, current_offset, current_count)
                     {
                         *self._current_offset.borrow_mut() = next_offset;
                     } else {
@@ -163,7 +145,9 @@ impl BraveSearchStream {
                 }
             }
         } else {
-            Err(SearchError::BackendError("Session not properly initialized".to_string()))
+            Err(SearchError::BackendError(
+                "Session not properly initialized".to_string(),
+            ))
         }
     }
     pub fn _get_metadata(&self) -> Option<SearchMetadata> {
@@ -182,31 +166,30 @@ impl SearchStreamState for BraveSearchStream {
         *self.finished.borrow_mut() = true;
     }
     fn stream(
-        &self
+        &self,
     ) -> std::cell::Ref<
         Option<
             Box<
                 dyn golem_web_search::event_source::stream::WebsearchStream<
                     Item = golem_web_search::event_source::types::WebsearchStreamEntry,
-                    Error = golem_web_search::event_source::error::StreamError<reqwest::Error>
-                >
-            >
-        >
+                    Error = golem_web_search::event_source::error::StreamError<reqwest::Error>,
+                >,
+            >,
+        >,
     > {
         unimplemented!()
     }
     fn stream_mut(
-        &self
+        &self,
     ) -> std::cell::RefMut<
         Option<
             Box<
                 dyn golem_web_search::event_source::stream::WebsearchStream<
-                    Item = golem_web_search::event_source::types::WebsearchStreamEntry,
-                    Error = golem_web_search::event_source::error::StreamError<reqwest::Error>
-                > +
-                    '_
-            >
-        >
+                        Item = golem_web_search::event_source::types::WebsearchStreamEntry,
+                        Error = golem_web_search::event_source::error::StreamError<reqwest::Error>,
+                    > + '_,
+            >,
+        >,
     > {
         unimplemented!()
     }
@@ -227,7 +210,7 @@ impl Guest for BraveSearchComponent {
     }
 
     fn search_once(
-        params: SearchParams
+        params: SearchParams,
     ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 

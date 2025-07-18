@@ -1,9 +1,9 @@
-use golem_web_search::error::{ from_reqwest_error };
+use golem_web_search::error::from_reqwest_error;
 use golem_web_search::golem::web_search::web_search::SearchError;
 use log::trace;
-use reqwest::{ Client, Method, Response };
+use reqwest::{Client, Method, Response};
 use serde::de::DeserializeOwned;
-use serde::{ Deserialize, Serialize };
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
 const BASE_URL: &str = "https://www.googleapis.com/customsearch/v1";
@@ -17,7 +17,9 @@ pub struct CustomSearchApi {
 
 impl CustomSearchApi {
     pub fn new(api_key: String, search_engine_id: String) -> Self {
-        let client = Client::builder().build().expect("Failed to initialize HTTP client");
+        let client = Client::builder()
+            .build()
+            .expect("Failed to initialize HTTP client");
         Self {
             api_key,
             search_engine_id,
@@ -28,7 +30,10 @@ impl CustomSearchApi {
     pub fn search(&self, request: SearchRequest) -> Result<SearchResponse, SearchError> {
         trace!("Sending request to Google Custom Search API: {request:?}");
 
-        let mut url = format!("{BASE_URL}?key={}&cx={}", self.api_key, self.search_engine_id);
+        let mut url = format!(
+            "{BASE_URL}?key={}&cx={}",
+            self.api_key, self.search_engine_id
+        );
 
         url.push_str(&format!("&q={}", urlencoding::encode(&request.q)));
 
@@ -76,7 +81,8 @@ impl CustomSearchApi {
             }
         }
 
-        let response: Response = self.client
+        let response: Response = self
+            .client
             .request(Method::GET, &url)
             .send()
             .map_err(|err| from_reqwest_error("Request failed", err))?;
@@ -269,10 +275,10 @@ fn parse_response<T: DeserializeOwned + Debug>(response: Response) -> Result<T, 
         let search_error = match error_body.error.code {
             400 => SearchError::InvalidQuery,
             429 => SearchError::RateLimited(60), // Default to 60 seconds
-            _ =>
-                SearchError::BackendError(
-                    format!("Request failed with {}: {}", status, error_body.error.message)
-                ),
+            _ => SearchError::BackendError(format!(
+                "Request failed with {}: {}",
+                status, error_body.error.message
+            )),
         };
 
         Err(search_error)

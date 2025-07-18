@@ -1,24 +1,19 @@
 mod client;
 mod conversions;
 
-use crate::client::{ CustomSearchApi, SearchRequest };
-use crate::conversions::{ response_to_results, params_to_request, validate_search_params };
-use golem_web_search::durability::{ ExtendedwebsearchGuest };
+use crate::client::{CustomSearchApi, SearchRequest};
+use crate::conversions::{params_to_request, response_to_results, validate_search_params};
+use golem_rust::wasm_rpc::Pollable;
+use golem_web_search::durability::ExtendedwebsearchGuest;
+use golem_web_search::event_source::error::EventSourceSearchError;
 use golem_web_search::golem::web_search::web_search::{
-    Guest,
-    GuestSearchSession,
-    SearchError,
-    SearchMetadata,
-    SearchParams,
-    SearchResult,
+    Guest, GuestSearchSession, SearchError, SearchMetadata, SearchParams, SearchResult,
     SearchSession,
 };
-use golem_web_search::session_stream::{ GuestSearchStream, SearchStreamState };
+use golem_web_search::session_stream::{GuestSearchStream, SearchStreamState};
 use golem_web_search::LOGGING_STATE;
-use golem_rust::wasm_rpc::Pollable;
 use log::trace;
-use std::cell::{ Ref, RefCell, RefMut };
-use golem_web_search::event_source::error::EventSourceSearchError;
+use std::cell::{Ref, RefCell, RefMut};
 
 struct GoogleSearchStream {
     _api: RefCell<Option<CustomSearchApi>>,
@@ -34,7 +29,7 @@ impl GoogleSearchStream {
     pub fn new(
         api: CustomSearchApi,
         request: SearchRequest,
-        params: SearchParams
+        params: SearchParams,
     ) -> GuestSearchStream<Self> {
         GuestSearchStream::new(GoogleSearchStream {
             _api: RefCell::new(Some(api)),
@@ -74,32 +69,31 @@ impl SearchStreamState for GoogleSearchStream {
     }
 
     fn stream(
-        &self
+        &self,
     ) -> Ref<
         Option<
             Box<
                 dyn golem_web_search::event_source::stream::WebsearchStream<
                     Item = golem_web_search::event_source::types::WebsearchStreamEntry,
-                    Error = golem_web_search::event_source::error::StreamError<reqwest::Error>
-                >
-            >
-        >
+                    Error = golem_web_search::event_source::error::StreamError<reqwest::Error>,
+                >,
+            >,
+        >,
     > {
         unimplemented!()
     }
 
     fn stream_mut(
-        &self
+        &self,
     ) -> RefMut<
         Option<
             Box<
                 dyn golem_web_search::event_source::stream::WebsearchStream<
-                    Item = golem_web_search::event_source::types::WebsearchStreamEntry,
-                    Error = golem_web_search::event_source::error::StreamError<reqwest::Error>
-                > +
-                    '_
-            >
-        >
+                        Item = golem_web_search::event_source::types::WebsearchStreamEntry,
+                        Error = golem_web_search::event_source::error::StreamError<reqwest::Error>,
+                    > + '_,
+            >,
+        >,
     > {
         unimplemented!()
     }
@@ -112,25 +106,21 @@ impl GoogleCustomSearchComponent {
     const SEARCH_ENGINE_ID_VAR: &'static str = "GOOGLE_SEARCH_ENGINE_ID";
 
     fn create_client() -> Result<CustomSearchApi, SearchError> {
-        let api_key = std::env
-            ::var(Self::API_KEY_VAR)
-            .map_err(|_|
-                SearchError::BackendError("GOOGLE_API_KEY environment variable not set".to_string())
-            )?;
+        let api_key = std::env::var(Self::API_KEY_VAR).map_err(|_| {
+            SearchError::BackendError("GOOGLE_API_KEY environment variable not set".to_string())
+        })?;
 
-        let search_engine_id = std::env
-            ::var(Self::SEARCH_ENGINE_ID_VAR)
-            .map_err(|_|
-                SearchError::BackendError(
-                    "GOOGLE_SEARCH_ENGINE_ID environment variable not set".to_string()
-                )
-            )?;
+        let search_engine_id = std::env::var(Self::SEARCH_ENGINE_ID_VAR).map_err(|_| {
+            SearchError::BackendError(
+                "GOOGLE_SEARCH_ENGINE_ID environment variable not set".to_string(),
+            )
+        })?;
 
         Ok(CustomSearchApi::new(api_key, search_engine_id))
     }
 
     fn execute_search(
-        params: SearchParams
+        params: SearchParams,
     ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
         validate_search_params(&params)?;
 
@@ -149,7 +139,7 @@ impl GoogleCustomSearchComponent {
     }
 
     fn start_search_session(
-        params: SearchParams
+        params: SearchParams,
     ) -> Result<GuestSearchStream<GoogleSearchStream>, SearchError> {
         validate_search_params(&params)?;
 
@@ -174,7 +164,7 @@ impl Guest for GoogleCustomSearchComponent {
     }
 
     fn search_once(
-        params: SearchParams
+        params: SearchParams,
     ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
@@ -200,7 +190,10 @@ impl GuestSearchSession for GoogleSearchSession {
 
         // Check if the stream has failed
         if let Some(error) = stream.failure() {
-            return Err(SearchError::BackendError(format!("Stream failed: {:?}", error)));
+            return Err(SearchError::BackendError(format!(
+                "Stream failed: {:?}",
+                error
+            )));
         }
 
         // Check if the stream is finished
@@ -218,7 +211,9 @@ impl GuestSearchSession for GoogleSearchSession {
             Some(api) => api,
             None => {
                 stream.set_finished();
-                return Err(SearchError::BackendError("API client not available".to_string()));
+                return Err(SearchError::BackendError(
+                    "API client not available".to_string(),
+                ));
             }
         };
 
@@ -226,7 +221,9 @@ impl GuestSearchSession for GoogleSearchSession {
             Some(req) => req.clone(),
             None => {
                 stream.set_finished();
-                return Err(SearchError::BackendError("Request not available".to_string()));
+                return Err(SearchError::BackendError(
+                    "Request not available".to_string(),
+                ));
             }
         };
 
@@ -234,7 +231,9 @@ impl GuestSearchSession for GoogleSearchSession {
             Some(p) => p,
             None => {
                 stream.set_finished();
-                return Err(SearchError::BackendError("Original params not available".to_string()));
+                return Err(SearchError::BackendError(
+                    "Original params not available".to_string(),
+                ));
             }
         };
 

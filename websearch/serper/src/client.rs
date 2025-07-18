@@ -1,9 +1,9 @@
-use golem_web_search::error::{ from_reqwest_error };
+use golem_web_search::error::from_reqwest_error;
 use golem_web_search::golem::web_search::web_search::SearchError;
 use log::trace;
-use reqwest::{ Client, Method, Response };
+use reqwest::{Client, Method, Response};
 use serde::de::DeserializeOwned;
-use serde::{ Deserialize, Serialize };
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
 const BASE_URL: &str = "https://google.serper.dev/search";
@@ -21,16 +21,14 @@ impl SerperSearchApi {
             .build()
             .expect("Failed to initialize HTTP client");
 
-        Self {
-            api_key,
-            client,
-        }
+        Self { api_key, client }
     }
 
     pub fn search(&self, request: SearchRequest) -> Result<SearchResponse, SearchError> {
         trace!("Sending request to Serper Search API: {request:?}");
 
-        let response: Response = self.client
+        let response: Response = self
+            .client
             .request(Method::POST, BASE_URL)
             .header("X-API-KEY", &self.api_key)
             .header("Content-Type", "application/json")
@@ -201,17 +199,19 @@ fn parse_response<T: DeserializeOwned + Debug>(response: Response) -> Result<T, 
                     403 => SearchError::BackendError("API access forbidden".to_string()),
                     429 => SearchError::RateLimited(60), // Default to 60 seconds
                     500 => SearchError::BackendError("Server error".to_string()),
-                    _ =>
-                        SearchError::BackendError(
-                            format!("Request failed with {}: {}", status, error_body.message)
-                        ),
+                    _ => SearchError::BackendError(format!(
+                        "Request failed with {}: {}",
+                        status, error_body.message
+                    )),
                 };
 
                 Err(search_error)
             }
             Err(_) => {
                 // Fallback for non-JSON error responses
-                Err(SearchError::BackendError(format!("Request failed with status {}", status)))
+                Err(SearchError::BackendError(format!(
+                    "Request failed with status {status}"
+                )))
             }
         }
     }

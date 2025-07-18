@@ -1,5 +1,5 @@
-use crate::exports::golem::web_search::web_search::{ SearchParams, SearchResult, SearchError };
-use crate::exports::golem::web_search::web_search::{ Guest };
+use crate::exports::golem::web_search::web_search::Guest;
+use crate::exports::golem::web_search::web_search::{SearchError, SearchParams, SearchResult};
 use golem_rust::wasm_rpc::Pollable;
 use std::marker::PhantomData;
 
@@ -18,7 +18,7 @@ pub trait ExtendedwebsearchGuest: Guest + 'static {
     /// parameters if needed.
     fn retry_params(
         original_params: &SearchParams,
-        partial_results: &[SearchResult]
+        partial_results: &[SearchResult],
     ) -> SearchParams {
         // For search, we typically want to continue from where we left off
         // This could involve adjusting max_results or using pagination tokens
@@ -40,14 +40,11 @@ pub trait ExtendedwebsearchGuest: Guest + 'static {
 /// When the durability feature flag is off, wrapping with `Durablewebsearch` is just a passthrough
 #[cfg(not(feature = "durability"))]
 mod passthrough_impl {
-    use crate::durability::{ Durablewebsearch, ExtendedwebsearchGuest };
+    use crate::durability::{Durablewebsearch, ExtendedwebsearchGuest};
+    use crate::golem::web_search::web_search::{Guest, SearchSession};
     use crate::golem::web_search::web_search::{
-        SearchError,
-        SearchMetadata,
-        SearchParams,
-        SearchResult,
+        SearchError, SearchMetadata, SearchParams, SearchResult,
     };
-    use crate::golem::web_search::web_search::{ Guest, SearchSession };
 
     impl<Impl: ExtendedwebsearchGuest> Guest for Durablewebsearch<Impl> {
         type SearchSession = Impl::SearchSession;
@@ -57,7 +54,7 @@ mod passthrough_impl {
         }
 
         fn search_once(
-            params: SearchParams
+            params: SearchParams,
         ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
             Impl::search_once(params)
         }
@@ -74,25 +71,21 @@ mod passthrough_impl {
 /// which is implemented using the type classes and builder in the `golem-rust` library.
 #[cfg(feature = "durability")]
 mod durable_impl {
-    use crate::durability::{ Durablewebsearch, ExtendedwebsearchGuest };
+    use crate::durability::{Durablewebsearch, ExtendedwebsearchGuest};
     use crate::event_source::StreamError;
+    use crate::exports::golem::web_search::web_search::{Guest, GuestSearchSession, SearchSession};
     use crate::exports::golem::web_search::web_search::{
-        SearchError,
-        SearchMetadata,
-        SearchParams,
-        SearchResult,
+        SearchError, SearchMetadata, SearchParams, SearchResult,
     };
-    use crate::exports::golem::web_search::web_search::{ Guest, GuestSearchSession, SearchSession };
     use golem_rust::bindings::golem::durability::durability::{
-        DurableFunctionType,
-        LazyInitializedPollable,
+        DurableFunctionType, LazyInitializedPollable,
     };
     use golem_rust::durability::Durability;
     use golem_rust::wasm_rpc::Pollable;
-    use golem_rust::{ with_persistence_level, FromValueAndType, IntoValue, PersistenceLevel };
-    use std::cell::RefCell;
-    use std::fmt::{ Display, Formatter };
+    use golem_rust::{with_persistence_level, FromValueAndType, IntoValue, PersistenceLevel};
     use nom::error::Error as NomError;
+    use std::cell::RefCell;
+    use std::fmt::{Display, Formatter};
 
     impl<E: Clone> Clone for StreamError<E> {
         fn clone(&self) -> Self {
@@ -117,7 +110,7 @@ mod durable_impl {
             let durability = Durability::<SearchParams, SearchError>::new(
                 "golem_websearch",
                 "start_search",
-                DurableFunctionType::WriteRemote
+                DurableFunctionType::WriteRemote,
             );
 
             if durability.is_live() {
@@ -128,38 +121,37 @@ mod durable_impl {
                     }
                 });
 
-                match durability.persist(StartSearchInput { params: params.clone() }, result) {
+                match durability.persist(
+                    StartSearchInput {
+                        params: params.clone(),
+                    },
+                    result,
+                ) {
                     Ok(persisted_params) => {
-                        Ok(
-                            SearchSession::new(
-                                DurableSearchSession::<Impl>::live(
-                                    Impl::unwrapped_search_session(persisted_params).unwrap()
-                                )
-                            )
-                        )
+                        Ok(SearchSession::new(DurableSearchSession::<Impl>::live(
+                            Impl::unwrapped_search_session(persisted_params).unwrap(),
+                        )))
                     }
                     Err(e) => Err(e),
                 }
             } else {
                 match durability.replay() {
-                    Ok(replayed_params) => {
-                        Ok(
-                            SearchSession::new(
-                                DurableSearchSession::<Impl>::replay(replayed_params)
-                            )
-                        )
-                    }
+                    Ok(replayed_params) => Ok(SearchSession::new(
+                        DurableSearchSession::<Impl>::replay(replayed_params),
+                    )),
                     Err(e) => Err(e),
                 }
             }
         }
         fn search_once(
-            params: SearchParams
+            params: SearchParams,
         ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
-            let durability = Durability::<
-                (Vec<SearchResult>, Option<SearchMetadata>),
-                SearchError
-            >::new("golem_websearch", "search_once", DurableFunctionType::WriteRemote);
+            let durability =
+                Durability::<(Vec<SearchResult>, Option<SearchMetadata>), SearchError>::new(
+                    "golem_websearch",
+                    "search_once",
+                    DurableFunctionType::WriteRemote,
+                );
             if durability.is_live() {
                 let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
                     Impl::search_once(params.clone())
@@ -205,27 +197,23 @@ mod durable_impl {
     impl<Impl: ExtendedwebsearchGuest> DurableSearchSession<Impl> {
         fn live(session: Impl::SearchSession) -> Self {
             Self {
-                state: RefCell::new(
-                    Some(DurableSearchSessionState::Live {
-                        session,
-                        pollables: Vec::new(),
-                    })
-                ),
+                state: RefCell::new(Some(DurableSearchSessionState::Live {
+                    session,
+                    pollables: Vec::new(),
+                })),
                 subscription: RefCell::new(None),
             }
         }
 
         fn replay(original_params: SearchParams) -> Self {
             Self {
-                state: RefCell::new(
-                    Some(DurableSearchSessionState::Replay {
-                        original_params,
-                        pollables: Vec::new(),
-                        partial_results: Vec::new(),
-                        metadata: Box::new(None),
-                        finished: false,
-                    })
-                ),
+                state: RefCell::new(Some(DurableSearchSessionState::Replay {
+                    original_params,
+                    pollables: Vec::new(),
+                    partial_results: Vec::new(),
+                    metadata: Box::new(None),
+                    finished: false,
+                })),
                 subscription: RefCell::new(None),
             }
         }
@@ -241,7 +229,9 @@ mod durable_impl {
                     pollables.push(lazy_pollable);
                     pollable
                 }
-                None => { unreachable!() }
+                None => {
+                    unreachable!()
+                }
             }
         }
     }
@@ -250,7 +240,10 @@ mod durable_impl {
         fn drop(&mut self) {
             let _ = self.subscription.take();
             match self.state.take() {
-                Some(DurableSearchSessionState::Live { mut pollables, session }) => {
+                Some(DurableSearchSessionState::Live {
+                    mut pollables,
+                    session,
+                }) => {
                     with_persistence_level(PersistenceLevel::PersistNothing, move || {
                         pollables.clear();
                         drop(session);
@@ -269,37 +262,37 @@ mod durable_impl {
             let durability = Durability::<Vec<SearchResult>, SearchError>::new(
                 "golem_websearch",
                 "next_page",
-                DurableFunctionType::ReadRemote
+                DurableFunctionType::ReadRemote,
             );
             if durability.is_live() {
                 let mut state = self.state.borrow_mut();
                 let (result, new_live_session) = match &*state {
                     Some(DurableSearchSessionState::Live { session, .. }) => {
-                        let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                            session.next_page()
-                        });
+                        let result =
+                            with_persistence_level(PersistenceLevel::PersistNothing, || {
+                                session.next_page()
+                            });
                         let cloned_result = result.clone();
                         (durability.persist(NoInput, cloned_result), None)
                     }
-                    Some(
-                        DurableSearchSessionState::Replay {
-                            original_params,
-                            pollables,
-                            partial_results,
-                            finished,
-                            ..
-                        },
-                    ) => {
+                    Some(DurableSearchSessionState::Replay {
+                        original_params,
+                        pollables,
+                        partial_results,
+                        finished,
+                        ..
+                    }) => {
                         if *finished {
                             (Ok(Vec::new()), None)
                         } else {
                             let retry_params = Impl::retry_params(original_params, partial_results);
 
-                            let (session, first_live_result) = with_persistence_level(
-                                PersistenceLevel::PersistNothing,
-                                || {
-                                    let session = <Impl as ExtendedwebsearchGuest>
-                                        ::unwrapped_search_session(retry_params)
+                            let (session, first_live_result) =
+                                with_persistence_level(PersistenceLevel::PersistNothing, || {
+                                    let session =
+                                        <Impl as ExtendedwebsearchGuest>::unwrapped_search_session(
+                                            retry_params,
+                                        )
                                         .unwrap();
 
                                     for lazy_initialized_pollable in pollables {
@@ -308,22 +301,25 @@ mod durable_impl {
 
                                     let next = session.next_page();
                                     (session, next)
-                                }
-                            );
+                                });
                             let cloned_result = first_live_result.clone();
                             let _ = durability.persist(NoInput, cloned_result);
 
                             (first_live_result, Some(session))
                         }
                     }
-                    None => { unreachable!() }
+                    None => {
+                        unreachable!()
+                    }
                 };
 
                 if let Some(session) = new_live_session {
                     let pollables = match state.take() {
                         Some(DurableSearchSessionState::Live { pollables, .. }) => pollables,
                         Some(DurableSearchSessionState::Replay { pollables, .. }) => pollables,
-                        None => { unreachable!() }
+                        None => {
+                            unreachable!()
+                        }
                     };
                     *state = Some(DurableSearchSessionState::Live { session, pollables });
                 }
@@ -336,20 +332,22 @@ mod durable_impl {
                     Some(DurableSearchSessionState::Live { .. }) => {
                         unreachable!("Durable search session cannot be in live mode during replay");
                     }
-                    Some(DurableSearchSessionState::Replay { partial_results, finished, .. }) => {
-                        match &result {
-                            Ok(results) => {
-                                if results.is_empty() {
-                                    *finished = true;
-                                } else {
-                                    partial_results.extend_from_slice(results);
-                                }
-                            }
-                            Err(_) => {
+                    Some(DurableSearchSessionState::Replay {
+                        partial_results,
+                        finished,
+                        ..
+                    }) => match &result {
+                        Ok(results) => {
+                            if results.is_empty() {
                                 *finished = true;
+                            } else {
+                                partial_results.extend_from_slice(results);
                             }
                         }
-                    }
+                        Err(_) => {
+                            *finished = true;
+                        }
+                    },
                     None => {
                         unreachable!();
                     }
@@ -362,7 +360,7 @@ mod durable_impl {
             let durability = Durability::<Option<SearchMetadata>, UnusedError>::new(
                 "golem_websearch",
                 "get_metadata",
-                DurableFunctionType::ReadRemote
+                DurableFunctionType::ReadRemote,
             );
             if durability.is_live() {
                 let state = self.state.borrow();
@@ -373,7 +371,9 @@ mod durable_impl {
                         })
                     }
                     Some(DurableSearchSessionState::Replay { metadata, .. }) => *metadata.clone(),
-                    None => { unreachable!() }
+                    None => {
+                        unreachable!()
+                    }
                 };
                 let _ = durability.persist_infallible(NoInput, result.clone());
                 result
@@ -420,25 +420,19 @@ mod durable_impl {
 
     #[cfg(test)]
     mod tests {
-        use crate::durability::durable_impl::{ SearchOnceInput, StartSearchInput };
+        use crate::durability::durable_impl::{SearchOnceInput, StartSearchInput};
         use crate::golem::web_search::types::{
-            ImageResult,
-            RateLimitInfo,
-            SafeSearchLevel,
-            TimeRange,
+            ImageResult, RateLimitInfo, SafeSearchLevel, TimeRange,
         };
         use crate::golem::web_search::web_search::{
-            SearchError,
-            SearchMetadata,
-            SearchParams,
-            SearchResult,
+            SearchError, SearchMetadata, SearchParams, SearchResult,
         };
-        use golem_rust::value_and_type::{ FromValueAndType, IntoValueAndType };
+        use golem_rust::value_and_type::{FromValueAndType, IntoValueAndType};
         use golem_rust::wasm_rpc::WitTypeNode;
         use std::fmt::Debug;
 
         fn roundtrip_test<T: Debug + Clone + PartialEq + IntoValueAndType + FromValueAndType>(
-            value: T
+            value: T,
         ) {
             let vnt = value.clone().into_value_and_type();
             let extracted = T::from_value_and_type(vnt).unwrap();
@@ -464,7 +458,9 @@ mod durable_impl {
         fn search_error_roundtrip() {
             roundtrip_test(SearchError::InvalidQuery);
             roundtrip_test(SearchError::RateLimited(3600));
-            roundtrip_test(SearchError::UnsupportedFeature("advanced search".to_string()));
+            roundtrip_test(SearchError::UnsupportedFeature(
+                "advanced search".to_string(),
+            ));
             roundtrip_test(SearchError::BackendError("Service unavailable".to_string()));
         }
 
@@ -500,18 +496,14 @@ mod durable_impl {
                 score: Some(0.95),
                 html_snippet: Some("<p>This is a sample search result snippet</p>".to_string()),
                 date_published: Some("2023-10-01".to_string()),
-                images: Some(
-                    vec![ImageResult {
-                        url: "https://example.com/thumb.jpg".to_string(),
-                        description: Some("Thumbnail".to_string()),
-                    }]
-                ),
-                content_chunks: Some(
-                    vec![
-                        "First chunk of content".to_string(),
-                        "Second chunk of content".to_string()
-                    ]
-                ),
+                images: Some(vec![ImageResult {
+                    url: "https://example.com/thumb.jpg".to_string(),
+                    description: Some("Thumbnail".to_string()),
+                }]),
+                content_chunks: Some(vec![
+                    "First chunk of content".to_string(),
+                    "Second chunk of content".to_string(),
+                ]),
             });
         }
 
@@ -542,9 +534,10 @@ mod durable_impl {
                 region: Some("US".to_string()),
                 max_results: Some(50),
                 time_range: Some(TimeRange::Month),
-                include_domains: Some(
-                    vec!["rust-lang.org".to_string(), "doc.rust-lang.org".to_string()]
-                ),
+                include_domains: Some(vec![
+                    "rust-lang.org".to_string(),
+                    "doc.rust-lang.org".to_string(),
+                ]),
                 exclude_domains: Some(vec!["spam.com".to_string()]),
                 include_images: Some(true),
                 include_html: Some(false),
@@ -562,9 +555,10 @@ mod durable_impl {
                     region: Some("US".to_string()),
                     max_results: Some(25),
                     time_range: Some(TimeRange::Week),
-                    include_domains: Some(
-                        vec!["github.com".to_string(), "stackoverflow.com".to_string()]
-                    ),
+                    include_domains: Some(vec![
+                        "github.com".to_string(),
+                        "stackoverflow.com".to_string(),
+                    ]),
                     exclude_domains: Some(vec!["ads.com".to_string()]),
                     include_images: Some(true),
                     include_html: Some(true),

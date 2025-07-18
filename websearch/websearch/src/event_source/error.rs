@@ -1,11 +1,11 @@
+use super::utf8_stream::Utf8StreamError;
 use core::fmt;
+use golem_rust::bindings::wasi::io::streams::StreamError as WasiStreamError;
+use nom::error::Error as NomError;
+use reqwest::header::HeaderValue;
+use reqwest::{Error as ReqwestError, StatusCode};
 use std::string::FromUtf8Error;
 use thiserror::Error;
-use reqwest::{ Error as ReqwestError, StatusCode };
-use reqwest::header::HeaderValue;
-use nom::error::Error as NomError;
-use golem_rust::bindings::wasi::io::streams::{ StreamError as WasiStreamError };
-use super::utf8_stream::Utf8StreamError;
 
 /// Low-level streaming errors (UTF-8, parser, transport).
 #[derive(Debug, PartialEq)]
@@ -91,8 +91,9 @@ impl From<StreamError<ReqwestError>> for EventSourceSearchError {
     fn from(e: StreamError<ReqwestError>) -> Self {
         match e {
             StreamError::Utf8(u) => Self::Utf8(u),
-            StreamError::Parser(p) =>
-                Self::Parser(format!("Parse error at '{}': {:?}", p.input, p.code)),
+            StreamError::Parser(p) => {
+                Self::Parser(format!("Parse error at '{}': {:?}", p.input, p.code))
+            }
             StreamError::Transport(t) => Self::Transport(t.to_string()),
         }
     }
@@ -102,14 +103,15 @@ impl From<StreamError<WasiStreamError>> for EventSourceSearchError {
     fn from(e: StreamError<WasiStreamError>) -> Self {
         match e {
             StreamError::Utf8(u) => Self::Utf8(u),
-            StreamError::Parser(p) =>
-                Self::Parser(format!("Parse error at '{}': {:?}", p.input, p.code)),
-            StreamError::Transport(t) =>
-                match t {
-                    WasiStreamError::Closed => Self::StreamEnded,
-                    WasiStreamError::LastOperationFailed(inner) =>
-                        Self::TransportStream(inner.to_debug_string()),
+            StreamError::Parser(p) => {
+                Self::Parser(format!("Parse error at '{}': {:?}", p.input, p.code))
+            }
+            StreamError::Transport(t) => match t {
+                WasiStreamError::Closed => Self::StreamEnded,
+                WasiStreamError::LastOperationFailed(inner) => {
+                    Self::TransportStream(inner.to_debug_string())
                 }
+            },
         }
     }
 }
@@ -169,11 +171,11 @@ impl From<EventSourceSearchError> for crate::exports::golem::web_search::web_sea
             EventSourceSearchError::InvalidStatusCode(_) => {
                 Self::BackendError(format!("Invalid HTTP status: {error}"))
             }
-            EventSourceSearchError::InvalidLastEventId(_) => { Self::InvalidQuery }
+            EventSourceSearchError::InvalidLastEventId(_) => Self::InvalidQuery,
             EventSourceSearchError::StreamEnded => {
                 Self::BackendError("Stream ended unexpectedly".to_string())
             }
-            EventSourceSearchError::RateLimited(seconds) => { Self::RateLimited(seconds) }
+            EventSourceSearchError::RateLimited(seconds) => Self::RateLimited(seconds),
         }
     }
 }

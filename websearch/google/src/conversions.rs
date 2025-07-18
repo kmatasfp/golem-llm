@@ -1,10 +1,7 @@
-use crate::client::{ SearchItem, SearchRequest, SearchResponse };
-use golem_web_search::golem::web_search::types::{ ImageResult, SafeSearchLevel, TimeRange };
+use crate::client::{SearchItem, SearchRequest, SearchResponse};
+use golem_web_search::golem::web_search::types::{ImageResult, SafeSearchLevel, TimeRange};
 use golem_web_search::golem::web_search::web_search::{
-    SearchError,
-    SearchMetadata,
-    SearchParams,
-    SearchResult,
+    SearchError, SearchMetadata, SearchParams, SearchResult,
 };
 
 pub fn params_to_request(params: SearchParams) -> Result<SearchRequest, SearchError> {
@@ -13,25 +10,25 @@ pub fn params_to_request(params: SearchParams) -> Result<SearchRequest, SearchEr
         return Err(SearchError::InvalidQuery);
     }
 
-    let safe = params.safe_search.map(|level| {
-        match level {
-            SafeSearchLevel::Off => "off".to_string(),
-            SafeSearchLevel::Medium => "medium".to_string(),
-            SafeSearchLevel::High => "high".to_string(),
-        }
+    let safe = params.safe_search.map(|level| match level {
+        SafeSearchLevel::Off => "off".to_string(),
+        SafeSearchLevel::Medium => "medium".to_string(),
+        SafeSearchLevel::High => "high".to_string(),
     });
 
-    let date_restrict = params.time_range.map(|range| {
-        match range {
-            TimeRange::Day => "d1".to_string(),
-            TimeRange::Week => "w1".to_string(),
-            TimeRange::Month => "m1".to_string(),
-            TimeRange::Year => "y1".to_string(),
-        }
+    let date_restrict = params.time_range.map(|range| match range {
+        TimeRange::Day => "d1".to_string(),
+        TimeRange::Week => "w1".to_string(),
+        TimeRange::Month => "m1".to_string(),
+        TimeRange::Year => "y1".to_string(),
     });
 
     let site_search = if let Some(domains) = &params.include_domains {
-        if !domains.is_empty() { Some(format!("site:{}", domains.join(" OR site:"))) } else { None }
+        if !domains.is_empty() {
+            Some(format!("site:{}", domains.join(" OR site:")))
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -69,15 +66,16 @@ pub fn params_to_request(params: SearchParams) -> Result<SearchRequest, SearchEr
 
 pub fn response_to_results(
     response: SearchResponse,
-    original_params: &SearchParams
+    original_params: &SearchParams,
 ) -> (Vec<SearchResult>, Option<SearchMetadata>) {
     let mut results = Vec::new();
 
     if let Some(ref items) = response.items {
         for item in items {
-            results.push(
-                item_to_search_result(item.clone(), original_params.include_images.unwrap_or(false))
-            );
+            results.push(item_to_search_result(
+                item.clone(),
+                original_params.include_images.unwrap_or(false),
+            ));
         }
     }
 
@@ -93,12 +91,10 @@ fn item_to_search_result(item: SearchItem, include_images: bool) -> SearchResult
     // Extract images if requested
     if include_images {
         if let Some(image_info) = item.image {
-            images = Some(
-                vec![ImageResult {
-                    url: image_info.context_link,
-                    description: Some(format!("{}x{}", image_info.width, image_info.height)),
-                }]
-            );
+            images = Some(vec![ImageResult {
+                url: image_info.context_link,
+                description: Some(format!("{}x{}", image_info.width, image_info.height)),
+            }]);
         }
 
         // Also check pagemap for additional images
@@ -171,13 +167,18 @@ fn item_to_search_result(item: SearchItem, include_images: bool) -> SearchResult
 }
 
 fn create_search_metadata(response: &SearchResponse, params: &SearchParams) -> SearchMetadata {
-    let total_results = response.search_information
+    let total_results = response
+        .search_information
         .as_ref()
         .and_then(|info| info.total_results.parse::<u64>().ok());
 
-    let search_time_ms = response.search_information.as_ref().map(|info| info.search_time * 1000.0); // Convert to milliseconds
+    let search_time_ms = response
+        .search_information
+        .as_ref()
+        .map(|info| info.search_time * 1000.0); // Convert to milliseconds
 
-    let next_page_token = response.queries
+    let next_page_token = response
+        .queries
         .as_ref()
         .and_then(|q| q.next_page.as_ref())
         .and_then(|next| next.first())
@@ -257,7 +258,8 @@ pub fn _create_pagination_request(original_request: SearchRequest, start: u32) -
 }
 
 pub fn _extract_next_page_start(response: &SearchResponse) -> Option<u32> {
-    response.queries
+    response
+        .queries
         .as_ref()
         .and_then(|q| q.next_page.as_ref())
         .and_then(|next| next.first())
@@ -271,11 +273,9 @@ pub fn validate_search_params(params: &SearchParams) -> Result<(), SearchError> 
 
     if let Some(max_results) = params.max_results {
         if max_results > 100 {
-            return Err(
-                SearchError::UnsupportedFeature(
-                    "max_results cannot exceed 100 for Google Custom Search".to_string()
-                )
-            );
+            return Err(SearchError::UnsupportedFeature(
+                "max_results cannot exceed 100 for Google Custom Search".to_string(),
+            ));
         }
     }
 

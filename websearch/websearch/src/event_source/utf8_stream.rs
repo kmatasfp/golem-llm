@@ -1,4 +1,4 @@
-use golem_rust::bindings::wasi::io::streams::{ InputStream, StreamError };
+use golem_rust::bindings::wasi::io::streams::{InputStream, StreamError};
 use golem_rust::wasm_rpc::Pollable;
 use std::string::FromUtf8Error;
 use std::task::Poll;
@@ -51,13 +51,10 @@ impl Utf8Stream {
                     if self.buffer.is_empty() {
                         Poll::Ready(None)
                     } else {
-                        Poll::Ready(
-                            Some(
-                                String::from_utf8(core::mem::take(&mut self.buffer)).map_err(
-                                    Utf8StreamError::Utf8
-                                )
-                            )
-                        )
+                        Poll::Ready(Some(
+                            String::from_utf8(core::mem::take(&mut self.buffer))
+                                .map_err(Utf8StreamError::Utf8),
+                        ))
                     }
                 }
                 Err(e) => Poll::Ready(Some(Err(Utf8StreamError::Transport(e)))),

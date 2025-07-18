@@ -1,10 +1,10 @@
 use golem_web_search::error::from_reqwest_error;
 use golem_web_search::golem::web_search::web_search::SearchError;
 use log::trace;
-use reqwest::{ Client, Response };
 use reqwest::Method;
+use reqwest::{Client, Response};
 use serde::de::DeserializeOwned;
-use serde::{ Deserialize, Serialize };
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
 const BASE_URL: &str = "https://api.tavily.com/search";
@@ -27,7 +27,8 @@ impl TavilySearchApi {
     pub fn search(&self, request: SearchRequest) -> Result<SearchResponse, SearchError> {
         trace!("Sending request to Tavily Search API: {request:?}");
 
-        let response = self.client
+        let response = self
+            .client
             .request(Method::POST, BASE_URL)
             .header("Content-Type", "application/json")
             .json(&request)
@@ -108,17 +109,19 @@ fn parse_response<T: DeserializeOwned + Debug>(response: Response) -> Result<T, 
                     401 => SearchError::BackendError("Invalid API key".to_string()),
                     403 => SearchError::BackendError("API key quota exceeded".to_string()),
                     429 => SearchError::RateLimited(60), // Default to 60 seconds
-                    _ =>
-                        SearchError::BackendError(
-                            format!("Request failed with {}: {}", status, error_body.error)
-                        ),
+                    _ => SearchError::BackendError(format!(
+                        "Request failed with {}: {}",
+                        status, error_body.error
+                    )),
                 };
 
                 Err(search_error)
             }
             Err(_) => {
                 // Fallback for non-JSON error responses
-                Err(SearchError::BackendError(format!("Request failed with status {}", status)))
+                Err(SearchError::BackendError(format!(
+                    "Request failed with status {status}"
+                )))
             }
         }
     }

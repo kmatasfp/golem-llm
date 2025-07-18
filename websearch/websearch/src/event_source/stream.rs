@@ -1,15 +1,14 @@
 use core::fmt;
-use std::{ string::FromUtf8Error, task::Poll };
+use std::{string::FromUtf8Error, task::Poll};
 
 use super::{
-    event_stream::SseWebsearchStream,
-    ndjson_stream::NdJsonWebsearchStream,
+    event_stream::SseWebsearchStream, ndjson_stream::NdJsonWebsearchStream,
     utf8_stream::Utf8StreamError,
 };
+use crate::event_source::error::StreamError as ImportedStreamError;
+use crate::event_source::types::WebsearchStreamEntry;
 use golem_rust::bindings::wasi::io::streams::InputStream;
 use golem_rust::wasm_rpc::Pollable;
-use crate::event_source::types::WebsearchStreamEntry;
-use crate::event_source::error::StreamError as ImportedStreamError;
 use nom::error::Error as NomError;
 
 /// Concrete stream variants we can wrap.
@@ -49,16 +48,16 @@ pub enum WebsearchStreamType {
         Box<
             dyn WebsearchStream<
                 Item = WebsearchStreamEntry,
-                Error = ImportedStreamError<golem_rust::bindings::wasi::io::streams::StreamError>
-            >
+                Error = ImportedStreamError<golem_rust::bindings::wasi::io::streams::StreamError>,
+            >,
         >,
     ),
     NdJson(
         Box<
             dyn WebsearchStream<
                 Item = WebsearchStreamEntry,
-                Error = ImportedStreamError<golem_rust::bindings::wasi::io::streams::StreamError>
-            >
+                Error = ImportedStreamError<golem_rust::bindings::wasi::io::streams::StreamError>,
+            >,
         >,
     ),
 }
@@ -134,7 +133,10 @@ impl<E> From<NomError<&str>> for StreamParseError<E> {
     }
 }
 
-impl<E> fmt::Display for StreamParseError<E> where E: fmt::Display {
+impl<E> fmt::Display for StreamParseError<E>
+where
+    E: fmt::Display,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Utf8(e) => write!(f, "UTF-8 error: {e}"),
@@ -144,6 +146,4 @@ impl<E> fmt::Display for StreamParseError<E> where E: fmt::Display {
     }
 }
 
-impl<E> std::error::Error
-    for StreamParseError<E>
-    where E: fmt::Display + fmt::Debug + Send + Sync {}
+impl<E> std::error::Error for StreamParseError<E> where E: fmt::Display + fmt::Debug + Send + Sync {}

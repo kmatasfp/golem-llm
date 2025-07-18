@@ -1,15 +1,12 @@
-use crate::client::{ SearchRequest, SearchResponse, SearchResult as TavilySearchResult };
+use crate::client::{SearchRequest, SearchResponse, SearchResult as TavilySearchResult};
+use golem_web_search::golem::web_search::types::{ImageResult, TimeRange};
 use golem_web_search::golem::web_search::web_search::{
-    SearchError,
-    SearchMetadata,
-    SearchParams,
-    SearchResult,
+    SearchError, SearchMetadata, SearchParams, SearchResult,
 };
-use golem_web_search::golem::web_search::types::{ TimeRange, ImageResult };
 
 pub fn params_to_request(
     params: SearchParams,
-    api_key: String
+    api_key: String,
 ) -> Result<SearchRequest, SearchError> {
     // Validate query
     if params.query.trim().is_empty() {
@@ -20,13 +17,11 @@ pub fn params_to_request(
     let search_depth = determine_search_depth(&params);
 
     // Convert time range to days
-    let days = params.time_range.map(|range| {
-        match range {
-            TimeRange::Day => 1,
-            TimeRange::Week => 7,
-            TimeRange::Month => 30,
-            TimeRange::Year => 365,
-        }
+    let days = params.time_range.map(|range| match range {
+        TimeRange::Day => 1,
+        TimeRange::Week => 7,
+        TimeRange::Month => 30,
+        TimeRange::Year => 365,
     });
 
     // Handle domain filtering
@@ -64,20 +59,18 @@ fn determine_search_depth(params: &SearchParams) -> String {
 
 pub fn response_to_results(
     response: SearchResponse,
-    original_params: &SearchParams
+    original_params: &SearchParams,
 ) -> (Vec<SearchResult>, Option<SearchMetadata>) {
     let mut results = Vec::new();
 
     // Process main search results
     for (index, item) in response.results.iter().enumerate() {
-        results.push(
-            tavily_result_to_search_result(
-                item,
-                index,
-                original_params.include_images.unwrap_or(false),
-                &response.images
-            )
-        );
+        results.push(tavily_result_to_search_result(
+            item,
+            index,
+            original_params.include_images.unwrap_or(false),
+            &response.images,
+        ));
     }
 
     // If we have an answer, create a special result for it
@@ -107,7 +100,7 @@ fn tavily_result_to_search_result(
     item: &TavilySearchResult,
     index: usize,
     include_images: bool,
-    response_images: &Option<Vec<String>>
+    response_images: &Option<Vec<String>>,
 ) -> SearchResult {
     let mut images = None;
     let mut content_chunks = None;
@@ -123,7 +116,7 @@ fn tavily_result_to_search_result(
                             url: url.clone(),
                             description: Some(format!("Image related to: {}", item.title)),
                         })
-                        .collect()
+                        .collect(),
                 );
             }
         }
@@ -202,11 +195,9 @@ pub fn validate_search_params(params: &SearchParams) -> Result<(), SearchError> 
     // Allow higher max_results but cap at reasonable limit
     if let Some(max_results) = params.max_results {
         if max_results > 500 {
-            return Err(
-                SearchError::UnsupportedFeature(
-                    "max_results cannot exceed 500 for Tavily Search".to_string()
-                )
-            );
+            return Err(SearchError::UnsupportedFeature(
+                "max_results cannot exceed 500 for Tavily Search".to_string(),
+            ));
         }
     }
     Ok(())

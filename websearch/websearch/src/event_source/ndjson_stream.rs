@@ -1,13 +1,13 @@
-use super::types::{ WebsearchStreamEntry };
 use super::stream::WebsearchStream;
-use crate::event_source::StreamError as NdJsonStreamError;
+use super::types::WebsearchStreamEntry;
 use crate::event_source::utf8_stream::Utf8Stream;
+use crate::event_source::StreamError as NdJsonStreamError;
 // use crate_golem::websearch::websearch::SearchError;
-use golem_rust::bindings::wasi::io::streams::{ InputStream, StreamError };
+use golem_rust::bindings::wasi::io::streams::{InputStream, StreamError};
 use golem_rust::wasm_rpc::Pollable;
-use log::{ debug, error, trace, warn };
-use std::task::Poll;
+use log::{debug, error, trace, warn};
 use serde_json::Value;
+use std::task::Poll;
 
 /// Represents the state of the NDJSON web search stream.
 #[derive(Debug, Clone, Copy)]
@@ -133,10 +133,11 @@ impl NdJsonWebsearchStream {
 
 /// Parses one complete line from the stream buffer (if any).
 fn try_parse_search_line(
-    stream: &mut NdJsonWebsearchStream
+    stream: &mut NdJsonWebsearchStream,
 ) -> Result<Option<WebsearchStreamEntry>, NdJsonStreamError<StreamError>> {
     if let Some(pos) = stream.buffer.find('\n') {
-        let line = stream.buffer
+        let line = stream
+            .buffer
             .drain(..=pos)
             .collect::<String>()
             .trim()
