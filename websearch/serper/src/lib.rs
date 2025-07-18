@@ -99,7 +99,8 @@ impl SearchStreamState for SerperSearchStream {
                 dyn golem_web_search::event_source::stream::WebsearchStream<
                     Item = golem_web_search::event_source::types::WebsearchStreamEntry,
                     Error = golem_web_search::event_source::error::StreamError<reqwest::Error>
-                >
+                > +
+                    '_
             >
         >
     > {
@@ -228,7 +229,7 @@ impl GuestSearchSession for SerperSearchSession {
         match api.search(request.clone()) {
             Ok(response) => {
                 let (results, metadata) = response_to_results(response, params, *start_index_ref);
-                let max_results = params.max_results.unwrap_or(10) as u32;
+                let max_results = params.max_results.unwrap_or(10);
                 let new_start = *start_index_ref + max_results;
                 drop(start_index_ref);
                 *stream._current_start_index.borrow_mut() = new_start;

@@ -187,7 +187,7 @@ fn create_search_metadata(response: &SearchResponse, params: &SearchParams) -> S
         query: params.query.clone(),
         total_results,
         search_time_ms,
-        safe_search: params.safe_search.clone(),
+        safe_search: params.safe_search,
         language: params.language.clone(),
         region: params.region.clone(),
         next_page_token,
@@ -199,8 +199,8 @@ fn extract_source_from_url(url: &str) -> Option<String> {
     if let Ok(parsed_url) = url::Url::parse(url) {
         parsed_url.host_str().map(|host| {
             // Remove www. prefix if present
-            if host.starts_with("www.") {
-                host[4..].to_string()
+            if let Some(stripped) = host.strip_prefix("www.") {
+                stripped.to_string()
             } else {
                 host.to_string()
             }

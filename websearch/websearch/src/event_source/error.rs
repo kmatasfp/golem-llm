@@ -152,22 +152,22 @@ impl From<EventSourceSearchError> for crate::exports::golem::web_search::web_sea
     fn from(error: EventSourceSearchError) -> Self {
         match error {
             EventSourceSearchError::Utf8(_) => {
-                Self::BackendError(format!("UTF-8 decoding error: {}", error))
+                Self::BackendError(format!("UTF-8 decoding error: {error}"))
             }
             EventSourceSearchError::Parser(_) => {
-                Self::BackendError(format!("Protocol parser error: {}", error))
+                Self::BackendError(format!("Protocol parser error: {error}"))
             }
             EventSourceSearchError::Transport(_) => {
-                Self::BackendError(format!("HTTP transport error: {}", error))
+                Self::BackendError(format!("HTTP transport error: {error}"))
             }
             EventSourceSearchError::TransportStream(_) => {
-                Self::BackendError(format!("Transport stream error: {}", error))
+                Self::BackendError(format!("Transport stream error: {error}"))
             }
             EventSourceSearchError::InvalidContentType(_) => {
-                Self::BackendError(format!("Invalid content type: {}", error))
+                Self::BackendError(format!("Invalid content type: {error}"))
             }
             EventSourceSearchError::InvalidStatusCode(_) => {
-                Self::BackendError(format!("Invalid HTTP status: {}", error))
+                Self::BackendError(format!("Invalid HTTP status: {error}"))
             }
             EventSourceSearchError::InvalidLastEventId(_) => { Self::InvalidQuery }
             EventSourceSearchError::StreamEnded => {

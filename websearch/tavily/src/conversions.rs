@@ -185,7 +185,7 @@ fn create_search_metadata(response: &SearchResponse, params: &SearchParams) -> S
         query: params.query.clone(),
         total_results,
         search_time_ms: Some(response.response_time as f64),
-        safe_search: params.safe_search.clone(),
+        safe_search: params.safe_search,
         language: params.language.clone(),
         region: params.region.clone(),
         next_page_token: None, // Will be updated for pagination support

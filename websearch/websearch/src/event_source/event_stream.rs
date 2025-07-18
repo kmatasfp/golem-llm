@@ -174,7 +174,7 @@ impl WebsearchStream for SseWebsearchStream {
 
     // FIXED: Corrected method signature to match trait
     fn set_last_event_id_str(&mut self, id: String) {
-        self.last_event_id = Some(id.into());
+        self.last_event_id = Some(id);
     }
 
     fn last_event_id(&self) -> &str {

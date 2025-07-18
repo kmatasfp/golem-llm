@@ -272,7 +272,7 @@ fn create_search_metadata(
         query: params.query.clone(),
         total_results,
         search_time_ms: None, // Serper doesn't provide search time
-        safe_search: params.safe_search.clone(),
+        safe_search: params.safe_search,
         language: params.language.clone(),
         region: params.region.clone(),
         next_page_token,

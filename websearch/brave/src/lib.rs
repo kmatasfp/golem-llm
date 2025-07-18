@@ -203,7 +203,8 @@ impl SearchStreamState for BraveSearchStream {
                 dyn golem_web_search::event_source::stream::WebsearchStream<
                     Item = golem_web_search::event_source::types::WebsearchStreamEntry,
                     Error = golem_web_search::event_source::error::StreamError<reqwest::Error>
-                >
+                > +
+                    '_
             >
         >
     > {

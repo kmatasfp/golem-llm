@@ -3,10 +3,10 @@ use std::task::Poll;
 
 use golem_rust::wasm_rpc::Pollable;
 
-use crate::event_source::error::StreamError as LowLevelError;
 use crate::event_source::types::WebsearchStreamEntry;
 use crate::event_source::stream::WebsearchStream;
 use crate::event_source::error::EventSourceSearchError as SearchError;
+use crate::event_source::error::StreamError as WebsearchStreamError;
 /// A trait that the session's concrete state object must implement.
 pub trait SearchStreamState: 'static {
     /// If an unrecoverable error occurred during startup.
@@ -17,30 +17,8 @@ pub trait SearchStreamState: 'static {
     fn set_finished(&self);
 
     /// Immutable & mutable accessors to the underlying low-level stream.
-    fn stream(
-        &self
-    ) -> Ref<
-        Option<
-            Box<
-                dyn WebsearchStream<
-                    Item = WebsearchStreamEntry,
-                    Error = LowLevelError<reqwest::Error>
-                >
-            >
-        >
-    >;
-    fn stream_mut(
-        &self
-    ) -> RefMut<
-        Option<
-            Box<
-                dyn WebsearchStream<
-                    Item = WebsearchStreamEntry,
-                    Error = LowLevelError<reqwest::Error>
-                >
-            >
-        >
-    >;
+    fn stream(&self) -> WebsearchStreamRef<'_>;
+    fn stream_mut(&self) -> WebsearchStreamRefMut<'_>;
 }
 
 /// Public wrapper exported to the host.
@@ -123,3 +101,28 @@ impl<T: SearchStreamState> HostSearchStream for GuestSearchStream<T> {
         }
     }
 }
+
+type WebsearchStreamRef<'a> = Ref<
+    'a,
+    Option<
+        Box<
+            dyn WebsearchStream<
+                Item = WebsearchStreamEntry,
+                Error = WebsearchStreamError<reqwest::Error>
+            > +
+                'a
+        >
+    >
+>;
+type WebsearchStreamRefMut<'a> = RefMut<
+    'a,
+    Option<
+        Box<
+            dyn WebsearchStream<
+                Item = WebsearchStreamEntry,
+                Error = WebsearchStreamError<reqwest::Error>
+            > +
+                'a
+        >
+    >
+>;

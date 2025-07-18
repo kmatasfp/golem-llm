@@ -96,7 +96,8 @@ impl SearchStreamState for GoogleSearchStream {
                 dyn golem_web_search::event_source::stream::WebsearchStream<
                     Item = golem_web_search::event_source::types::WebsearchStreamEntry,
                     Error = golem_web_search::event_source::error::StreamError<reqwest::Error>
-                >
+                > +
+                    '_
             >
         >
     > {
@@ -248,7 +249,7 @@ impl GuestSearchSession for GoogleSearchSession {
                 let (results, metadata) = response_to_results(response, params);
 
                 // Update pagination state
-                let max_results = params.max_results.unwrap_or(10) as u32;
+                let max_results = params.max_results.unwrap_or(10);
                 let new_start = *current_start_ref + max_results;
 
                 // Update the current start for next page

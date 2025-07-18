@@ -364,7 +364,7 @@ fn image_result_to_search_result(
         snippet: format!("Image: {}", item.title),
         display_url: item.meta_url.as_ref().map(|meta| meta.hostname.clone()),
         source: item.meta_url.as_ref().map(|meta| meta.hostname.clone()),
-        score: Some((1.0 - (index as f32) * 0.01).max(0.0).into()),
+        score: Some((1.0 - (index as f32) * 0.01).clamp(0.0, 1.0).into()),
         html_snippet: None,
         date_published: item.age.clone(),
         images,
@@ -405,7 +405,7 @@ fn calculate_result_score(index: usize, item: &WebResult) -> f32 {
         }
     }
 
-    score.min(1.0).max(0.0)
+    score.clamp(0.0, 1.0)
 }
 
 fn create_search_metadata(response: &SearchResponse, params: &SearchParams) -> SearchMetadata {
@@ -435,7 +435,7 @@ fn create_search_metadata(response: &SearchResponse, params: &SearchParams) -> S
         query: params.query.clone(),
         total_results: total_results.map(|x| x as u64),
         search_time_ms: None, // Brave API doesn't provide search time
-        safe_search: params.safe_search.clone(),
+        safe_search: params.safe_search,
         language: params.language.clone(),
         region: params.region.clone(),
         next_page_token: if more_results_available {

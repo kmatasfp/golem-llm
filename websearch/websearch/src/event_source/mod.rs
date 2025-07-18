@@ -104,14 +104,16 @@ impl EventSource {
         match &mut self.stream {
             StreamType::EventStream(s) =>
                 match s.poll_next() {
-                    Poll::Ready(Some(Ok(event))) => Poll::Ready(Some(Ok(Event::Message(event)))),
+                    Poll::Ready(Some(Ok(event))) =>
+                        Poll::Ready(Some(Ok(Event::Message(Box::new(event))))),
                     Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(Box::new(err)))),
                     Poll::Ready(None) => Poll::Ready(None),
                     Poll::Pending => Poll::Pending,
                 }
             StreamType::NdJsonStream(s) =>
                 match s.poll_next() {
-                    Poll::Ready(Some(Ok(event))) => Poll::Ready(Some(Ok(Event::Message(event)))),
+                    Poll::Ready(Some(Ok(event))) =>
+                        Poll::Ready(Some(Ok(Event::Message(Box::new(event))))),
                     Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(Box::new(err)))),
                     Poll::Ready(None) => Poll::Ready(None),
                     Poll::Pending => Poll::Pending,
@@ -124,12 +126,12 @@ impl EventSource {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     Open,
-    Message(WebsearchStreamEntry),
+    Message(Box<WebsearchStreamEntry>),
 }
 
 impl From<WebsearchStreamEntry> for Event {
     fn from(event: WebsearchStreamEntry) -> Self {
-        Event::Message(event)
+        Event::Message(Box::new(event))
     }
 }
 
@@ -144,10 +146,10 @@ impl std::fmt::Display for EventSourceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             EventSourceError::InvalidStatusCode(status) => {
-                write!(f, "Invalid status code: {}", status)
+                write!(f, "Invalid status code: {status}")
             }
             EventSourceError::InvalidContentType(content_type) => {
-                write!(f, "Invalid content type: {:?}", content_type)
+                write!(f, "Invalid content type: {content_type:?}")
             }
         }
     }

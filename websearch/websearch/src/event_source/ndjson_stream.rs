@@ -82,7 +82,7 @@ impl WebsearchStream for NdJsonWebsearchStream {
                         let leftover = std::mem::take(&mut self.buffer);
                         warn!("Unparsed leftover buffer: {}", leftover.trim());
 
-                        if let Ok(entry) = parse_json_to_search_entry(&leftover.trim()) {
+                        if let Ok(entry) = parse_json_to_search_entry(leftover.trim()) {
                             return Poll::Ready(Some(Ok(entry)));
                         }
                     }
@@ -146,7 +146,7 @@ fn try_parse_search_line(
             return Ok(None);
         }
 
-        trace!("Parsing NDJSON line: {}", line);
+        trace!("Parsing NDJSON line: {line}");
 
         match parse_json_to_search_entry(&line) {
             Ok(entry) => {
@@ -157,7 +157,7 @@ fn try_parse_search_line(
                 Ok(Some(entry))
             }
             Err(err) => {
-                error!("Failed to parse line: {:?} ({})", line, err);
+                error!("Failed to parse line: {line:?} ({err})");
                 Ok(Some(WebsearchStreamEntry::Unknown(line)))
             }
         }

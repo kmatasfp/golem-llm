@@ -192,7 +192,7 @@ mod durable_impl {
             original_params: SearchParams,
             pollables: Vec<LazyInitializedPollable>,
             partial_results: Vec<SearchResult>,
-            metadata: Option<SearchMetadata>,
+            metadata: Box<Option<SearchMetadata>>,
             finished: bool,
         },
     }
@@ -222,7 +222,7 @@ mod durable_impl {
                         original_params,
                         pollables: Vec::new(),
                         partial_results: Vec::new(),
-                        metadata: None,
+                        metadata: Box::new(None),
                         finished: false,
                     })
                 ),
@@ -372,7 +372,7 @@ mod durable_impl {
                             session.get_metadata()
                         })
                     }
-                    Some(DurableSearchSessionState::Replay { metadata, .. }) => metadata.clone(),
+                    Some(DurableSearchSessionState::Replay { metadata, .. }) => *metadata.clone(),
                     None => { unreachable!() }
                 };
                 let _ = durability.persist_infallible(NoInput, result.clone());
@@ -385,7 +385,7 @@ mod durable_impl {
                         unreachable!("Durable search session cannot be in live mode during replay");
                     }
                     Some(DurableSearchSessionState::Replay { metadata, .. }) => {
-                        *metadata = result.clone();
+                        *metadata = Box::new(result.clone());
                     }
                     None => {
                         unreachable!();

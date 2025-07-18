@@ -26,8 +26,8 @@ pub fn error_from_status(status: StatusCode, body: Option<String>) -> SearchErro
         s if s.is_client_error() => SearchError::InvalidQuery,
         _ => {
             let message = match body {
-                Some(b) => format!("HTTP {}: {}", status, b),
-                None => format!("HTTP {}", status),
+                Some(b) => format!("HTTP {status}: {b}"),
+                None => format!("HTTP {status}"),
             };
             SearchError::BackendError(message)
         }
