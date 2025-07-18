@@ -461,16 +461,11 @@ dependencies = [
 name = "golem-web-search"
 version = "0.0.0"
 dependencies = [
- "anyhow",
  "golem-rust",
  "log",
- "mime",
- "nom",
  "reqwest",
  "serde",
  "serde_json",
- "thiserror",
- "url",
  "wasi-logger",
  "wit-bindgen 0.40.0",
 ]

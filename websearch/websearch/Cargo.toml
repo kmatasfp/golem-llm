@@ -21,11 +21,6 @@ log = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-thiserror = "2.0.12"
-mime = "0.3.17"
-nom = { version = "7.1", default-features = false }
 wasi-logger = "0.1.2"
 wit-bindgen = { version = "0.40.0" }
-url = "2.4"
-anyhow = "1.0"
 
