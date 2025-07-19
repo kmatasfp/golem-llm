@@ -6,6 +6,7 @@ use golem_web_search::golem::web_search::web_search::{
 pub fn params_to_request(
     params: SearchParams,
     api_key: String,
+    offset: u32,
 ) -> Result<SearchRequest, SearchError> {
     // Validate query
     if params.query.trim().is_empty() {
@@ -23,14 +24,15 @@ pub fn params_to_request(
     Ok(SearchRequest {
         api_key,
         query,
-        count: Some(10),
-        offset: Some(0),
+        count: Some(params.max_results.unwrap_or(10)),
+        offset: Some(offset),
     })
 }
 
 pub fn response_to_results(
     response: SearchResponse,
     original_params: &SearchParams,
+    current_offset: u32,
 ) -> (Vec<SearchResult>, Option<SearchMetadata>) {
     let mut results = Vec::new();
 
@@ -41,7 +43,7 @@ pub fn response_to_results(
         }
     }
 
-    let metadata = create_search_metadata(&response, original_params);
+    let metadata = create_search_metadata(&response, original_params, current_offset);
     (results, Some(metadata))
 }
 
@@ -90,7 +92,27 @@ fn extract_domain(url: &str) -> Option<String> {
     }
 }
 
-fn create_search_metadata(response: &SearchResponse, params: &SearchParams) -> SearchMetadata {
+fn create_search_metadata(
+    response: &SearchResponse,
+    params: &SearchParams,
+    current_offset: u32,
+) -> SearchMetadata {
+    // Check if we got the full count requested
+    let has_more_results = if let Some(web_results) = &response.web {
+        let requested_count = params.max_results.unwrap_or(10);
+        web_results.results.len() == (requested_count as usize)
+    } else {
+        false
+    };
+
+    // Create next page token if more results are available
+    let next_page_token = if has_more_results {
+        let next_offset = current_offset + params.max_results.unwrap_or(10);
+        Some(next_offset.to_string())
+    } else {
+        None
+    };
+
     // Simple total results estimation
     let total_results = if let Some(web_results) = &response.web {
         if web_results.results.len() >= (params.max_results.unwrap_or(10) as usize) {
@@ -109,7 +131,7 @@ fn create_search_metadata(response: &SearchResponse, params: &SearchParams) -> S
         safe_search: params.safe_search,
         language: params.language.clone(),
         region: params.region.clone(),
-        next_page_token: None,
+        next_page_token,
         rate_limits: None,
     }
 }

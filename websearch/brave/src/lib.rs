@@ -18,6 +18,7 @@ struct BraveSearch {
     params: SearchParams,
     finished: bool,
     metadata: Option<SearchMetadata>,
+    current_offset: u32,
 }
 
 impl BraveSearch {
@@ -28,6 +29,7 @@ impl BraveSearch {
             params,
             finished: false,
             metadata: None,
+            current_offset: 0,
         }
     }
 
@@ -36,12 +38,34 @@ impl BraveSearch {
             return Ok(vec![]);
         }
 
-        let response = self.client.search(self.request.clone())?;
-        let (results, metadata) = response_to_results(response, &self.params);
+        // Update request with current offset
+        let mut request = self.request.clone();
+        request.offset = Some(self.current_offset);
+
+        let response = self.client.search(request)?;
+        let (results, metadata) = response_to_results(response, &self.params, self.current_offset);
+
+        // Check if more results are available
+        if let Some(ref meta) = metadata {
+            // Check if we got the full count requested - if yes, there might be more
+            let count = self.request.count.unwrap_or(10);
+            let has_more_results = results.len() == (count as usize);
+
+            // Also check if next_page_token is available
+            let has_next_page = meta.next_page_token.is_some();
+
+            // Only set finished if no more results available
+            self.finished = !has_more_results || !has_next_page;
+
+            // Increment offset for next page if not finished
+            if !self.finished {
+                self.current_offset += count;
+            }
+        } else {
+            self.finished = true;
+        }
 
         self.metadata = metadata;
-        self.finished = true;
-
         Ok(results)
     }
 
@@ -77,11 +101,14 @@ impl BraveSearchComponent {
     const API_KEY_VAR: &'static str = "BRAVE_API_KEY";
 
     fn create_client() -> Result<BraveSearchApi, SearchError> {
-        let api_key = std::env::var(Self::API_KEY_VAR).map_err(|_| {
-            SearchError::BackendError("BRAVE_API_KEY environment variable not set".to_string())
-        })?;
-
+        let api_key = Self::get_api_key()?;
         Ok(BraveSearchApi::new(api_key))
+    }
+
+    fn get_api_key() -> Result<String, SearchError> {
+        std::env::var(Self::API_KEY_VAR).map_err(|_| {
+            SearchError::BackendError("BRAVE_API_KEY environment variable not set".to_string())
+        })
     }
 
     fn execute_search(
@@ -91,10 +118,10 @@ impl BraveSearchComponent {
         validate_search_params(&params)?;
 
         let client = Self::create_client()?;
-        let request = params_to_request(params.clone(), api_key.clone())?;
+        let request = params_to_request(params.clone(), api_key.clone(), 0)?;
 
         let response = client.search(request)?;
-        let (results, metadata) = response_to_results(response, &params);
+        let (results, metadata) = response_to_results(response, &params, 0);
 
         Ok((results, metadata))
     }
@@ -106,7 +133,7 @@ impl BraveSearchComponent {
         validate_search_params(&params)?;
 
         let client = Self::create_client()?;
-        let request = params_to_request(params.clone(), api_key.clone())?;
+        let request = params_to_request(params.clone(), api_key.clone(), 0)?;
 
         let search = BraveSearch::new(client, request, params);
         Ok(BraveSearchSession::new(search))
@@ -118,7 +145,7 @@ impl Guest for BraveSearchComponent {
 
     fn start_search(params: SearchParams) -> Result<SearchSession, SearchError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
-        match Self::start_search_session(params, std::env::var(Self::API_KEY_VAR).unwrap()) {
+        match Self::start_search_session(params, Self::get_api_key()?) {
             Ok(session) => Ok(SearchSession::new(session)),
             Err(err) => Err(err),
         }
@@ -128,7 +155,7 @@ impl Guest for BraveSearchComponent {
         params: SearchParams,
     ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
-        Self::execute_search(params, std::env::var(Self::API_KEY_VAR).unwrap())
+        Self::execute_search(params, Self::get_api_key()?)
     }
 }
 

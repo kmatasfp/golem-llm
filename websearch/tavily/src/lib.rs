@@ -18,6 +18,7 @@ struct TavilySearch {
     params: SearchParams,
     finished: bool,
     metadata: Option<SearchMetadata>,
+    current_page: u32,
 }
 
 impl TavilySearch {
@@ -28,6 +29,7 @@ impl TavilySearch {
             params,
             finished: false,
             metadata: None,
+            current_page: 1,
         }
     }
 
@@ -36,12 +38,34 @@ impl TavilySearch {
             return Ok(vec![]);
         }
 
-        let response = self.client.search(self.request.clone())?;
-        let (results, metadata) = response_to_results(response, &self.params);
+        let request = self.request.clone();
+        // Note: Tavily's SearchRequest doesn't have pagination fields
+        // We'll use the existing request and track pagination in metadata
+
+        let response = self.client.search(request)?;
+        let (results, metadata) = response_to_results(response, &self.params, self.current_page);
+
+        // Check if more results are available
+        if let Some(ref meta) = metadata {
+            // Check if we got the full count requested
+            let max_results = self.params.max_results.unwrap_or(10);
+            let has_more_results = results.len() == (max_results as usize);
+
+            // Also check if next_page_token is available
+            let has_next_page = meta.next_page_token.is_some();
+
+            // Only set finished if no more results available
+            self.finished = !has_more_results || !has_next_page;
+
+            // Increment page for next request if not finished
+            if !self.finished {
+                self.current_page += 1;
+            }
+        } else {
+            self.finished = true;
+        }
 
         self.metadata = metadata;
-        self.finished = true;
-
         Ok(results)
     }
 
@@ -76,14 +100,10 @@ impl TavilySearchComponent {
     const API_KEY_VAR: &'static str = "TAVILY_API_KEY";
 
     fn create_client() -> Result<TavilySearchApi, SearchError> {
-        let api_key = std::env::var(Self::API_KEY_VAR).map_err(|_| {
-            SearchError::BackendError("TAVILY_API_KEY environment variable not set".to_string())
-        })?;
-
+        let api_key = Self::get_api_key()?;
         Ok(TavilySearchApi::new(api_key))
     }
 
-    // Add getter for API key
     fn get_api_key() -> Result<String, SearchError> {
         std::env::var(Self::API_KEY_VAR).map_err(|_| {
             SearchError::BackendError("TAVILY_API_KEY environment variable not set".to_string())
@@ -97,10 +117,10 @@ impl TavilySearchComponent {
 
         let client = Self::create_client()?;
         let api_key = Self::get_api_key()?;
-        let request = params_to_request(params.clone(), api_key)?;
+        let request = params_to_request(params.clone(), api_key, 1)?;
 
         let response = client.search(request)?;
-        let (results, metadata) = response_to_results(response, &params);
+        let (results, metadata) = response_to_results(response, &params, 1);
 
         // Unwrap the metadata Option since we know it should be Some
         Ok((results, metadata))
@@ -111,7 +131,7 @@ impl TavilySearchComponent {
 
         let client = Self::create_client()?;
         let api_key = Self::get_api_key()?;
-        let request = params_to_request(params.clone(), api_key)?;
+        let request = params_to_request(params.clone(), api_key, 1)?;
 
         let search = TavilySearch::new(client, request, params);
         Ok(TavilySearchSession::new(search))

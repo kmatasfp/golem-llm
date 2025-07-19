@@ -7,6 +7,7 @@ use golem_web_search::golem::web_search::web_search::{
 pub fn params_to_request(
     params: SearchParams,
     api_key: String,
+    _page: u32,
 ) -> Result<SearchRequest, SearchError> {
     // Validate query
     if params.query.trim().is_empty() {
@@ -32,6 +33,8 @@ pub fn params_to_request(
     let exclude_domains = params.exclude_domains.clone();
     let include_domains = params.include_domains.clone();
 
+    // Note: Tavily's SearchRequest doesn't have pagination fields (page/start/offset)
+    // This is a limitation of the current API structure
     Ok(SearchRequest {
         api_key,
         query,
@@ -60,6 +63,7 @@ fn determine_search_depth(params: &SearchParams) -> String {
 pub fn response_to_results(
     response: SearchResponse,
     original_params: &SearchParams,
+    current_page: u32,
 ) -> (Vec<SearchResult>, Option<SearchMetadata>) {
     let mut results = Vec::new();
 
@@ -92,7 +96,7 @@ pub fn response_to_results(
         results.insert(0, answer_result);
     }
 
-    let metadata = create_search_metadata(&response, original_params);
+    let metadata = create_search_metadata(&response, original_params, current_page);
     (results, Some(metadata))
 }
 
@@ -166,7 +170,24 @@ fn extract_domain(url: &str) -> Option<String> {
     }
 }
 
-fn create_search_metadata(response: &SearchResponse, params: &SearchParams) -> SearchMetadata {
+fn create_search_metadata(
+    response: &SearchResponse,
+    params: &SearchParams,
+    current_page: u32,
+) -> SearchMetadata {
+    let has_more_results = {
+        let requested_count = params.max_results.unwrap_or(10);
+        response.results.len() == (requested_count as usize)
+    };
+
+    // Create next page token if more results are available
+    let next_page_token = if has_more_results {
+        let next_page = current_page + 1;
+        Some(next_page.to_string())
+    } else {
+        None
+    };
+
     // Tavily doesn't provide total results count, so we estimate based on results returned
     let total_results = if (response.results.len() as u32) >= params.max_results.unwrap_or(10) {
         Some(100000u64) // Conservative estimate
@@ -181,7 +202,7 @@ fn create_search_metadata(response: &SearchResponse, params: &SearchParams) -> S
         safe_search: params.safe_search,
         language: params.language.clone(),
         region: params.region.clone(),
-        next_page_token: None, // Will be updated for pagination support
+        next_page_token,
         rate_limits: None,
     }
 }

@@ -18,6 +18,7 @@ struct SerperSearch {
     params: SearchParams,
     finished: bool,
     metadata: Option<SearchMetadata>,
+    current_page: u32,
 }
 
 impl SerperSearch {
@@ -28,6 +29,7 @@ impl SerperSearch {
             params,
             finished: false,
             metadata: None,
+            current_page: 1,
         }
     }
 
@@ -36,12 +38,35 @@ impl SerperSearch {
             return Ok(vec![]);
         }
 
-        let response = self.client.search(self.request.clone())?;
-        let (results, metadata) = response_to_results(response, &self.params);
+        // Update request with current page
+        let request = self.request.clone();
+        // Note: Serper's SearchRequest doesn't have pagination fields
+        // We'll use the existing request and track pagination in metadata
+
+        let response = self.client.search(request)?;
+        let (results, metadata) = response_to_results(response, &self.params, self.current_page);
+
+        // Check if more results are available
+        if let Some(ref meta) = metadata {
+            // Check if we got the full count requested
+            let num_results = self.request.num.unwrap_or(10);
+            let has_more_results = results.len() == (num_results as usize);
+
+            // Also check if next_page_token is available
+            let has_next_page = meta.next_page_token.is_some();
+
+            // Only set finished if no more results available
+            self.finished = !has_more_results || !has_next_page;
+
+            // Increment page for next request if not finished
+            if !self.finished {
+                self.current_page += 1;
+            }
+        } else {
+            self.finished = true;
+        }
 
         self.metadata = metadata;
-        self.finished = true;
-
         Ok(results)
     }
 
@@ -90,10 +115,10 @@ impl SerperSearchComponent {
         validate_search_params(&params)?;
 
         let client = Self::create_client()?;
-        let request = params_to_request(params.clone())?;
+        let request = params_to_request(params.clone(), 1)?;
 
         let response = client.search(request)?;
-        let (results, metadata) = response_to_results(response, &params);
+        let (results, metadata) = response_to_results(response, &params, 1);
 
         Ok((results, metadata))
     }
@@ -102,7 +127,7 @@ impl SerperSearchComponent {
         validate_search_params(&params)?;
 
         let client = Self::create_client()?;
-        let request = params_to_request(params.clone())?;
+        let request = params_to_request(params.clone(), 1)?;
 
         let search = SerperSearch::new(client, request, params);
         Ok(SerperSearchSession::new(search))
