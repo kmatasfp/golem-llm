@@ -22,7 +22,6 @@ use futures_concurrency::future::Join;
 use itertools::Itertools;
 use wstd::runtime::block_on;
 
-mod error;
 mod transcription;
 
 #[allow(unused)]
