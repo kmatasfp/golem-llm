@@ -5,6 +5,7 @@ use golem_graph::golem::graph::{
         Guest as QueryGuest, QueryExecutionResult, QueryOptions, QueryParameters, QueryResult,
     },
 };
+use golem_graph::LOGGING_STATE;
 
 impl Transaction {
     pub fn execute_query(
@@ -13,6 +14,8 @@ impl Transaction {
         parameters: Option<QueryParameters>,
         _options: Option<QueryOptions>,
     ) -> Result<QueryExecutionResult, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
+
         let mut bind_vars = serde_json::Map::new();
         if let Some(p) = parameters {
             for (key, value) in p {
@@ -108,6 +111,7 @@ impl QueryGuest for GraphArangoDbComponent {
         parameters: Option<QueryParameters>,
         options: Option<QueryOptions>,
     ) -> Result<QueryExecutionResult, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx: &Transaction = transaction.get();
         tx.execute_query(query, parameters, options)
     }

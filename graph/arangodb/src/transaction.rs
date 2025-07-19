@@ -8,10 +8,12 @@ use serde_json::json;
 
 impl GuestTransaction for Transaction {
     fn commit(&self) -> Result<(), GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         self.api.commit_transaction(&self.transaction_id)
     }
 
     fn rollback(&self) -> Result<(), GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         self.api.rollback_transaction(&self.transaction_id)
     }
 
@@ -20,6 +22,7 @@ impl GuestTransaction for Transaction {
         vertex_type: String,
         properties: PropertyMap,
     ) -> Result<Vertex, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         self.create_vertex_with_labels(vertex_type, vec![], properties)
     }
 
@@ -29,6 +32,7 @@ impl GuestTransaction for Transaction {
         additional_labels: Vec<String>,
         properties: PropertyMap,
     ) -> Result<Vertex, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         if !additional_labels.is_empty() {
             return Err(GraphError::UnsupportedOperation(
                 "ArangoDB does not support multiple labels per vertex. Use vertex collections instead."
@@ -64,6 +68,7 @@ impl GuestTransaction for Transaction {
     }
 
     fn get_vertex(&self, id: ElementId) -> Result<Option<Vertex>, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let key = helpers::element_id_to_key(&id)?;
         let collection = if let ElementId::StringValue(s) = &id {
             s.split('/').next().unwrap_or_default()
@@ -105,6 +110,7 @@ impl GuestTransaction for Transaction {
     }
 
     fn update_vertex(&self, id: ElementId, properties: PropertyMap) -> Result<Vertex, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let key = helpers::element_id_to_key(&id)?;
         let collection = helpers::collection_from_element_id(&id)?;
 
@@ -138,6 +144,7 @@ impl GuestTransaction for Transaction {
         id: ElementId,
         updates: PropertyMap,
     ) -> Result<Vertex, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let key = helpers::element_id_to_key(&id)?;
         let collection = if let ElementId::StringValue(s) = &id {
             s.split('/').next().unwrap_or_default()
@@ -177,6 +184,7 @@ impl GuestTransaction for Transaction {
     }
 
     fn delete_vertex(&self, id: ElementId, delete_edges: bool) -> Result<(), GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let key = helpers::element_id_to_key(&id)?;
         let collection = if let ElementId::StringValue(s) = &id {
             s.split('/').next().unwrap_or_default()
@@ -241,6 +249,7 @@ impl GuestTransaction for Transaction {
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<Vertex>, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let collection = vertex_type.ok_or_else(|| {
             GraphError::InvalidQuery("vertex_type must be provided for find_vertices".to_string())
         })?;

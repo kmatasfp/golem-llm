@@ -7,6 +7,7 @@ use golem_graph::{
         transactions::Transaction as TransactionResource,
     },
 };
+use golem_graph::LOGGING_STATE;
 
 impl ProviderGraph for Graph {
     type Transaction = Transaction;
@@ -14,8 +15,10 @@ impl ProviderGraph for Graph {
 
 impl GuestGraph for Graph {
     fn begin_transaction(&self) -> Result<TransactionResource, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
+
         // Ensure common collections exist before starting transaction
-        // This is act as just helper for testing purposes, in production we would not need this
+        // This is act as just helper for testing purposes
         // let common_collections = vec![
         //     (
         //         "Person",
@@ -74,8 +77,9 @@ impl GuestGraph for Graph {
     }
 
     fn begin_read_transaction(&self) -> Result<TransactionResource, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         // Ensure common collections exist before starting transaction
-        // This is act as just helper for testing purposes, in production we would not need this
+        // This is act as just helper for testing purposes
         // let common_collections = vec![
         //     (
         //         "Person",
@@ -134,15 +138,18 @@ impl GuestGraph for Graph {
     }
 
     fn ping(&self) -> Result<(), GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         self.api.ping()
     }
 
     fn close(&self) -> Result<(), GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         // The ArangoDB client uses a connection pool, so a specific close is not needed.
         Ok(())
     }
 
     fn get_statistics(&self) -> Result<GraphStatistics, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let stats = self.api.get_database_statistics()?;
 
         Ok(GraphStatistics {
