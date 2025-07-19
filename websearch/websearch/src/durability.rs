@@ -334,33 +334,22 @@ mod durable_impl {
             );
             if durability.is_live() {
                 let state = self.state.borrow();
-                let result = match &*state {
+                match &*state {
                     Some(DurableSearchSessionState::Live { session, .. }) => {
+                        // Always delegate to the underlying live session
                         with_persistence_level(PersistenceLevel::PersistNothing, || {
                             session.get_metadata()
                         })
                     }
-                    Some(DurableSearchSessionState::Replay {
-                        original_params,
-                        partial_results,
-                        ..
-                    }) => Some(SearchMetadata {
-                        query: original_params.query.clone(),
-                        total_results: Some(partial_results.len() as u64),
-                        search_time_ms: None,
-                        safe_search: None,
-                        language: None,
-                        region: None,
-                        next_page_token: None,
-                        rate_limits: None,
-                        current_page: partial_results.len() as u32,
-                    }),
+                    Some(DurableSearchSessionState::Replay { .. }) => {
+                        // In replay mode, use the replayed metadata
+                        // (This branch should only be hit if still in replay)
+                        None
+                    }
                     None => {
                         unreachable!()
                     }
-                };
-                let _ = durability.persist_infallible(NoInput, result.clone());
-                result
+                }
             } else {
                 let result: Option<SearchMetadata> = durability.replay_infallible();
                 let mut state = self.state.borrow_mut();
