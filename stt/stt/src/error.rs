@@ -1,4 +1,4 @@
-use crate::{client, golem::stt::types::SttError};
+use crate::golem::stt::types::SttError as WitSttError;
 
 use derive_more::From;
 
@@ -7,7 +7,7 @@ use derive_more::From;
 pub enum Error {
     EnvVariablesNotSet(String),
     #[from]
-    Client(String, client::Error),
+    Http(String, crate::http::Error),
 
     APIBadRequest {
         request_id: String,
@@ -64,7 +64,7 @@ impl Error {
             Error::APIRateLimit { request_id, .. } => request_id,
             Error::APIInternalServerError { request_id, .. } => request_id,
             Error::APIUnknown { request_id, .. } => request_id,
-            Error::Client(request_id, ..) => request_id,
+            Error::Http(request_id, ..) => request_id,
             Error::APINotFound { request_id, .. } => request_id,
             Error::EnvVariablesNotSet(_) => "",
         }
@@ -79,58 +79,52 @@ impl core::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-#[allow(unused)]
-#[derive(Debug, PartialEq)]
-pub struct ApiError {
-    pub provider_error: String,
-}
-
-impl From<Error> for SttError {
+impl From<Error> for WitSttError {
     fn from(error: Error) -> Self {
         match error {
             Error::APIBadRequest {
                 request_id: _,
                 provider_error,
-            } => SttError::InvalidAudio(provider_error),
+            } => WitSttError::InvalidAudio(provider_error),
             Error::APIUnauthorized {
                 request_id: _,
                 provider_error,
-            } => SttError::AccessDenied(provider_error),
+            } => WitSttError::AccessDenied(provider_error),
             Error::APIForbidden {
                 request_id: _,
                 provider_error,
-            } => SttError::Unauthorized(provider_error),
+            } => WitSttError::Unauthorized(provider_error),
             Error::APIAccessDenied {
                 request_id: _,
                 provider_error,
-            } => SttError::AccessDenied(provider_error),
+            } => WitSttError::AccessDenied(provider_error),
             Error::APINotFound {
                 request_id: _,
                 provider_error,
-            } => SttError::UnsupportedOperation(provider_error),
+            } => WitSttError::UnsupportedOperation(provider_error),
             Error::APIConflict {
                 request_id: _,
                 provider_error,
-            } => SttError::ServiceUnavailable(provider_error),
+            } => WitSttError::ServiceUnavailable(provider_error),
             Error::APIUnprocessableEntity {
                 request_id: _,
                 provider_error,
-            } => SttError::ServiceUnavailable(provider_error),
+            } => WitSttError::ServiceUnavailable(provider_error),
             Error::APIRateLimit {
                 request_id: _,
                 provider_error,
-            } => SttError::RateLimited(provider_error),
+            } => WitSttError::RateLimited(provider_error),
             Error::APIInternalServerError {
                 request_id: _,
                 provider_error,
-            } => SttError::ServiceUnavailable(provider_error),
+            } => WitSttError::ServiceUnavailable(provider_error),
             Error::APIUnknown {
                 request_id: _,
                 provider_error,
-            } => SttError::InternalError(provider_error),
-            Error::Client(_, error) => SttError::InternalError(format!("Internal error: {error}")),
+            } => WitSttError::InternalError(provider_error),
+            Error::Http(_, error) => WitSttError::InternalError(format!("Internal error: {error}")),
             Error::EnvVariablesNotSet(reason) => {
-                SttError::InternalError(format!("Internal error: {reason}"))
+                WitSttError::InternalError(format!("Internal error: {reason}"))
             }
         }
     }

@@ -1,16 +1,12 @@
-use std::{collections::HashMap, rc::Rc, sync::Arc};
+use std::collections::HashMap;
 
-use bytes::Bytes;
-use golem_stt::{
-    client::{self, HttpClient, ReqwestHttpClient, SttProviderClient},
-    error::Error,
-    languages::Language,
-};
+use golem_stt::{http::HttpClient, languages::Language};
 use http::{header::CONTENT_TYPE, Method, Request, StatusCode};
 use log::trace;
 use serde::{Deserialize, Serialize};
 use url::Url;
-use wasi_async_runtime::Reactor;
+
+use golem_stt::error::Error;
 
 const BASE_URL: &str = "https://api.deepgram.com/v1/listen";
 
@@ -143,32 +139,44 @@ pub struct TranscriptionConfig {
     pub keyterms: Vec<String>, // only nova-3
 }
 
+pub struct TranscriptionRequest {
+    pub request_id: String,
+    pub audio: Vec<u8>,
+    pub audio_config: AudioConfig,
+    pub transcription_config: Option<TranscriptionConfig>,
+}
+
+impl std::fmt::Debug for TranscriptionRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TranscriptionRequest")
+            .field("audio_size", &self.audio.len())
+            .field("audio_config", &self.audio_config)
+            .field("transcription_config", &self.transcription_config)
+            .finish()
+    }
+}
+
 // The Deepgram Speech-to-Text API client for transcribing audio into the input language
 ///
 /// https://developers.deepgram.com/reference/speech-to-text-api/listen
 pub struct PreRecordedAudioApi<HC: HttpClient> {
-    deepgram_api_token: Arc<str>,
-    http_client: Arc<HC>,
+    deepgram_api_token: String,
+    http_client: HC,
 }
 
 #[allow(unused)]
 impl<HC: HttpClient> PreRecordedAudioApi<HC> {
-    pub fn new(deepgram_api_key: String, http_client: impl Into<Arc<HC>>) -> Self {
+    pub fn new(deepgram_api_key: String, http_client: HC) -> Self {
         Self {
-            deepgram_api_token: format!("Token {}", deepgram_api_key).into(),
-            http_client: http_client.into(),
+            deepgram_api_token: format!("Token {}", deepgram_api_key),
+            http_client,
         }
-    }
-
-    pub fn get_supported_languages(&self) -> &[Language] {
-        &DEEPGRAM_SUPPORTED_LANGUAGES
     }
 }
 
-impl PreRecordedAudioApi<ReqwestHttpClient> {
-    pub fn live(deepgram_api_key: String, reactor: Reactor) -> Self {
-        Self::new(deepgram_api_key, ReqwestHttpClient::new(reactor))
-    }
+#[allow(async_fn_in_trait)]
+pub trait SttProviderClient<REQ, RES, ERR: std::error::Error> {
+    async fn transcribe_audio(&self, request: REQ) -> Result<RES, ERR>;
 }
 
 impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionResponse, Error>
@@ -178,9 +186,9 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
         &self,
         request: TranscriptionRequest,
     ) -> Result<TranscriptionResponse, Error> {
-        trace!("Sending request to OpenAI API: {request:?}");
+        trace!("Sending request to Deepgram API: {request:?}");
 
-        let request_id: Rc<str> = Rc::from(request.request_id.clone()); // is there a better way to do this?
+        let request_id = request.request_id;
 
         let mime_type = format!("audio/{}", request.audio_config.format);
 
@@ -252,9 +260,9 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
         }
 
         let mut url = Url::parse(BASE_URL).map_err(|e| {
-            Error::Client(
-                request_id.clone().to_string(),
-                client::Error::Generic(format!("Failed to parse uri: {}", e)),
+            Error::Http(
+                request_id.clone(),
+                golem_stt::http::Error::Generic(format!("Failed to parse uri: {}", e)),
             )
         })?;
 
@@ -266,24 +274,25 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
             .method(Method::POST)
             .uri(url.as_str())
             .header(CONTENT_TYPE, mime_type)
-            .header("Authorization", &*self.deepgram_api_token)
-            .body(Bytes::from(request.audio))
-            .map_err(|e| {
-                Error::Client(request_id.clone().to_string(), client::Error::HttpError(e))
-            })?;
+            .header("Authorization", &self.deepgram_api_token)
+            .body(request.audio)
+            .map_err(|e| Error::Http(request_id.clone(), golem_stt::http::Error::HttpError(e)))?;
 
         let response = self
             .http_client
             .execute(req)
             .await
-            .map_err(|e| Error::Client(request_id.clone().to_string(), e))?;
+            .map_err(|e| Error::Http(request_id.clone(), e))?;
 
         if response.status().is_success() {
             let deepgram_transcription: DeepgramTranscription =
                 serde_json::from_slice(response.body()).map_err(|e| {
-                    Error::Client(
-                        request_id.clone().to_string(),
-                        client::Error::Generic(format!("Failed to deserialize response: {}", e)),
+                    Error::Http(
+                        request_id.clone(),
+                        golem_stt::http::Error::Generic(format!(
+                            "Failed to deserialize response: {}",
+                            e
+                        )),
                     )
                 })?;
 
@@ -294,56 +303,42 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
             })
         } else {
             let provider_error = String::from_utf8(response.body().to_vec()).map_err(|e| {
-                Error::Client(
-                    request_id.clone().to_string(),
-                    client::Error::Generic(format!("Failed to parse response as UTF-8: {}", e)),
+                Error::Http(
+                    request_id.clone(),
+                    golem_stt::http::Error::Generic(format!(
+                        "Failed to parse response as UTF-8: {}",
+                        e
+                    )),
                 )
             })?;
 
             match response.status() {
                 StatusCode::BAD_REQUEST => Err(Error::APIBadRequest {
-                    request_id: request_id.clone().to_string(),
+                    request_id: request_id.clone(),
                     provider_error,
                 }),
                 StatusCode::UNAUTHORIZED => Err(Error::APIUnauthorized {
-                    request_id: request_id.clone().to_string(),
+                    request_id: request_id.clone(),
                     provider_error,
                 }),
                 StatusCode::PAYMENT_REQUIRED => Err(Error::APIAccessDenied {
-                    request_id: request_id.clone().to_string(),
+                    request_id: request_id.clone(),
                     provider_error,
                 }),
                 StatusCode::FORBIDDEN => Err(Error::APIForbidden {
-                    request_id: request_id.clone().to_string(),
+                    request_id: request_id.clone(),
                     provider_error,
                 }),
                 status if status.is_server_error() => Err(Error::APIInternalServerError {
-                    request_id: request_id.clone().to_string(),
+                    request_id: request_id.clone(),
                     provider_error,
                 }),
                 _ => Err(Error::APIUnknown {
-                    request_id: request_id.clone().to_string(),
+                    request_id: request_id.clone(),
                     provider_error,
                 }),
             }
         }
-    }
-}
-
-pub struct TranscriptionRequest {
-    pub request_id: String,
-    pub audio: Bytes,
-    pub audio_config: AudioConfig,
-    pub transcription_config: Option<TranscriptionConfig>,
-}
-
-impl std::fmt::Debug for TranscriptionRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TranscriptionRequest")
-            .field("audio_size", &self.audio.len())
-            .field("audio_config", &self.audio_config)
-            .field("transcription_config", &self.transcription_config)
-            .finish()
     }
 }
 
@@ -373,7 +368,7 @@ pub struct Metadata {
     pub model_info: HashMap<String, ModelInfo>,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 pub struct ModelInfo {
     pub name: String,
     pub version: String,
@@ -410,9 +405,7 @@ pub struct Word {
 #[cfg(test)]
 mod tests {
 
-    use golem_stt::client;
     use http::Response;
-    use wasi_async_runtime::block_on;
 
     use super::*;
     use std::cell::{Ref, RefCell};
@@ -421,8 +414,8 @@ mod tests {
     const TEST_API_KEY: &str = "test-deepgram-api-key";
 
     struct MockHttpClient {
-        pub responses: RefCell<VecDeque<Result<Response<Bytes>, client::Error>>>,
-        pub captured_requests: RefCell<Vec<Request<Bytes>>>,
+        pub responses: RefCell<VecDeque<Result<Response<Vec<u8>>, golem_stt::http::Error>>>,
+        pub captured_requests: RefCell<Vec<Request<Vec<u8>>>>,
     }
 
     #[allow(unused)]
@@ -434,11 +427,11 @@ mod tests {
             }
         }
 
-        pub fn expect_response(&self, response: Response<Bytes>) {
+        pub fn expect_response(&self, response: Response<Vec<u8>>) {
             self.responses.borrow_mut().push_back(Ok(response));
         }
 
-        pub fn get_captured_requests(&self) -> Ref<Vec<Request<Bytes>>> {
+        pub fn get_captured_requests(&self) -> Ref<Vec<Request<Vec<u8>>>> {
             self.captured_requests.borrow()
         }
 
@@ -450,7 +443,7 @@ mod tests {
             self.captured_requests.borrow().len()
         }
 
-        pub fn last_captured_request(&self) -> Option<Ref<Request<Bytes>>> {
+        pub fn last_captured_request(&self) -> Option<Ref<Request<Vec<u8>>>> {
             let borrow = self.captured_requests.borrow();
             if borrow.is_empty() {
                 None
@@ -461,16 +454,21 @@ mod tests {
     }
 
     impl HttpClient for MockHttpClient {
-        async fn execute(&self, request: Request<Bytes>) -> Result<Response<Bytes>, client::Error> {
+        async fn execute(
+            &self,
+            request: Request<Vec<u8>>,
+        ) -> Result<Response<Vec<u8>>, golem_stt::http::Error> {
             self.captured_requests.borrow_mut().push(request);
             self.responses
                 .borrow_mut()
                 .pop_front()
-                .unwrap_or(Err(client::Error::Generic("unexpected error".to_string())))
+                .unwrap_or(Err(golem_stt::http::Error::Generic(
+                    "unexpected error".to_string(),
+                )))
         }
     }
 
-    fn create_mock_success_response() -> Response<Bytes> {
+    fn create_mock_success_response() -> Response<Vec<u8>> {
         let response_body = r#"{
             "metadata": {
                 "transaction_key": "test-transaction-key",
@@ -515,22 +513,21 @@ mod tests {
 
         Response::builder()
             .status(StatusCode::OK)
-            .body(Bytes::from_static(response_body.as_bytes()))
+            .body(response_body.as_bytes().to_vec())
             .unwrap()
     }
 
-    #[test]
-    fn test_api_key_gets_passed_as_auth_header() {
-        let mock_client = Arc::new(MockHttpClient::new());
+    #[wstd::test]
+    async fn test_api_key_gets_passed_as_auth_header() {
+        let mock_client = MockHttpClient::new();
 
         mock_client.expect_response(create_mock_success_response());
 
-        let api: PreRecordedAudioApi<MockHttpClient> =
-            PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client.clone());
+        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec().into(),
+            audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: None,
@@ -538,9 +535,9 @@ mod tests {
             transcription_config: None,
         };
 
-        block_on(|_| async { api.transcribe_audio(request).await.unwrap() });
+        api.transcribe_audio(request).await.unwrap();
 
-        let captured_request = mock_client.last_captured_request().unwrap();
+        let captured_request = api.http_client.last_captured_request().unwrap();
         let auth_header = captured_request
             .headers()
             .get("Authorization")
@@ -549,19 +546,18 @@ mod tests {
         assert_eq!(auth_header, Some("Token test-deepgram-api-key"));
     }
 
-    #[test]
-    fn test_request_gets_sent_with_correct_content_type_and_body() {
-        let mock_client = Arc::new(MockHttpClient::new());
+    #[wstd::test]
+    async fn test_request_gets_sent_with_correct_content_type_and_body() {
+        let mock_client = MockHttpClient::new();
 
         mock_client.expect_response(create_mock_success_response());
 
-        let api: PreRecordedAudioApi<MockHttpClient> =
-            PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client.clone());
+        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let audio_data = b"fake audio data".to_vec();
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: audio_data.clone().into(),
+            audio: audio_data.clone(),
             audio_config: AudioConfig {
                 format: AudioFormat::mp3,
                 channels: Some(2),
@@ -569,9 +565,9 @@ mod tests {
             transcription_config: None,
         };
 
-        block_on(|_| async { api.transcribe_audio(request).await.unwrap() });
+        api.transcribe_audio(request).await.unwrap();
 
-        let captured_request = mock_client.last_captured_request().unwrap();
+        let captured_request = api.http_client.last_captured_request().unwrap();
 
         let content_type = captured_request
             .headers()
@@ -590,18 +586,17 @@ mod tests {
         assert_eq!(body_bytes, audio_data)
     }
 
-    #[test]
-    fn test_query_parameters_other_than_keywords_and_keyterms_set_correctly() {
-        let mock_client = Arc::new(MockHttpClient::new());
+    #[wstd::test]
+    async fn test_query_parameters_other_than_keywords_and_keyterms_set_correctly() {
+        let mock_client = MockHttpClient::new();
 
         mock_client.expect_response(create_mock_success_response());
 
-        let api: PreRecordedAudioApi<MockHttpClient> =
-            PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client.clone());
+        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec().into(),
+            audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: Some(2), // Should add multichannel=true
@@ -616,9 +611,9 @@ mod tests {
             }),
         };
 
-        block_on(|_| async { api.transcribe_audio(request).await.unwrap() });
+        api.transcribe_audio(request).await.unwrap();
 
-        let captured_request = mock_client.last_captured_request().unwrap();
+        let captured_request = api.http_client.last_captured_request().unwrap();
         let uri = captured_request.uri();
         let query_pairs: HashMap<String, String> = Url::parse(&uri.to_string())
             .unwrap()
@@ -636,18 +631,17 @@ mod tests {
         assert_eq!(query_pairs.get("diarize"), Some(&"true".to_string()));
     }
 
-    #[test]
-    fn test_query_keyterms_params_set_correctly_in_case_of_nova3_model() {
-        let mock_client = Arc::new(MockHttpClient::new());
+    #[wstd::test]
+    async fn test_query_keyterms_params_set_correctly_in_case_of_nova3_model() {
+        let mock_client = MockHttpClient::new();
 
         mock_client.expect_response(create_mock_success_response());
 
-        let api: PreRecordedAudioApi<MockHttpClient> =
-            PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client.clone());
+        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec().into(),
+            audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: Some(2), // Should add multichannel=true
@@ -662,9 +656,9 @@ mod tests {
             }),
         };
 
-        block_on(|_| async { api.transcribe_audio(request).await.unwrap() });
+        api.transcribe_audio(request).await.unwrap();
 
-        let captured_request = mock_client.last_captured_request().unwrap();
+        let captured_request = api.http_client.last_captured_request().unwrap();
         let uri = captured_request.uri();
         let keyterm_query_pairs: Vec<(String, String)> = Url::parse(&uri.to_string())
             .unwrap()
@@ -683,18 +677,18 @@ mod tests {
         )
     }
 
-    #[test]
-    fn test_query_keyterms_params_set_correctly_in_case_of_nova2_nova1_enhanced_and_base_model() {
-        let mock_client = Arc::new(MockHttpClient::new());
+    #[wstd::test]
+    async fn test_query_keyterms_params_set_correctly_in_case_of_nova2_nova1_enhanced_and_base_model(
+    ) {
+        let mock_client = MockHttpClient::new();
 
         mock_client.expect_response(create_mock_success_response());
 
-        let api: PreRecordedAudioApi<MockHttpClient> =
-            PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client.clone());
+        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec().into(),
+            audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: Some(2), // Should add multichannel=true
@@ -722,9 +716,9 @@ mod tests {
             }),
         };
 
-        block_on(|_| async { api.transcribe_audio(request).await.unwrap() });
+        api.transcribe_audio(request).await.unwrap();
 
-        let captured_request = mock_client.last_captured_request().unwrap();
+        let captured_request = api.http_client.last_captured_request().unwrap();
         let uri = captured_request.uri();
         let keyterm_query_pairs: Vec<(String, String)> = Url::parse(&uri.to_string())
             .unwrap()
@@ -743,18 +737,17 @@ mod tests {
         )
     }
 
-    #[test]
-    fn test_query_parameters_not_set_when_disabled() {
-        let mock_client = Arc::new(MockHttpClient::new());
+    #[wstd::test]
+    async fn test_query_parameters_not_set_when_disabled() {
+        let mock_client = MockHttpClient::new();
 
         mock_client.expect_response(create_mock_success_response());
 
-        let api: PreRecordedAudioApi<MockHttpClient> =
-            PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client.clone());
+        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec().into(),
+            audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: Some(1), // Should NOT add multichannel=true
@@ -769,9 +762,9 @@ mod tests {
             }),
         };
 
-        block_on(|_| async { api.transcribe_audio(request).await.unwrap() });
+        api.transcribe_audio(request).await.unwrap();
 
-        let captured_request = mock_client.last_captured_request().unwrap();
+        let captured_request = api.http_client.last_captured_request().unwrap();
         let uri = captured_request.uri();
         let query_pairs: HashMap<String, String> = Url::parse(&uri.to_string())
             .unwrap()
@@ -787,8 +780,8 @@ mod tests {
         assert!(!query_pairs.contains_key("keyterm"));
     }
 
-    #[test]
-    fn test_transcribe_audio_without_diarization_success() {
+    #[wstd::test]
+    async fn test_transcribe_audio_without_diarization_success() {
         let mock_client = MockHttpClient::new();
 
         let response_body = r#"{
@@ -832,17 +825,16 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::OK)
-                .body(Bytes::copy_from_slice(response_body.as_bytes()))
+                .body(response_body.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let api: PreRecordedAudioApi<MockHttpClient> =
-            PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let audio_data = b"fake audio data".to_vec();
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: audio_data.clone().into(),
+            audio: audio_data.clone(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: None,
@@ -850,7 +842,7 @@ mod tests {
             transcription_config: None,
         };
 
-        let response = block_on(|_| async { api.transcribe_audio(request).await.unwrap() });
+        let response = api.transcribe_audio(request).await.unwrap();
 
         let expected_response = TranscriptionResponse {
             language: String::new(),
@@ -905,8 +897,8 @@ mod tests {
         assert_eq!(response, expected_response);
     }
 
-    #[test]
-    fn test_transcribe_audio_with_diarization_success() {
+    #[wstd::test]
+    async fn test_transcribe_audio_with_diarization_success() {
         let mock_client = MockHttpClient::new();
 
         let response_body = r#"{
@@ -954,17 +946,16 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::OK)
-                .body(Bytes::copy_from_slice(response_body.as_bytes()))
+                .body(response_body.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let api: PreRecordedAudioApi<MockHttpClient> =
-            PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let audio_data = b"fake audio data".to_vec();
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: audio_data.clone().into(),
+            audio: audio_data.clone(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: None,
@@ -972,7 +963,7 @@ mod tests {
             transcription_config: None,
         };
 
-        let response = block_on(|_| async { api.transcribe_audio(request).await.unwrap() });
+        let response = api.transcribe_audio(request).await.unwrap();
 
         let expected_response = TranscriptionResponse {
             language: String::new(),
@@ -1027,8 +1018,8 @@ mod tests {
         assert_eq!(response, expected_response);
     }
 
-    #[test]
-    fn test_transcribe_audio_error_bad_request() {
+    #[wstd::test]
+    async fn test_transcribe_audio_error_bad_request() {
         let mock_client = MockHttpClient::new();
 
         let error_body = r#"{
@@ -1039,16 +1030,15 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::BAD_REQUEST)
-                .body(Bytes::from_static(error_body.as_bytes()))
+                .body(error_body.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let api: PreRecordedAudioApi<MockHttpClient> =
-            PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec().into(),
+            audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: None,
@@ -1056,7 +1046,7 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        let result = api.transcribe_audio(request).await;
         assert!(result.is_err());
 
         match result.unwrap_err() {
@@ -1071,8 +1061,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_transcribe_audio_error_unauthorized() {
+    #[wstd::test]
+    async fn test_transcribe_audio_error_unauthorized() {
         let mock_client = MockHttpClient::new();
 
         let error_body = r#"{
@@ -1084,16 +1074,15 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::UNAUTHORIZED)
-                .body(Bytes::from_static(error_body.as_bytes()))
+                .body(error_body.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let api: PreRecordedAudioApi<MockHttpClient> =
-            PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec().into(),
+            audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: None,
@@ -1101,7 +1090,7 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        let result = api.transcribe_audio(request).await;
         assert!(result.is_err());
 
         match result.unwrap_err() {
@@ -1116,8 +1105,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_transcribe_audio_error_access_denied() {
+    #[wstd::test]
+    async fn test_transcribe_audio_error_access_denied() {
         let mock_client = MockHttpClient::new();
 
         let error_body = r#"{
@@ -1128,16 +1117,15 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::PAYMENT_REQUIRED)
-                .body(Bytes::from_static(error_body.as_bytes()))
+                .body(error_body.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let api: PreRecordedAudioApi<MockHttpClient> =
-            PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec().into(),
+            audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: None,
@@ -1145,7 +1133,7 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        let result = api.transcribe_audio(request).await;
         assert!(result.is_err());
 
         match result.unwrap_err() {
@@ -1160,8 +1148,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_transcribe_audio_error_forbidden() {
+    #[wstd::test]
+    async fn test_transcribe_audio_error_forbidden() {
         let mock_client = MockHttpClient::new();
 
         let error_body = r#"{
@@ -1173,16 +1161,15 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::FORBIDDEN)
-                .body(Bytes::from_static(error_body.as_bytes()))
+                .body(error_body.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let api: PreRecordedAudioApi<MockHttpClient> =
-            PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec().into(),
+            audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: None,
@@ -1190,7 +1177,7 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        let result = api.transcribe_audio(request).await;
         assert!(result.is_err());
 
         match result.unwrap_err() {
@@ -1205,24 +1192,23 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_transcribe_audio_error_internal_server_error() {
+    #[wstd::test]
+    async fn test_transcribe_audio_error_internal_server_error() {
         let mock_client = MockHttpClient::new();
 
         let error_body = r#"{"error": "Internal server error"}"#;
         mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(Bytes::from_static(error_body.as_bytes()))
+                .body(error_body.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let api: PreRecordedAudioApi<MockHttpClient> =
-            PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec().into(),
+            audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: None,
@@ -1230,7 +1216,7 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        let result = api.transcribe_audio(request).await;
         assert!(result.is_err());
 
         match result.unwrap_err() {
@@ -1245,24 +1231,23 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_transcribe_audio_error_unknown_status() {
+    #[wstd::test]
+    async fn test_transcribe_audio_error_unknown_status() {
         let mock_client = MockHttpClient::new();
 
         let error_body = r#"{"error": "Unknown error"}"#;
         mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::IM_A_TEAPOT)
-                .body(Bytes::from_static(error_body.as_bytes()))
+                .body(error_body.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let api: PreRecordedAudioApi<MockHttpClient> =
-            PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec().into(),
+            audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: None,
@@ -1270,7 +1255,7 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        let result = api.transcribe_audio(request).await;
         assert!(result.is_err());
 
         match result.unwrap_err() {

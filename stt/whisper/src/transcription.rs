@@ -1,14 +1,10 @@
-use std::{rc::Rc, sync::Arc};
-
-use bytes::{BufMut, Bytes, BytesMut};
-use golem_stt::client::{self, HttpClient, ReqwestHttpClient, SttProviderClient};
+use golem_stt::{http::HttpClient, transcription::SttProviderClient};
 use log::trace;
 use serde::{Deserialize, Serialize};
 
 use golem_stt::error::Error;
 use golem_stt::languages::Language;
 use http::{Method, Request, StatusCode};
-use wasi_async_runtime::Reactor;
 
 const BASE_URL: &str = "https://api.openai.com/v1/audio/transcriptions";
 
@@ -116,50 +112,20 @@ pub struct TranscriptionConfig {
     pub prompt: Option<String>,
 }
 
-pub struct MultipartBuilder {
-    boundary: String,
-    parts: Vec<Bytes>,
+pub struct TranscriptionRequest {
+    pub request_id: String,
+    pub audio: Vec<u8>,
+    pub audio_config: AudioConfig,
+    pub transcription_config: Option<TranscriptionConfig>,
 }
 
-impl MultipartBuilder {
-    pub fn new() -> Self {
-        Self {
-            boundary: format!("----formdata-{}", uuid::Uuid::new_v4()),
-            parts: Vec::new(),
-        }
-    }
-
-    pub fn add_bytes(&mut self, name: &str, filename: &str, content_type: &str, data: Bytes) {
-        self.parts.push(Bytes::from(format!(
-            "--{}\r\nContent-Disposition: form-data; name=\"{}\"; filename=\"{}\"\r\nContent-Type: {}\r\n\r\n",
-            self.boundary, name, filename, content_type
-        )));
-        self.parts.push(data);
-        self.parts.push(Bytes::from_static(b"\r\n"));
-    }
-
-    pub fn add_field(&mut self, name: &str, value: &str) {
-        self.parts.push(Bytes::from(format!(
-            "--{}\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\n{}\r\n",
-            self.boundary, name, value
-        )));
-    }
-
-    pub fn finish(mut self) -> (String, Bytes) {
-        // Add end boundary
-        self.parts
-            .push(Bytes::from(format!("--{}--\r\n", self.boundary)));
-
-        // Calculate total size and build final buffer
-        let total_size: usize = self.parts.iter().map(|b| b.len()).sum();
-        let mut final_buffer = BytesMut::with_capacity(total_size);
-
-        for part in self.parts {
-            final_buffer.put(part);
-        }
-
-        let content_type = format!("multipart/form-data; boundary={}", self.boundary);
-        (content_type, final_buffer.freeze())
+impl std::fmt::Debug for TranscriptionRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TranscriptionRequest")
+            .field("audio_size", &self.audio.len())
+            .field("audio_config", &self.audio_config)
+            .field("transcription_config", &self.transcription_config)
+            .finish()
     }
 }
 
@@ -167,23 +133,17 @@ impl MultipartBuilder {
 ///
 /// https://platform.openai.com/docs/api-reference/audio/createTranscription
 pub struct TranscriptionsApi<HC: HttpClient> {
-    openai_api_token: Arc<str>,
-    http_client: Arc<HC>,
+    openai_api_token: String,
+    http_client: HC,
 }
 
 #[allow(unused)]
 impl<HC: HttpClient> TranscriptionsApi<HC> {
-    pub fn new(openai_api_key: String, http_client: impl Into<Arc<HC>>) -> Self {
+    pub fn new(openai_api_key: String, http_client: HC) -> Self {
         Self {
             openai_api_token: format!("Bearer {}", openai_api_key).into(),
-            http_client: http_client.into(),
+            http_client,
         }
-    }
-}
-
-impl TranscriptionsApi<ReqwestHttpClient> {
-    pub fn live(openai_api_key: String, reactor: Reactor) -> Self {
-        Self::new(openai_api_key, ReqwestHttpClient::new(reactor))
     }
 }
 
@@ -196,7 +156,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
     ) -> Result<TranscriptionResponse, Error> {
         trace!("Sending request to OpenAI API: {request:?}");
 
-        let request_id: Rc<str> = Rc::from(request.request_id.clone()); // is there a better way to do this?
+        let request_id = request.request_id;
 
         let file_name = format!("audio.{}", request.audio_config.format);
         let mime_type = format!("audio/{}", request.audio_config.format);
@@ -229,27 +189,27 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
         let req = Request::builder()
             .method(Method::POST)
             .uri(BASE_URL)
-            .header("Authorization", &*self.openai_api_token)
+            .header("Authorization", &self.openai_api_token)
             .header("Content-Type", content_type)
             .body(body)
-            .map_err(|e| {
-                Error::Client(request_id.clone().to_string(), client::Error::HttpError(e))
-            })?;
+            .map_err(|e| Error::Http(request_id.clone(), golem_stt::http::Error::HttpError(e)))?;
 
         let response = self
             .http_client
             .execute(req)
             .await
-            .map_err(|e| Error::Client(request_id.clone().to_string(), e))?;
+            .map_err(|e| Error::Http(request_id.clone(), e))?;
 
         // match what official OpenAI SDK does https://github.com/openai/openai-python/blob/0673da62f2f2476a3e5791122e75ec0cbfd03442/src/openai/_client.py#L343
-
         if response.status().is_success() {
             let whisper_transcription: WhisperTranscription =
                 serde_json::from_slice(response.body()).map_err(|e| {
-                    Error::Client(
-                        request_id.clone().to_string(),
-                        client::Error::Generic(format!("Failed to deserialize response: {}", e)),
+                    Error::Http(
+                        request_id.clone(),
+                        golem_stt::http::Error::Generic(format!(
+                            "Failed to deserialize response: {}",
+                            e
+                        )),
                     )
                 })?;
 
@@ -259,68 +219,54 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
             })
         } else {
             let provider_error = String::from_utf8(response.body().to_vec()).map_err(|e| {
-                Error::Client(
-                    request_id.clone().to_string(),
-                    client::Error::Generic(format!("Failed to parse response as UTF-8: {}", e)),
+                Error::Http(
+                    request_id.clone(),
+                    golem_stt::http::Error::Generic(format!(
+                        "Failed to parse response as UTF-8: {}",
+                        e
+                    )),
                 )
             })?;
 
             match response.status() {
                 StatusCode::BAD_REQUEST => Err(Error::APIBadRequest {
-                    request_id: request_id.clone().to_string(),
+                    request_id: request_id.clone(),
                     provider_error,
                 }),
                 StatusCode::UNAUTHORIZED => Err(Error::APIUnauthorized {
-                    request_id: request_id.clone().to_string(),
+                    request_id: request_id.clone(),
                     provider_error,
                 }),
                 StatusCode::FORBIDDEN => Err(Error::APIForbidden {
-                    request_id: request_id.clone().to_string(),
+                    request_id: request_id.clone(),
                     provider_error,
                 }),
                 StatusCode::NOT_FOUND => Err(Error::APINotFound {
-                    request_id: request_id.clone().to_string(),
+                    request_id: request_id.clone(),
                     provider_error,
                 }),
                 StatusCode::CONFLICT => Err(Error::APIConflict {
-                    request_id: request_id.clone().to_string(),
+                    request_id: request_id.clone(),
                     provider_error,
                 }),
                 StatusCode::UNPROCESSABLE_ENTITY => Err(Error::APIUnprocessableEntity {
-                    request_id: request_id.clone().to_string(),
+                    request_id: request_id.clone(),
                     provider_error,
                 }),
                 StatusCode::TOO_MANY_REQUESTS => Err(Error::APIRateLimit {
-                    request_id: request_id.clone().to_string(),
+                    request_id: request_id.clone(),
                     provider_error,
                 }),
                 status if status.is_server_error() => Err(Error::APIInternalServerError {
-                    request_id: request_id.clone().to_string(),
+                    request_id: request_id.clone(),
                     provider_error,
                 }),
                 _ => Err(Error::APIUnknown {
-                    request_id: request_id.clone().to_string(),
+                    request_id: request_id.clone(),
                     provider_error,
                 }),
             }
         }
-    }
-}
-
-pub struct TranscriptionRequest {
-    pub request_id: String,
-    pub audio: Bytes,
-    pub audio_config: AudioConfig,
-    pub transcription_config: Option<TranscriptionConfig>,
-}
-
-impl std::fmt::Debug for TranscriptionRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TranscriptionRequest")
-            .field("audio_size", &self.audio.len())
-            .field("audio_config", &self.audio_config)
-            .field("transcription_config", &self.transcription_config)
-            .finish()
     }
 }
 
@@ -391,13 +337,61 @@ pub struct ErrorBody {
     pub code: Option<String>,
 }
 
+pub struct MultipartBuilder {
+    boundary: String,
+    parts: Vec<Vec<u8>>,
+}
+
+impl MultipartBuilder {
+    pub fn new() -> Self {
+        Self {
+            boundary: format!("----formdata-{}", uuid::Uuid::new_v4()),
+            parts: Vec::new(),
+        }
+    }
+
+    pub fn add_bytes(&mut self, name: &str, filename: &str, content_type: &str, data: Vec<u8>) {
+        self.parts.push(format!(
+                   "--{}\r\nContent-Disposition: form-data; name=\"{}\"; filename=\"{}\"\r\nContent-Type: {}\r\n\r\n",
+                   self.boundary, name, filename, content_type
+               ).into_bytes());
+        self.parts.push(data);
+        self.parts.push(b"\r\n".to_vec());
+    }
+
+    pub fn add_field(&mut self, name: &str, value: &str) {
+        self.parts.push(
+            format!(
+                "--{}\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\n{}\r\n",
+                self.boundary, name, value
+            )
+            .into_bytes(),
+        );
+    }
+
+    pub fn finish(mut self) -> (String, Vec<u8>) {
+        // Add end boundary
+        self.parts
+            .push(format!("--{}--\r\n", self.boundary).into_bytes());
+        // Calculate total size and build final buffer
+        let total_size: usize = self.parts.iter().map(|b| b.len()).sum();
+        let mut final_buffer = Vec::with_capacity(total_size);
+
+        for part in self.parts {
+            final_buffer.extend(part);
+        }
+
+        let content_type = format!("multipart/form-data; boundary={}", self.boundary);
+        (content_type, final_buffer)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use http::Response;
     use std::cell::{Ref, RefCell};
     use std::collections::{HashMap, VecDeque};
     use std::io::{Cursor, Read};
-    use wasi_async_runtime::block_on;
 
     use multipart_2021::server::Multipart;
 
@@ -406,8 +400,8 @@ mod tests {
     const TEST_API_KEY: &str = "test-api-key";
 
     struct MockHttpClient {
-        pub responses: RefCell<VecDeque<Result<Response<Bytes>, client::Error>>>,
-        pub captured_requests: RefCell<Vec<Request<Bytes>>>,
+        pub responses: RefCell<VecDeque<Result<Response<Vec<u8>>, golem_stt::http::Error>>>,
+        pub captured_requests: RefCell<Vec<Request<Vec<u8>>>>,
     }
 
     #[allow(unused)]
@@ -419,11 +413,11 @@ mod tests {
             }
         }
 
-        pub fn expect_response(&self, response: Response<Bytes>) {
+        pub fn expect_response(&self, response: Response<Vec<u8>>) {
             self.responses.borrow_mut().push_back(Ok(response));
         }
 
-        pub fn get_captured_requests(&self) -> Ref<Vec<Request<Bytes>>> {
+        pub fn get_captured_requests(&self) -> Ref<Vec<Request<Vec<u8>>>> {
             self.captured_requests.borrow()
         }
 
@@ -435,7 +429,7 @@ mod tests {
             self.captured_requests.borrow().len()
         }
 
-        pub fn last_captured_request(&self) -> Option<Ref<Request<Bytes>>> {
+        pub fn last_captured_request(&self) -> Option<Ref<Request<Vec<u8>>>> {
             let borrow = self.captured_requests.borrow();
             if borrow.is_empty() {
                 None
@@ -446,12 +440,17 @@ mod tests {
     }
 
     impl HttpClient for MockHttpClient {
-        async fn execute(&self, request: Request<Bytes>) -> Result<Response<Bytes>, client::Error> {
+        async fn execute(
+            &self,
+            request: Request<Vec<u8>>,
+        ) -> Result<Response<Vec<u8>>, golem_stt::http::Error> {
             self.captured_requests.borrow_mut().push(request);
             self.responses
                 .borrow_mut()
                 .pop_front()
-                .unwrap_or(Err(client::Error::Generic("unexpected error".to_string())))
+                .unwrap_or(Err(golem_stt::http::Error::Generic(
+                    "unexpected error".to_string(),
+                )))
         }
     }
 
@@ -462,8 +461,8 @@ mod tests {
         pub content_type: Option<String>,
     }
 
-    #[test]
-    fn test_api_key_gets_passed_as_auth_header() {
+    #[wstd::test]
+    async fn test_api_key_gets_passed_as_auth_header() {
         let response_body = r#"
             {
                 "task": "transcribe",
@@ -490,16 +489,15 @@ mod tests {
             }
         "#;
 
-        let mock_client = Arc::new(MockHttpClient::new());
+        let mock_client = MockHttpClient::new();
         mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::OK)
-                .body(Bytes::from_static(response_body.as_bytes()))
+                .body(response_body.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let api: TranscriptionsApi<MockHttpClient> =
-            TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client.clone());
+        let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let audio_bytes = b"fake audio data".to_vec();
 
@@ -512,9 +510,9 @@ mod tests {
             transcription_config: None,
         };
 
-        block_on(|_| async { api.transcribe_audio(request).await.unwrap() });
+        api.transcribe_audio(request).await.unwrap();
 
-        let captured_request = mock_client.last_captured_request().unwrap();
+        let captured_request = api.http_client.last_captured_request().unwrap();
 
         assert_eq!(captured_request.method(), &Method::POST);
 
@@ -527,11 +525,11 @@ mod tests {
 
         assert_eq!(auth_header, Some("Bearer test-api-key"));
 
-        assert_eq!(mock_client.captured_request_count(), 1);
+        assert_eq!(api.http_client.captured_request_count(), 1);
     }
 
-    #[test]
-    fn test_resquest_gets_sent_as_multi_part_form_data() {
+    #[wstd::test]
+    async fn test_resquest_gets_sent_as_multi_part_form_data() {
         let response_body = r#"
             {
                 "task": "transcribe",
@@ -558,16 +556,15 @@ mod tests {
             }
         "#;
 
-        let mock_client = Arc::new(MockHttpClient::new());
+        let mock_client = MockHttpClient::new();
         mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::OK)
-                .body(Bytes::from_static(response_body.as_bytes()))
+                .body(response_body.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let api: TranscriptionsApi<MockHttpClient> =
-            TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client.clone());
+        let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let audio_bytes = b"fake audio data".to_vec();
 
@@ -587,9 +584,9 @@ mod tests {
             }),
         };
 
-        block_on(|_| async { api.transcribe_audio(request).await.unwrap() });
+        api.transcribe_audio(request).await.unwrap();
 
-        let captured_request = mock_client.last_captured_request().unwrap();
+        let captured_request = api.http_client.last_captured_request().unwrap();
 
         let content_type_header = captured_request
             .headers()
@@ -676,12 +673,11 @@ mod tests {
             }
         );
 
-        // Verify that we captured exactly one request
-        assert_eq!(mock_client.captured_request_count(), 1);
+        assert_eq!(api.http_client.captured_request_count(), 1);
     }
 
-    #[test]
-    fn test_word_level_timestamps_requested() {
+    #[wstd::test]
+    async fn test_word_level_timestamps_requested() {
         let response_body = r#"
                {
                    "task": "transcribe",
@@ -707,16 +703,15 @@ mod tests {
                }
            "#;
 
-        let mock_client = Arc::new(MockHttpClient::new());
+        let mock_client = MockHttpClient::new();
         mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::OK)
-                .body(Bytes::from_static(response_body.as_bytes()))
+                .body(response_body.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let api: TranscriptionsApi<MockHttpClient> =
-            TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client.clone());
+        let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
         let audio_bytes = b"fake audio data".to_vec();
 
@@ -733,9 +728,9 @@ mod tests {
             }),
         };
 
-        block_on(|_| async { api.transcribe_audio(request).await.unwrap() });
+        api.transcribe_audio(request).await.unwrap();
 
-        let captured_request = mock_client.last_captured_request().unwrap();
+        let captured_request = api.http_client.last_captured_request().unwrap();
 
         let content_type_header = captured_request
             .headers()
@@ -782,12 +777,11 @@ mod tests {
             }
         );
 
-        // Verify that we captured exactly one request
-        assert_eq!(mock_client.captured_request_count(), 1);
+        assert_eq!(api.http_client.captured_request_count(), 1);
     }
 
-    #[test]
-    fn test_transcribe_audio_success_words() {
+    #[wstd::test]
+    async fn test_transcribe_audio_success_words() {
         let response_body = r#"
                {
                    "task": "transcribe",
@@ -817,7 +811,7 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::OK)
-                .body(Bytes::from_static(response_body.as_bytes()))
+                .body(response_body.as_bytes().to_vec())
                 .unwrap(),
         );
 
@@ -840,7 +834,7 @@ mod tests {
             }),
         };
 
-        let response = block_on(|_| async { api.transcribe_audio(request).await.unwrap() });
+        let response = api.transcribe_audio(request).await.unwrap();
 
         let expected_response = TranscriptionResponse {
             audio_size_bytes: audio_byte_len,
@@ -871,8 +865,8 @@ mod tests {
         assert_eq!(response, expected_response);
     }
 
-    #[test]
-    fn test_transcribe_audio_error_bad_request() {
+    #[wstd::test]
+    async fn test_transcribe_audio_error_bad_request() {
         let error_body = r#"
                 {
                     "error": {
@@ -888,7 +882,7 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::BAD_REQUEST)
-                .body(Bytes::from_static(error_body.as_bytes()))
+                .body(error_body.as_bytes().to_vec())
                 .unwrap(),
         );
 
@@ -905,7 +899,7 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        let result = api.transcribe_audio(request).await;
 
         assert!(result.is_err());
 
@@ -921,8 +915,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_transcribe_audio_error_unauthorized() {
+    #[wstd::test]
+    async fn test_transcribe_audio_error_unauthorized() {
         let error_body = r#"
                 {
                     "error": {
@@ -938,7 +932,7 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::UNAUTHORIZED)
-                .body(Bytes::from_static(error_body.as_bytes()))
+                .body(error_body.as_bytes().to_vec())
                 .unwrap(),
         );
 
@@ -955,7 +949,7 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        let result = api.transcribe_audio(request).await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -970,8 +964,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_transcribe_audio_error_forbidden() {
+    #[wstd::test]
+    async fn test_transcribe_audio_error_forbidden() {
         let error_body = r#"
                 {
                     "error": {
@@ -987,7 +981,7 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::FORBIDDEN)
-                .body(Bytes::from_static(error_body.as_bytes()))
+                .body(error_body.as_bytes().to_vec())
                 .unwrap(),
         );
 
@@ -1004,7 +998,7 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        let result = api.transcribe_audio(request).await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -1019,8 +1013,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_transcribe_audio_error_not_found() {
+    #[wstd::test]
+    async fn test_transcribe_audio_error_not_found() {
         let error_body = r#"
                 {
                     "error": {
@@ -1036,7 +1030,7 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::NOT_FOUND)
-                .body(Bytes::from_static(error_body.as_bytes()))
+                .body(error_body.as_bytes().to_vec())
                 .unwrap(),
         );
 
@@ -1053,7 +1047,7 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        let result = api.transcribe_audio(request).await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -1068,8 +1062,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_transcribe_audio_error_unprocessable_entity() {
+    #[wstd::test]
+    async fn test_transcribe_audio_error_unprocessable_entity() {
         let error_body = r#"
                 {
                     "error": {
@@ -1085,7 +1079,7 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::UNPROCESSABLE_ENTITY)
-                .body(Bytes::from_static(error_body.as_bytes()))
+                .body(error_body.as_bytes().to_vec())
                 .unwrap(),
         );
 
@@ -1102,7 +1096,7 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        let result = api.transcribe_audio(request).await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -1117,8 +1111,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_transcribe_audio_error_rate_limit() {
+    #[wstd::test]
+    async fn test_transcribe_audio_error_rate_limit() {
         let error_body = r#"
                 {
                     "error": {
@@ -1134,7 +1128,7 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::TOO_MANY_REQUESTS)
-                .body(Bytes::from_static(error_body.as_bytes()))
+                .body(error_body.as_bytes().to_vec())
                 .unwrap(),
         );
 
@@ -1151,7 +1145,7 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        let result = api.transcribe_audio(request).await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -1166,8 +1160,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_transcribe_audio_error_internal_server_error() {
+    #[wstd::test]
+    async fn test_transcribe_audio_error_internal_server_error() {
         let error_body = r#"
                 {
                     "error": {
@@ -1183,7 +1177,7 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(Bytes::from_static(error_body.as_bytes()))
+                .body(error_body.as_bytes().to_vec())
                 .unwrap(),
         );
 
@@ -1200,7 +1194,7 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        let result = api.transcribe_audio(request).await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -1215,8 +1209,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_transcribe_audio_error_unknown_status() {
+    #[wstd::test]
+    async fn test_transcribe_audio_error_unknown_status() {
         let error_body = r#"
                 {
                     "error": {
@@ -1232,7 +1226,7 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::IM_A_TEAPOT)
-                .body(Bytes::from_static(error_body.as_bytes()))
+                .body(error_body.as_bytes().to_vec())
                 .unwrap(),
         );
 
@@ -1249,7 +1243,7 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        let result = api.transcribe_audio(request).await;
 
         assert!(result.is_err());
         match result.unwrap_err() {

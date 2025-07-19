@@ -1,507 +1,14 @@
-use bytes::Bytes;
-use chrono::{DateTime, Utc};
-use golem_stt::{
-    client::{self, HttpClient},
-    runtime::AsyncRuntime,
-};
-use hmac::{Hmac, Mac};
-use http::{HeaderMap, HeaderValue, Request};
-use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
+use chrono::Utc;
+use golem_stt::runtime::AsyncRuntime;
+
+use http::Request;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::{
-    fmt::{self},
-    sync::Arc,
-    time::Duration,
+use std::time::Duration;
+
+use super::{
+    aws_signer::AwsSignatureV4,
+    request::{AudioConfig, TranscriptionConfig},
 };
-
-use crate::{
-    client::{AudioConfig, TranscriptionConfig},
-    error::Error,
-};
-
-type HmacSha256 = Hmac<Sha256>;
-
-pub struct AwsSignatureV4 {
-    access_key: String,
-    secret_key: String,
-    region: String,
-    service: String,
-}
-
-pub enum AwsService {
-    S3,
-    Transcribe,
-}
-
-impl fmt::Display for AwsService {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            AwsService::S3 => write!(f, "s3"),
-            AwsService::Transcribe => write!(f, "transcribe"),
-        }
-    }
-}
-
-// Percent-encoding set for URI paths
-// Why this is needed see here https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html
-// AWS uri encoding has special characters that need to be percent-encoded
-const URI_ENCODE_SET: &AsciiSet = &CONTROLS
-    .add(b' ')
-    .add(b'!')
-    .add(b'"')
-    .add(b'#')
-    .add(b'$')
-    .add(b'%')
-    .add(b'\'')
-    .add(b'(')
-    .add(b')')
-    .add(b'*')
-    .add(b',')
-    .add(b'/')
-    .add(b':')
-    .add(b';')
-    .add(b'?')
-    .add(b'@')
-    .add(b'[')
-    .add(b'\\')
-    .add(b']')
-    .add(b'^')
-    .add(b'`')
-    .add(b'{')
-    .add(b'|')
-    .add(b'}');
-
-/// AWS-specific percent-encoding set for query strings
-const QUERY_ENCODE_SET: &AsciiSet = &URI_ENCODE_SET.add(b'=').add(b'&').add(b'+');
-
-impl AwsSignatureV4 {
-    pub fn new(
-        access_key: String,
-        secret_key: String,
-        region: String,
-        service: AwsService,
-    ) -> Self {
-        Self {
-            access_key,
-            secret_key,
-            region,
-            service: service.to_string(),
-        }
-    }
-
-    pub fn for_s3(access_key: String, secret_key: String, region: String) -> Self {
-        Self::new(access_key, secret_key, region, AwsService::S3)
-    }
-
-    pub fn for_transcribe(access_key: String, secret_key: String, region: String) -> Self {
-        Self::new(access_key, secret_key, region, AwsService::Transcribe)
-    }
-
-    pub fn get_region(&self) -> &str {
-        &self.region
-    }
-
-    pub fn sign_request(
-        &self,
-        request: Request<Bytes>,
-        timestamp: DateTime<Utc>,
-    ) -> Result<Request<Bytes>, Error> {
-        let (mut parts, body) = request.into_parts();
-
-        let date_stamp = timestamp.format("%Y%m%d").to_string();
-        let amz_date = timestamp.format("%Y%m%dT%H%M%SZ").to_string();
-
-        parts
-            .headers
-            .insert("x-amz-date", HeaderValue::from_str(&amz_date)?);
-
-        let content_sha256 = self.hash_payload(body.as_ref());
-        parts.headers.insert(
-            "x-amz-content-sha256",
-            HeaderValue::from_str(&content_sha256)?,
-        );
-
-        let mut headers_for_signing = parts.headers.clone();
-
-        if !headers_for_signing.contains_key("host") {
-            if let Some(host) = parts.uri.host() {
-                let host_header = if let Some(port) = parts.uri.port_u16() {
-                    if parts.uri.scheme_str() == Some("https") && port == 443 {
-                        host.to_string()
-                    } else if parts.uri.scheme_str() == Some("http") && port == 80 {
-                        host.to_string()
-                    } else {
-                        format!("{}:{}", host, port)
-                    }
-                } else {
-                    host.to_string()
-                };
-
-                headers_for_signing.insert("host", HeaderValue::from_str(&host_header)?);
-            }
-        }
-
-        let canonical_request = self.create_canonical_request(
-            &parts.method,
-            &parts.uri,
-            &headers_for_signing,
-            &content_sha256,
-        );
-
-        let string_to_sign = self.create_string_to_sign(&canonical_request, &amz_date, &date_stamp);
-
-        let signature = self.calculate_signature(&string_to_sign, &date_stamp)?;
-
-        let signed_headers = self.get_signed_headers(&headers_for_signing);
-        let credential = format!(
-            "{}/{}/{}/{}/aws4_request",
-            self.access_key, date_stamp, self.region, self.service
-        );
-        let authorization = format!(
-            "AWS4-HMAC-SHA256 Credential={}, SignedHeaders={}, Signature={}",
-            credential, signed_headers, signature
-        );
-
-        parts
-            .headers
-            .insert("authorization", HeaderValue::from_str(&authorization)?);
-
-        Ok(Request::from_parts(parts, body))
-    }
-
-    fn create_canonical_request(
-        &self,
-        method: &http::Method,
-        uri: &http::Uri,
-        headers: &HeaderMap,
-        content_sha256: &str,
-    ) -> String {
-        let canonical_uri = self.canonical_uri(uri.path());
-
-        let canonical_query_string = self.canonical_query_string(uri.query().unwrap_or(""));
-
-        let canonical_headers = self.canonical_headers(headers);
-
-        let signed_headers = self.get_signed_headers(headers);
-
-        let hashed_payload = content_sha256;
-
-        let canonical_request = format!(
-            "{}\n{}\n{}\n{}\n{}\n{}",
-            method.as_str().to_uppercase(),
-            canonical_uri,
-            canonical_query_string,
-            canonical_headers,
-            signed_headers,
-            hashed_payload
-        );
-
-        canonical_request
-    }
-
-    fn canonical_uri(&self, path: &str) -> String {
-        if path.is_empty() {
-            "/".to_string()
-        } else {
-            // URI encode each segment
-            let segments: Vec<String> = path
-                .split('/')
-                .map(|segment| utf8_percent_encode(segment, URI_ENCODE_SET).to_string())
-                .collect();
-            segments.join("/")
-        }
-    }
-
-    fn canonical_query_string(&self, query: &str) -> String {
-        if query.is_empty() {
-            return String::new();
-        }
-
-        let mut params: Vec<(String, String)> = query
-            .split('&')
-            .filter_map(|param| {
-                if let Some(eq_pos) = param.find('=') {
-                    let key = &param[..eq_pos];
-                    let value = &param[eq_pos + 1..];
-                    Some((
-                        utf8_percent_encode(key, QUERY_ENCODE_SET).to_string(),
-                        utf8_percent_encode(value, QUERY_ENCODE_SET).to_string(),
-                    ))
-                } else {
-                    Some((
-                        utf8_percent_encode(param, QUERY_ENCODE_SET).to_string(),
-                        String::new(),
-                    ))
-                }
-            })
-            .collect();
-
-        params.sort_by(|a, b| a.0.cmp(&b.0));
-
-        params
-            .into_iter()
-            .map(|(key, value)| {
-                if value.is_empty() {
-                    key
-                } else {
-                    format!("{}={}", key, value)
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("&")
-    }
-
-    fn canonical_headers(&self, headers: &HeaderMap) -> String {
-        let mut canonical_headers = String::new();
-
-        let mut sorted_headers: Vec<_> = headers
-            .iter()
-            .map(|(name, value)| {
-                (
-                    name.as_str().to_lowercase(),
-                    value.to_str().unwrap_or("").trim(),
-                )
-            })
-            .collect();
-        sorted_headers.sort_by(|a, b| a.0.cmp(&b.0));
-
-        for (name, value) in sorted_headers {
-            canonical_headers.push_str(&format!("{}:{}\n", name, value));
-        }
-
-        canonical_headers
-    }
-
-    fn get_signed_headers(&self, headers: &HeaderMap) -> String {
-        let mut signed_headers: Vec<String> = headers
-            .keys()
-            .map(|key| key.as_str().to_lowercase())
-            .collect();
-        signed_headers.sort();
-        signed_headers.join(";")
-    }
-
-    fn create_string_to_sign(
-        &self,
-        canonical_request: &str,
-        amz_date: &str,
-        date_stamp: &str,
-    ) -> String {
-        let algorithm = "AWS4-HMAC-SHA256";
-        let credential_scope = format!(
-            "{}/{}/{}/aws4_request",
-            date_stamp, self.region, self.service
-        );
-
-        let hashed_canonical_request = self.hash_payload(canonical_request.as_bytes());
-
-        let string_to_sign = format!(
-            "{}\n{}\n{}\n{}",
-            algorithm, amz_date, credential_scope, hashed_canonical_request
-        );
-
-        string_to_sign
-    }
-
-    fn calculate_signature(&self, string_to_sign: &str, date_stamp: &str) -> Result<String, Error> {
-        let secret = format!("AWS4{}", self.secret_key);
-
-        let mut mac = HmacSha256::new_from_slice(secret.as_bytes())?;
-        mac.update(date_stamp.as_bytes());
-        let date_key = mac.finalize().into_bytes();
-
-        let mut mac = HmacSha256::new_from_slice(&date_key)?;
-        mac.update(self.region.as_bytes());
-        let date_region_key = mac.finalize().into_bytes();
-
-        let mut mac = HmacSha256::new_from_slice(&date_region_key)?;
-        mac.update(self.service.as_bytes());
-        let date_region_service_key = mac.finalize().into_bytes();
-
-        let mut mac = HmacSha256::new_from_slice(&date_region_service_key)?;
-        mac.update(b"aws4_request");
-        let signing_key = mac.finalize().into_bytes();
-
-        let mut mac = HmacSha256::new_from_slice(&signing_key)?;
-        mac.update(string_to_sign.as_bytes());
-        let signature = mac.finalize().into_bytes();
-
-        Ok(hex::encode(signature))
-    }
-
-    fn hash_payload(&self, payload: &[u8]) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(payload);
-        hex::encode(hasher.finalize())
-    }
-}
-
-#[allow(async_fn_in_trait)]
-pub trait S3Service {
-    async fn put_object(
-        &self,
-        request_id: &str,
-        bucket: &str,
-        object_name: &str,
-        content: Bytes,
-    ) -> Result<(), golem_stt::error::Error>;
-
-    async fn delete_object(
-        &self,
-        request_id: &str,
-        bucket: &str,
-        object_name: &str,
-    ) -> Result<(), golem_stt::error::Error>;
-}
-
-pub struct S3Client<HC: HttpClient> {
-    http_client: Arc<HC>,
-    signer: AwsSignatureV4,
-}
-
-impl<HC: HttpClient> S3Client<HC> {
-    pub fn new(
-        access_key: String,
-        secret_key: String,
-        region: String,
-        http_client: impl Into<Arc<HC>>,
-    ) -> Self {
-        Self {
-            http_client: http_client.into(),
-            signer: AwsSignatureV4::for_s3(access_key, secret_key, region),
-        }
-    }
-}
-
-impl<HC: HttpClient> S3Service for S3Client<HC> {
-    async fn put_object(
-        &self,
-        request_id: &str,
-        bucket: &str,
-        object_name: &str,
-        content: Bytes,
-    ) -> Result<(), golem_stt::error::Error> {
-        let timestamp = Utc::now();
-        let uri = format!("https://{}.s3.amazonaws.com/{}", bucket, object_name);
-
-        let request = Request::builder()
-            .method("PUT")
-            .uri(&uri)
-            .body(content)
-            .map_err(|e| (request_id.to_string(), client::Error::HttpError(e)))?;
-
-        let signed_request = self
-            .signer
-            .sign_request(request, timestamp)
-            .map_err(|err| {
-                (
-                    request_id.to_string(),
-                    client::Error::Generic(format!("Failed to sign request: {}", err)),
-                )
-            })?;
-
-        let response = self
-            .http_client
-            .execute(signed_request)
-            .await
-            .map_err(|err| (request_id.to_string(), err))?;
-
-        if response.status().is_success() {
-            Ok(())
-        } else {
-            let error_body = String::from_utf8(response.body().to_vec())
-                .unwrap_or_else(|e| format!("Unknown error, {e}"));
-
-            let status = response.status();
-            let request_id = request_id.to_string();
-
-            match status.as_u16() {
-                400 => Err(golem_stt::error::Error::APIBadRequest {
-                    request_id,
-                    provider_error: format!("S3 PutObject bad request: {}", error_body),
-                }),
-                500..=599 => Err(golem_stt::error::Error::APIInternalServerError {
-                    request_id,
-                    provider_error: format!(
-                        "S3 PutObject server error ({}): {}",
-                        status, error_body
-                    ),
-                }),
-                _ => Err(golem_stt::error::Error::APIUnknown {
-                    request_id,
-                    provider_error: format!(
-                        "S3 PutObject unexpected error ({}): {}",
-                        status, error_body
-                    ),
-                }),
-            }
-        }
-    }
-
-    async fn delete_object(
-        &self,
-        request_id: &str,
-        bucket: &str,
-        object_name: &str,
-    ) -> Result<(), golem_stt::error::Error> {
-        let timestamp = Utc::now();
-        let uri = format!("https://{}.s3.amazonaws.com/{}", bucket, object_name);
-
-        let request = Request::builder()
-            .method("DELETE")
-            .uri(&uri)
-            .body(Bytes::new())
-            .map_err(|e| (request_id.to_string(), client::Error::HttpError(e)))?;
-
-        let signed_request = self
-            .signer
-            .sign_request(request, timestamp)
-            .map_err(|err| {
-                (
-                    request_id.to_string(),
-                    client::Error::Generic(format!("Failed to sign request: {}", err)),
-                )
-            })?;
-
-        let response = self
-            .http_client
-            .execute(signed_request)
-            .await
-            .map_err(|err| (request_id.to_string(), err))?;
-
-        if response.status().is_success() {
-            Ok(())
-        } else {
-            let error_body = String::from_utf8(response.body().to_vec())
-                .unwrap_or_else(|e| format!("Unknown error, {e}"));
-
-            let status = response.status();
-            let request_id = request_id.to_string();
-
-            match status.as_u16() {
-                400 => Err(golem_stt::error::Error::APIBadRequest {
-                    request_id,
-                    provider_error: format!("S3 DeleteObject bad request: {}", error_body),
-                }),
-                500..=599 => Err(golem_stt::error::Error::APIInternalServerError {
-                    request_id,
-                    provider_error: format!(
-                        "S3 DeleteObject server error ({}): {}",
-                        status, error_body
-                    ),
-                }),
-                _ => Err(golem_stt::error::Error::APIUnknown {
-                    request_id,
-                    provider_error: format!(
-                        "S3 DeleteObject unexpected error ({}): {}",
-                        status, error_body
-                    ),
-                }),
-            }
-        }
-    }
-}
 
 // https://docs.aws.amazon.com/transcribe/latest/APIReference/API_CreateVocabulary.html
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -846,16 +353,15 @@ pub trait TranscribeService {
         vocabulary_name: String,
         language_code: String,
         phrases: Vec<String>,
-    ) -> Result<crate::aws::CreateVocabularyResponse, golem_stt::error::Error>;
+    ) -> Result<CreateVocabularyResponse, golem_stt::error::Error>;
 
     async fn get_vocabulary(
         &self,
         vocabulary_name: &str,
-    ) -> Result<crate::aws::GetVocabularyResponse, golem_stt::error::Error>;
+    ) -> Result<GetVocabularyResponse, golem_stt::error::Error>;
 
-    async fn wait_for_vocabulary_ready<RT: AsyncRuntime>(
+    async fn wait_for_vocabulary_ready(
         &self,
-        runtime: &RT,
         request_id: &str,
         max_wait_time: Duration,
     ) -> Result<(), golem_stt::error::Error>;
@@ -870,19 +376,18 @@ pub trait TranscribeService {
         audio_config: AudioConfig,
         transcription_config: Option<TranscriptionConfig>,
         vocabulary_name: Option<String>,
-    ) -> Result<crate::aws::StartTranscriptionJobResponse, golem_stt::error::Error>;
+    ) -> Result<StartTranscriptionJobResponse, golem_stt::error::Error>;
 
     async fn get_transcription_job(
         &self,
         transcription_job_name: String,
-    ) -> Result<crate::aws::GetTranscriptionJobResponse, golem_stt::error::Error>;
+    ) -> Result<GetTranscriptionJobResponse, golem_stt::error::Error>;
 
-    async fn wait_for_transcription_job_completion<RT: AsyncRuntime>(
+    async fn wait_for_transcription_job_completion(
         &self,
-        runtime: &RT,
         transcription_job_name: &str,
         max_wait_time: Duration,
-    ) -> Result<crate::aws::GetTranscriptionJobResponse, golem_stt::error::Error>;
+    ) -> Result<GetTranscriptionJobResponse, golem_stt::error::Error>;
 
     async fn download_transcript_json(
         &self,
@@ -891,25 +396,30 @@ pub trait TranscribeService {
     ) -> Result<TranscribeOutput, golem_stt::error::Error>;
 }
 
-pub struct TranscribeClient<HC: golem_stt::client::HttpClient> {
-    http_client: std::sync::Arc<HC>,
+pub struct TranscribeClient<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> {
+    http_client: HC,
     signer: AwsSignatureV4,
+    runtime: RT,
 }
 
-impl<HC: golem_stt::client::HttpClient> TranscribeClient<HC> {
+impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeClient<HC, RT> {
     pub fn new(
         access_key: String,
         secret_key: String,
         region: String,
-        http_client: impl Into<std::sync::Arc<HC>>,
+        http_client: HC,
+        runtime: RT,
     ) -> Self {
         Self {
-            http_client: http_client.into(),
+            http_client,
             signer: AwsSignatureV4::for_transcribe(access_key, secret_key, region),
+            runtime,
         }
     }
 }
-impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<HC> {
+impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
+    for TranscribeClient<HC, RT>
+{
     async fn create_vocabulary(
         &self,
         vocabulary_name: String,
@@ -934,7 +444,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
         let json_body = serde_json::to_string(&request_body).map_err(|e| {
             (
                 vocabulary_name.clone(),
-                client::Error::Generic(format!("Failed to serialize request: {}", e)),
+                golem_stt::http::Error::Generic(format!("Failed to serialize request: {}", e)),
             )
         })?;
 
@@ -946,8 +456,13 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
                 "X-Amz-Target",
                 "com.amazonaws.transcribe.Transcribe.CreateVocabulary",
             )
-            .body(Bytes::from(json_body))
-            .map_err(|e| (vocabulary_name.clone(), client::Error::HttpError(e)))?;
+            .body(json_body.into_bytes())
+            .map_err(|e| {
+                (
+                    vocabulary_name.clone(),
+                    golem_stt::http::Error::HttpError(e),
+                )
+            })?;
 
         let signed_request = self
             .signer
@@ -955,7 +470,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
             .map_err(|err| {
                 (
                     vocabulary_name.clone(),
-                    client::Error::Generic(format!("Failed to sign request: {}", err)),
+                    golem_stt::http::Error::Generic(format!("Failed to sign request: {}", err)),
                 )
             })?;
 
@@ -970,7 +485,10 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
                 serde_json::from_slice(response.body()).map_err(|e| {
                     (
                         vocabulary_name.clone(),
-                        client::Error::Generic(format!("Failed to deserialize response: {}", e)),
+                        golem_stt::http::Error::Generic(format!(
+                            "Failed to deserialize response: {}",
+                            e
+                        )),
                     )
                 })?;
 
@@ -1039,7 +557,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
         let json_body = serde_json::to_string(&request_body).map_err(|e| {
             (
                 vocabulary_name.to_string(),
-                client::Error::Generic(format!("Failed to serialize request: {}", e)),
+                golem_stt::http::Error::Generic(format!("Failed to serialize request: {}", e)),
             )
         })?;
 
@@ -1051,8 +569,13 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
                 "X-Amz-Target",
                 "com.amazonaws.transcribe.Transcribe.GetVocabulary",
             )
-            .body(Bytes::from(json_body))
-            .map_err(|e| (vocabulary_name.to_string(), client::Error::HttpError(e)))?;
+            .body(json_body.into_bytes())
+            .map_err(|e| {
+                (
+                    vocabulary_name.to_string(),
+                    golem_stt::http::Error::HttpError(e),
+                )
+            })?;
 
         let signed_request = self
             .signer
@@ -1060,7 +583,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
             .map_err(|err| {
                 (
                     vocabulary_name.to_string(),
-                    client::Error::Generic(format!("Failed to sign request: {}", err)),
+                    golem_stt::http::Error::Generic(format!("Failed to sign request: {}", err)),
                 )
             })?;
 
@@ -1075,7 +598,10 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
                 serde_json::from_slice(response.body()).map_err(|e| {
                     (
                         vocabulary_name.to_string(),
-                        client::Error::Generic(format!("Failed to deserialize response: {}", e)),
+                        golem_stt::http::Error::Generic(format!(
+                            "Failed to deserialize response: {}",
+                            e
+                        )),
                     )
                 })?;
 
@@ -1121,9 +647,8 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
         }
     }
 
-    async fn wait_for_vocabulary_ready<RT: AsyncRuntime>(
+    async fn wait_for_vocabulary_ready(
         &self,
-        runtime: &RT,
         request_id: &str,
         max_wait_time: Duration,
     ) -> Result<(), golem_stt::error::Error> {
@@ -1139,7 +664,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
                 });
             }
 
-            runtime.sleep(retry_delay).await;
+            self.runtime.sleep(retry_delay).await;
 
             let res = self.get_vocabulary(request_id).await?;
 
@@ -1188,7 +713,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
         let json_body = serde_json::to_string(&request_body).map_err(|e| {
             (
                 vocabulary_name.to_string(),
-                client::Error::Generic(format!("Failed to serialize request: {}", e)),
+                golem_stt::http::Error::Generic(format!("Failed to serialize request: {}", e)),
             )
         })?;
 
@@ -1200,8 +725,13 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
                 "X-Amz-Target",
                 "com.amazonaws.transcribe.Transcribe.DeleteVocabulary",
             )
-            .body(Bytes::from(json_body))
-            .map_err(|e| (vocabulary_name.to_string(), client::Error::HttpError(e)))?;
+            .body(json_body.into_bytes())
+            .map_err(|e| {
+                (
+                    vocabulary_name.to_string(),
+                    golem_stt::http::Error::HttpError(e),
+                )
+            })?;
 
         let signed_request = self
             .signer
@@ -1209,7 +739,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
             .map_err(|err| {
                 (
                     vocabulary_name.to_string(),
-                    client::Error::Generic(format!("Failed to sign request: {}", err)),
+                    golem_stt::http::Error::Generic(format!("Failed to sign request: {}", err)),
                 )
             })?;
 
@@ -1370,7 +900,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
         let json_body = serde_json::to_string(&request_body).map_err(|e| {
             (
                 transcription_job_name.clone(),
-                client::Error::Generic(format!("Failed to serialize request: {}", e)),
+                golem_stt::http::Error::Generic(format!("Failed to serialize request: {}", e)),
             )
         })?;
 
@@ -1382,8 +912,13 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
                 "X-Amz-Target",
                 "com.amazonaws.transcribe.Transcribe.StartTranscriptionJob",
             )
-            .body(Bytes::from(json_body))
-            .map_err(|e| (transcription_job_name.clone(), client::Error::HttpError(e)))?;
+            .body(json_body.into_bytes())
+            .map_err(|e| {
+                (
+                    transcription_job_name.clone(),
+                    golem_stt::http::Error::HttpError(e),
+                )
+            })?;
 
         let signed_request = self
             .signer
@@ -1391,7 +926,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
             .map_err(|err| {
                 (
                     transcription_job_name.clone(),
-                    client::Error::Generic(format!("Failed to sign request: {}", err)),
+                    golem_stt::http::Error::Generic(format!("Failed to sign request: {}", err)),
                 )
             })?;
 
@@ -1406,7 +941,10 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
                 serde_json::from_slice(response.body()).map_err(|e| {
                     (
                         transcription_job_name.clone(),
-                        client::Error::Generic(format!("Failed to deserialize response: {}", e)),
+                        golem_stt::http::Error::Generic(format!(
+                            "Failed to deserialize response: {}",
+                            e
+                        )),
                     )
                 })?;
 
@@ -1475,7 +1013,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
         let json_body = serde_json::to_string(&request_body).map_err(|e| {
             (
                 transcription_job_name.clone(),
-                client::Error::Generic(format!("Failed to serialize request: {}", e)),
+                golem_stt::http::Error::Generic(format!("Failed to serialize request: {}", e)),
             )
         })?;
 
@@ -1487,8 +1025,13 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
                 "X-Amz-Target",
                 "com.amazonaws.transcribe.Transcribe.GetTranscriptionJob",
             )
-            .body(Bytes::from(json_body))
-            .map_err(|e| (transcription_job_name.clone(), client::Error::HttpError(e)))?;
+            .body(json_body.into_bytes())
+            .map_err(|e| {
+                (
+                    transcription_job_name.clone(),
+                    golem_stt::http::Error::HttpError(e),
+                )
+            })?;
 
         let signed_request = self
             .signer
@@ -1496,7 +1039,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
             .map_err(|err| {
                 (
                     transcription_job_name.clone(),
-                    client::Error::Generic(format!("Failed to sign request: {}", err)),
+                    golem_stt::http::Error::Generic(format!("Failed to sign request: {}", err)),
                 )
             })?;
 
@@ -1511,7 +1054,10 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
                 serde_json::from_slice(response.body()).map_err(|e| {
                     (
                         transcription_job_name.clone(),
-                        client::Error::Generic(format!("Failed to deserialize response: {}", e)),
+                        golem_stt::http::Error::Generic(format!(
+                            "Failed to deserialize response: {}",
+                            e
+                        )),
                     )
                 })?;
 
@@ -1564,9 +1110,8 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
         }
     }
 
-    async fn wait_for_transcription_job_completion<RT: AsyncRuntime>(
+    async fn wait_for_transcription_job_completion(
         &self,
-        runtime: &RT,
         transcription_job_name: &str,
         max_wait_time: Duration,
     ) -> Result<GetTranscriptionJobResponse, golem_stt::error::Error> {
@@ -1582,7 +1127,7 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
                 });
             }
 
-            runtime.sleep(retry_delay).await;
+            self.runtime.sleep(retry_delay).await;
 
             let res = self
                 .get_transcription_job(transcription_job_name.to_string())
@@ -1630,11 +1175,11 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
             .method("GET")
             .uri(transcript_uri)
             .header("Accept", "application/json")
-            .body(bytes::Bytes::new())
+            .body(vec![])
             .map_err(|e| {
                 (
                     transcription_job_name.to_string(),
-                    client::Error::HttpError(e),
+                    golem_stt::http::Error::HttpError(e),
                 )
             })?;
 
@@ -1647,15 +1192,18 @@ impl<HC: golem_stt::client::HttpClient> TranscribeService for TranscribeClient<H
         if response.status().is_success() {
             let transcript_json: TranscribeOutput = serde_json::from_slice(response.body())
                 .map_err(|e| {
-                    golem_stt::error::Error::Client(
+                    golem_stt::error::Error::Http(
                         transcription_job_name.to_string(),
-                        client::Error::Generic(format!("Failed to deserialize response: {}", e)),
+                        golem_stt::http::Error::Generic(format!(
+                            "Failed to deserialize response: {}",
+                            e
+                        )),
                     )
                 })?;
 
             Ok(transcript_json)
         } else {
-            let error_body = String::from_utf8(response.body().to_vec())
+            let error_body = String::from_utf8(response.body().to_owned())
                 .unwrap_or_else(|_| "Unknown error".to_string());
 
             let status = response.status();
@@ -1695,407 +1243,15 @@ mod tests {
         collections::VecDeque,
     };
 
+    use crate::transcription::request::AudioFormat;
+
     use super::*;
-    use aws_credential_types::Credentials;
-    use http::{Method, Request, Response, StatusCode};
-
-    use aws_sigv4::{
-        http_request::{sign, SignableBody, SignableRequest, SigningSettings},
-        sign::v4,
-    };
-    use wasi_async_runtime::block_on;
-
-    fn sign_with_aws_sdk(
-        mut request: Request<Bytes>,
-        access_key: &str,
-        secret_key: &str,
-        region: &str,
-        service: &str,
-        timestamp: DateTime<Utc>,
-    ) -> Request<Bytes> {
-        let creds = Credentials::new(access_key, secret_key, None, None, "iam");
-        let identity = creds.into();
-
-        let signing_settings = SigningSettings::default();
-        let signing_params = v4::SigningParams::builder()
-            .identity(&identity)
-            .region(region)
-            .name(service)
-            .time(timestamp.into())
-            .settings(signing_settings)
-            .build()
-            .unwrap()
-            .into();
-
-        let mut hasher = Sha256::new();
-        hasher.update(request.body().as_ref());
-        let hashed_content = hex::encode(hasher.finalize());
-
-        request.headers_mut().append(
-            "x-amz-content-sha256",
-            HeaderValue::from_str(&hashed_content).unwrap(),
-        );
-
-        let signable_request = SignableRequest::new(
-            request.method().as_str(),
-            request.uri().to_string(),
-            request
-                .headers()
-                .iter()
-                .map(|(k, v)| (k.as_str(), std::str::from_utf8(v.as_bytes()).unwrap())),
-            SignableBody::Bytes(request.body().as_ref()),
-        )
-        .unwrap();
-
-        let (signing_instructions, _signature) = sign(signable_request, &signing_params)
-            .unwrap()
-            .into_parts();
-        signing_instructions.apply_to_request_http1x(&mut request);
-
-        request
-    }
-
-    // test constructd based on spec here https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html
-    #[test]
-    fn test_uri_encoding_all_characters() {
-        let signer = AwsSignatureV4::for_s3(
-            "test".to_string(),
-            "test".to_string(),
-            "us-east-1".to_string(),
-        );
-
-        assert_eq!(signer.canonical_uri("test file.txt"), "test%20file.txt");
-
-        assert_eq!(signer.canonical_uri("test!file.txt"), "test%21file.txt");
-
-        assert_eq!(signer.canonical_uri("test\"file.txt"), "test%22file.txt");
-
-        assert_eq!(signer.canonical_uri("test#file.txt"), "test%23file.txt");
-
-        assert_eq!(signer.canonical_uri("test$file.txt"), "test%24file.txt");
-
-        assert_eq!(signer.canonical_uri("test%file.txt"), "test%25file.txt");
-
-        assert_eq!(signer.canonical_uri("test'file.txt"), "test%27file.txt");
-
-        assert_eq!(signer.canonical_uri("test(file.txt"), "test%28file.txt");
-
-        assert_eq!(signer.canonical_uri("test)file.txt"), "test%29file.txt");
-
-        assert_eq!(signer.canonical_uri("test*file.txt"), "test%2Afile.txt");
-
-        assert_eq!(signer.canonical_uri("test,file.txt"), "test%2Cfile.txt");
-
-        assert_eq!(signer.canonical_uri("folder/file.txt"), "folder/file.txt");
-
-        assert_eq!(signer.canonical_uri("test:file.txt"), "test%3Afile.txt");
-
-        assert_eq!(signer.canonical_uri("test;file.txt"), "test%3Bfile.txt");
-
-        assert_eq!(signer.canonical_uri("test?file.txt"), "test%3Ffile.txt");
-
-        assert_eq!(signer.canonical_uri("test@file.txt"), "test%40file.txt");
-
-        assert_eq!(signer.canonical_uri("test[file.txt"), "test%5Bfile.txt");
-
-        assert_eq!(signer.canonical_uri("test\\file.txt"), "test%5Cfile.txt");
-
-        assert_eq!(signer.canonical_uri("test]file.txt"), "test%5Dfile.txt");
-
-        assert_eq!(signer.canonical_uri("test^file.txt"), "test%5Efile.txt");
-
-        assert_eq!(signer.canonical_uri("test`file.txt"), "test%60file.txt");
-
-        assert_eq!(signer.canonical_uri("test{file.txt"), "test%7Bfile.txt");
-
-        assert_eq!(signer.canonical_uri("test|file.txt"), "test%7Cfile.txt");
-
-        assert_eq!(signer.canonical_uri("test}file.txt"), "test%7Dfile.txt");
-
-        assert_eq!(signer.canonical_uri("test~file.txt"), "test~file.txt");
-
-        assert_eq!(
-            signer.canonical_uri("test-file_123.txt"),
-            "test-file_123.txt"
-        );
-    }
-
-    #[test]
-    fn test_query_encoding_all_characters() {
-        let signer = AwsSignatureV4::for_s3(
-            "test".to_string(),
-            "test".to_string(),
-            "us-east-1".to_string(),
-        );
-
-        assert_eq!(
-            signer.canonical_query_string("key=value=with=equals"),
-            "key=value%3Dwith%3Dequals",
-        );
-
-        assert_eq!(
-            signer.canonical_query_string("key=value+with+plus"),
-            "key=value%2Bwith%2Bplus",
-        );
-
-        assert_eq!(
-            signer.canonical_query_string("key=value with spaces"),
-            "key=value%20with%20spaces",
-        );
-
-        assert_eq!(
-            signer.canonical_query_string("filter=name=\"John Doe\"&sort=date:desc"),
-            "filter=name%3D%22John%20Doe%22&sort=date%3Adesc",
-        );
-
-        assert_eq!(
-            signer.canonical_query_string("z-param=last&a-param=first&m-param=middle"),
-            "a-param=first&m-param=middle&z-param=last",
-        );
-    }
-
-    #[test]
-    fn test_s3_get_object_authorization_header() {
-        let access_key = "AKIAIOSFODNN7EXAMPLE";
-        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
-        let region = "us-east-1";
-
-        let signer = AwsSignatureV4::for_s3(
-            access_key.to_string(),
-            secret_key.to_string(),
-            region.to_string(),
-        );
-
-        let request = Request::builder()
-            .method(Method::GET)
-            .uri("s3://examplebucket.s3.amazonaws.com/foo/bar/test@file.txt")
-            .header("Range", "bytes=0-9")
-            .body(vec![].into())
-            .unwrap();
-
-        let request_for_aws_sdk = request.clone();
-
-        let timestamp = DateTime::parse_from_rfc2822("Fri, 24 May 2013 00:00:00 GMT")
-            .unwrap()
-            .with_timezone(&Utc);
-
-        let result = signer.sign_request(request, timestamp);
-        assert!(result.is_ok(), "Failed to sign request: {:?}", result.err());
-
-        let signed_request = result.unwrap();
-
-        let auth_header = signed_request
-            .headers()
-            .get("authorization")
-            .unwrap()
-            .to_str()
-            .unwrap();
-
-        let aws_signed_request = sign_with_aws_sdk(
-            request_for_aws_sdk,
-            access_key,
-            secret_key,
-            region,
-            "s3",
-            timestamp,
-        );
-
-        let expected_auth = aws_signed_request
-            .headers()
-            .get("authorization")
-            .unwrap()
-            .to_str()
-            .unwrap();
-
-        assert_eq!(auth_header, expected_auth, "Authorization header mismatch");
-    }
-
-    #[test]
-    fn test_s3_put_object_authorization_header() {
-        let access_key = "AKIAIOSFODNN7EXAMPLE";
-        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
-        let region = "us-east-1";
-
-        let signer = AwsSignatureV4::for_s3(
-            access_key.to_string(),
-            secret_key.to_string(),
-            region.to_string(),
-        );
-
-        // Create the exact request from your specification
-        let request = Request::builder()
-            .method(Method::PUT)
-            .uri("s3://examplebucket.s3.amazonaws.com/test$file.text")
-            .header("Date", "Fri, 24 May 2013 00:00:00 GMT")
-            .header("x-amz-storage-class", "REDUCED_REDUNDANCY")
-            .body(b"Welcome to Amazon S3.".to_vec().into())
-            .unwrap();
-
-        let request_for_aws_sdk = request.clone();
-
-        let timestamp = DateTime::parse_from_rfc2822("Fri, 24 May 2013 00:00:00 GMT")
-            .unwrap()
-            .with_timezone(&Utc);
-
-        let result = signer.sign_request(request, timestamp);
-        assert!(result.is_ok(), "Failed to sign request: {:?}", result.err());
-
-        let signed_request = result.unwrap();
-
-        let auth_header = signed_request
-            .headers()
-            .get("authorization")
-            .unwrap()
-            .to_str()
-            .unwrap();
-
-        let aws_signed_request = sign_with_aws_sdk(
-            request_for_aws_sdk,
-            access_key,
-            secret_key,
-            region,
-            "s3",
-            timestamp,
-        );
-
-        let expected_auth = aws_signed_request
-            .headers()
-            .get("authorization")
-            .unwrap()
-            .to_str()
-            .unwrap();
-
-        assert_eq!(auth_header, expected_auth, "Authorization header mismatch");
-    }
-
-    #[test]
-    fn test_s3_list_objects_authorization_header() {
-        let access_key = "AKIAIOSFODNN7EXAMPLE";
-        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
-        let region = "us-east-1";
-
-        let signer = AwsSignatureV4::for_s3(
-            access_key.to_string(),
-            secret_key.to_string(),
-            region.to_string(),
-        );
-
-        let request = Request::builder()
-            .method(Method::GET)
-            .uri("s3://examplebucket.s3.amazonaws.com/?max-keys=2&prefix=J")
-            .body(vec![].into())
-            .unwrap();
-
-        let request_for_aws_sdk = request.clone();
-
-        let timestamp = DateTime::parse_from_rfc2822("Fri, 24 May 2013 00:00:00 GMT")
-            .unwrap()
-            .with_timezone(&Utc);
-
-        let result = signer.sign_request(request, timestamp);
-        assert!(result.is_ok(), "Failed to sign request: {:?}", result.err());
-
-        let signed_request = result.unwrap();
-
-        let auth_header = signed_request
-            .headers()
-            .get("authorization")
-            .unwrap()
-            .to_str()
-            .unwrap();
-
-        let aws_signed_request = sign_with_aws_sdk(
-            request_for_aws_sdk,
-            access_key,
-            secret_key,
-            region,
-            "s3",
-            timestamp,
-        );
-
-        let expected_auth = aws_signed_request
-            .headers()
-            .get("authorization")
-            .unwrap()
-            .to_str()
-            .unwrap();
-
-        assert_eq!(auth_header, expected_auth, "Authorization header mismatch");
-    }
-
-    #[test]
-    fn test_batch_transcription_authorization_header() {
-        let access_key = "AKIAIOSFODNN7EXAMPLE";
-        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
-        let region = "us-east-1";
-
-        let signer = AwsSignatureV4::for_transcribe(
-            access_key.to_string(),
-            secret_key.to_string(),
-            region.to_string(),
-        );
-
-        let body = r#"
-            {
-                "TranscriptionJobName": "my-first-transcription-job",
-                "LanguageCode": "en-US",
-                "Media": {
-                    "MediaFileUri": "s3://amzn-s3-demo-bucket/my-input-files/my-media-file.flac"
-                },
-                "OutputBucketName": "amzn-s3-demo-bucket",
-                "OutputKey": "my-output-files/"
-            }
-            "#;
-
-        // Create the exact request from your specification
-        let request = Request::builder()
-            .method(Method::GET)
-            .uri("s3://examplebucket.s3.amazonaws.com/?max-keys=2&prefix=J")
-            .body(body.as_bytes().into())
-            .unwrap();
-
-        let request_for_aws_sdk = request.clone();
-
-        // Parse the Date header directly: "Fri, 24 May 2013 00:00:00 GMT"
-        let timestamp = DateTime::parse_from_rfc2822("Fri, 24 May 2013 00:00:00 GMT")
-            .unwrap()
-            .with_timezone(&Utc);
-
-        let result = signer.sign_request(request, timestamp);
-        assert!(result.is_ok(), "Failed to sign request: {:?}", result.err());
-
-        let signed_request = result.unwrap();
-
-        // Get the authorization header
-        let auth_header = signed_request
-            .headers()
-            .get("authorization")
-            .unwrap()
-            .to_str()
-            .unwrap();
-
-        let aws_signed_request = sign_with_aws_sdk(
-            request_for_aws_sdk,
-            access_key,
-            secret_key,
-            region,
-            "transcribe",
-            timestamp,
-        );
-
-        let expected_auth = aws_signed_request
-            .headers()
-            .get("authorization")
-            .unwrap()
-            .to_str()
-            .unwrap();
-
-        assert_eq!(auth_header, expected_auth, "Authorization header mismatch");
-    }
+    use golem_stt::http::HttpClient;
+    use http::{Request, Response, StatusCode};
 
     struct MockHttpClient {
-        pub responses: RefCell<VecDeque<Result<Response<Bytes>, client::Error>>>,
-        pub captured_requests: RefCell<Vec<Request<Bytes>>>,
+        pub responses: RefCell<VecDeque<Result<Response<Vec<u8>>, golem_stt::http::Error>>>,
+        pub captured_requests: RefCell<Vec<Request<Vec<u8>>>>,
     }
 
     #[allow(unused)]
@@ -2107,11 +1263,11 @@ mod tests {
             }
         }
 
-        pub fn expect_response(&self, response: Response<Bytes>) {
+        pub fn expect_response(&self, response: Response<Vec<u8>>) {
             self.responses.borrow_mut().push_back(Ok(response));
         }
 
-        pub fn get_captured_requests(&self) -> Ref<Vec<Request<Bytes>>> {
+        pub fn get_captured_requests(&self) -> Ref<Vec<Request<Vec<u8>>>> {
             self.captured_requests.borrow()
         }
 
@@ -2123,7 +1279,7 @@ mod tests {
             self.captured_requests.borrow().len()
         }
 
-        pub fn last_captured_request(&self) -> Option<Ref<Request<Bytes>>> {
+        pub fn last_captured_request(&self) -> Option<Ref<Request<Vec<u8>>>> {
             let borrow = self.captured_requests.borrow();
             if borrow.is_empty() {
                 None
@@ -2134,134 +1290,44 @@ mod tests {
     }
 
     impl HttpClient for MockHttpClient {
-        async fn execute(&self, request: Request<Bytes>) -> Result<Response<Bytes>, client::Error> {
+        async fn execute(
+            &self,
+            request: Request<Vec<u8>>,
+        ) -> Result<Response<Vec<u8>>, golem_stt::http::Error> {
             self.captured_requests.borrow_mut().push(request);
             self.responses
                 .borrow_mut()
                 .pop_front()
-                .unwrap_or(Err(client::Error::Generic("unexpected error".to_string())))
+                .unwrap_or(Err(golem_stt::http::Error::Generic(
+                    "unexpected error".to_string(),
+                )))
         }
     }
 
-    #[test]
-    fn test_s3_put_object_request() {
-        let access_key = "AKIAIOSFODNN7EXAMPLE";
-        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
-        let region = "us-east-1";
-
-        let mock_client = Arc::new(MockHttpClient::new());
-
-        mock_client.expect_response(
-            Response::builder()
-                .status(StatusCode::OK)
-                .body(Bytes::new())
-                .unwrap(),
-        );
-
-        let s3_client: S3Client<MockHttpClient> = S3Client::new(
-            access_key.to_string(),
-            secret_key.to_string(),
-            region.to_string(),
-            mock_client.clone(),
-        );
-
-        let bucket = "test-bucket";
-        let object_name = "test-object.txt";
-        let content = Bytes::from("Hello, World!");
-
-        let _result = block_on(|_| async {
-            s3_client
-                .put_object("some-request-id", bucket, object_name, content.clone())
-                .await
-        });
-
-        let captured_request = mock_client.last_captured_request();
-        let request = captured_request.as_ref().unwrap();
-
-        assert_eq!(request.method(), "PUT");
-
-        let expected_uri = format!("https://{}.s3.amazonaws.com/{}", bucket, object_name);
-        assert_eq!(request.uri().to_string(), expected_uri);
-
-        assert_eq!(request.body(), &content);
-
-        assert!(request.headers().contains_key("x-amz-date"));
-        assert!(request.headers().contains_key("x-amz-content-sha256"));
-        assert!(request.headers().contains_key("authorization"));
-
-        let auth_header = request
-            .headers()
-            .get("authorization")
-            .unwrap()
-            .to_str()
-            .unwrap();
-        assert!(auth_header.starts_with("AWS4-HMAC-SHA256"));
-        assert!(auth_header.contains("Credential="));
-        assert!(auth_header.contains("SignedHeaders="));
-        assert!(auth_header.contains("Signature="));
+    struct MockRuntime {
+        sleep_calls: std::cell::RefCell<Vec<Duration>>,
     }
 
-    #[test]
-    fn test_s3_delete_object_request() {
-        let access_key = "AKIAIOSFODNN7EXAMPLE";
-        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
-        let region = "us-east-1";
+    impl MockRuntime {
+        fn new() -> Self {
+            Self {
+                sleep_calls: std::cell::RefCell::new(Vec::new()),
+            }
+        }
 
-        let mock_client = Arc::new(MockHttpClient::new());
-
-        mock_client.expect_response(
-            Response::builder()
-                .status(StatusCode::NO_CONTENT)
-                .body(Bytes::new())
-                .unwrap(),
-        );
-
-        let s3_client: S3Client<MockHttpClient> = S3Client::new(
-            access_key.to_string(),
-            secret_key.to_string(),
-            region.to_string(),
-            mock_client.clone(),
-        );
-
-        let bucket = "test-bucket";
-        let object_name = "test-object.txt";
-
-        let result = block_on(|_| async {
-            s3_client
-                .delete_object("some-request-id", bucket, object_name)
-                .await
-        });
-
-        assert!(result.is_ok());
-
-        let captured_request = mock_client.last_captured_request();
-        let request = captured_request.as_ref().unwrap();
-
-        assert_eq!(request.method(), "DELETE");
-
-        let expected_uri = format!("https://{}.s3.amazonaws.com/{}", bucket, object_name);
-        assert_eq!(request.uri().to_string(), expected_uri);
-
-        assert_eq!(request.body(), &Bytes::new());
-
-        assert!(request.headers().contains_key("x-amz-date"));
-        assert!(request.headers().contains_key("x-amz-content-sha256"));
-        assert!(request.headers().contains_key("authorization"));
-
-        let auth_header = request
-            .headers()
-            .get("authorization")
-            .unwrap()
-            .to_str()
-            .unwrap();
-        assert!(auth_header.starts_with("AWS4-HMAC-SHA256"));
-        assert!(auth_header.contains("Credential="));
-        assert!(auth_header.contains("SignedHeaders="));
-        assert!(auth_header.contains("Signature="));
+        fn get_sleep_calls(&self) -> Vec<Duration> {
+            self.sleep_calls.borrow().clone()
+        }
     }
 
-    #[test]
-    fn test_transcribe_create_vocabulary_request() {
+    impl golem_stt::runtime::AsyncRuntime for MockRuntime {
+        async fn sleep(&self, duration: Duration) {
+            self.sleep_calls.borrow_mut().push(duration);
+        }
+    }
+
+    #[wstd::test]
+    async fn test_transcribe_create_vocabulary_request() {
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "us-east-1";
@@ -2274,11 +1340,11 @@ mod tests {
             failure_reason: None,
         };
 
-        let mock_client = Arc::new(MockHttpClient::new());
+        let mock_client = MockHttpClient::new();
 
         let response_json_str = serde_json::to_string(&expected_response).unwrap();
 
-        let body_bytes = Bytes::from(response_json_str.as_bytes().to_vec());
+        let body_bytes = response_json_str.into_bytes();
 
         mock_client.expect_response(
             Response::builder()
@@ -2287,11 +1353,14 @@ mod tests {
                 .unwrap(),
         );
 
-        let transcribe_client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+        let mock_runtime = MockRuntime::new();
+
+        let transcribe_client = TranscribeClient::new(
             access_key.to_string(),
             secret_key.to_string(),
             region.to_string(),
-            mock_client.clone(),
+            mock_client,
+            mock_runtime,
         );
 
         let vocabulary_name = "test-vocabulary".to_string();
@@ -2302,21 +1371,21 @@ mod tests {
             "artificial intelligence".to_string(),
         ];
 
-        let result = block_on(|_| async {
-            transcribe_client
-                .create_vocabulary(
-                    vocabulary_name.clone(),
-                    language_code.clone(),
-                    phrases.clone(),
-                )
-                .await
-        });
+        let actual_response = transcribe_client
+            .create_vocabulary(
+                vocabulary_name.clone(),
+                language_code.clone(),
+                phrases.clone(),
+            )
+            .await
+            .unwrap();
 
-        assert!(result.is_ok());
-        let actual_response = result.unwrap();
         assert_eq!(actual_response, expected_response);
 
-        let request = mock_client.last_captured_request().unwrap();
+        let request = transcribe_client
+            .http_client
+            .last_captured_request()
+            .unwrap();
         assert_eq!(request.method(), "POST");
         assert_eq!(
             request.uri().to_string(),
@@ -2360,34 +1429,39 @@ mod tests {
         assert!(auth_header.contains("Signature="));
     }
 
-    #[test]
-    fn test_transcribe_delete_vocabulary_request() {
+    #[wstd::test]
+    async fn test_transcribe_delete_vocabulary_request() {
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "us-east-1";
 
-        let mock_client = Arc::new(MockHttpClient::new());
+        let mock_client = MockHttpClient::new();
         mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::OK)
-                .body(Bytes::new())
+                .body(vec![])
                 .unwrap(),
         );
 
-        let transcribe_client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+        let mock_runtime = MockRuntime::new();
+
+        let transcribe_client = TranscribeClient::new(
             access_key.to_string(),
             secret_key.to_string(),
             region.to_string(),
-            mock_client.clone(),
+            mock_client,
+            mock_runtime,
         );
 
         let vocabulary_name = "test-vocabulary".to_string();
-        let result =
-            block_on(|_| async { transcribe_client.delete_vocabulary(&vocabulary_name).await });
+        let result = transcribe_client.delete_vocabulary(&vocabulary_name).await;
 
         assert!(result.is_ok());
 
-        let request = mock_client.last_captured_request().unwrap();
+        let request = transcribe_client
+            .http_client
+            .last_captured_request()
+            .unwrap();
         assert_eq!(request.method(), "POST");
         assert_eq!(
             request.uri().to_string(),
@@ -2424,15 +1498,13 @@ mod tests {
         assert!(auth_header.contains("Signature="));
     }
 
-    #[test]
-    fn test_start_transcription_job_basic_request() {
-        use crate::client::{AudioConfig, AudioFormat};
-
+    #[wstd::test]
+    async fn test_start_transcription_job_basic_request() {
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "us-east-1";
 
-        let mock_client = Arc::new(MockHttpClient::new());
+        let mock_client = MockHttpClient::new();
 
         let mock_response = r#"{
                "TranscriptionJob": {
@@ -2444,15 +1516,18 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(200)
-                .body(Bytes::from(mock_response))
+                .body(mock_response.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+        let mock_runtime = MockRuntime::new();
+
+        let transcribe_client = TranscribeClient::new(
             access_key.to_string(),
             secret_key.to_string(),
             region.to_string(),
-            mock_client.clone(),
+            mock_client,
+            mock_runtime,
         );
 
         // Test basic audio config with no transcription config (should use identify_language)
@@ -2461,20 +1536,22 @@ mod tests {
             channels: Some(1),
         };
 
-        let _result = block_on(|_| async {
-            client
-                .start_transcription_job(
-                    "test-job-basic".to_string(),
-                    "s3://bucket/audio.wav".to_string(),
-                    audio_config,
-                    None, // No transcription config
-                    None, // No vocabulary
-                )
-                .await
-        });
+        let _result = transcribe_client
+            .start_transcription_job(
+                "test-job-basic".to_string(),
+                "s3://bucket/audio.wav".to_string(),
+                audio_config,
+                None, // No transcription config
+                None, // No vocabulary
+            )
+            .await
+            .unwrap();
 
         // Verify the request was constructed correctly
-        let request = mock_client.last_captured_request().unwrap();
+        let request = transcribe_client
+            .http_client
+            .last_captured_request()
+            .unwrap();
         let actual_request: StartTranscriptionJobRequest =
             serde_json::from_slice(request.body()).unwrap();
 
@@ -2510,15 +1587,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_start_transcription_job_with_explicit_language() {
-        use crate::client::{AudioConfig, AudioFormat, TranscriptionConfig};
-
+    #[wstd::test]
+    async fn test_start_transcription_job_with_explicit_language() {
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "us-west-2";
 
-        let mock_client = Arc::new(MockHttpClient::new());
+        let mock_client = MockHttpClient::new();
 
         let mock_response = r#"{
                 "TranscriptionJob": {
@@ -2530,15 +1605,18 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(200)
-                .body(Bytes::from(mock_response))
+                .body(mock_response.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+        let mock_runtime = MockRuntime::new();
+
+        let transcribe_client = TranscribeClient::new(
             access_key.to_string(),
             secret_key.to_string(),
             region.to_string(),
-            mock_client.clone(),
+            mock_client,
+            mock_runtime,
         );
 
         let audio_config = AudioConfig {
@@ -2553,19 +1631,21 @@ mod tests {
             vocabulary: vec![],
         };
 
-        let _result = block_on(|_| async {
-            client
-                .start_transcription_job(
-                    "test-job-lang".to_string(),
-                    "s3://bucket/audio.mp3".to_string(),
-                    audio_config,
-                    Some(transcription_config),
-                    None,
-                )
-                .await
-        });
+        let _result = transcribe_client
+            .start_transcription_job(
+                "test-job-lang".to_string(),
+                "s3://bucket/audio.mp3".to_string(),
+                audio_config,
+                Some(transcription_config),
+                None,
+            )
+            .await
+            .unwrap();
 
-        let request = mock_client.last_captured_request().unwrap();
+        let request = transcribe_client
+            .http_client
+            .last_captured_request()
+            .unwrap();
         let actual_request: StartTranscriptionJobRequest =
             serde_json::from_slice(request.body()).unwrap();
 
@@ -2601,15 +1681,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_start_transcription_job_with_model_and_vocabulary() {
-        use crate::client::{AudioConfig, AudioFormat, TranscriptionConfig};
-
+    #[wstd::test]
+    async fn test_start_transcription_job_with_model_and_vocabulary() {
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "eu-west-1";
 
-        let mock_client = Arc::new(MockHttpClient::new());
+        let mock_client = MockHttpClient::new();
 
         let mock_response = r#"{
                "TranscriptionJob": {
@@ -2621,15 +1699,18 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(200)
-                .body(Bytes::from(mock_response))
+                .body(mock_response.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+        let mock_runtime = MockRuntime::new();
+
+        let transcribe_client = TranscribeClient::new(
             access_key.to_string(),
             secret_key.to_string(),
             region.to_string(),
-            mock_client.clone(),
+            mock_client,
+            mock_runtime,
         );
 
         let audio_config = AudioConfig {
@@ -2644,19 +1725,21 @@ mod tests {
             vocabulary: vec!["A".to_string(), "B".to_string()],
         };
 
-        let _result = block_on(|_| async {
-            client
-                .start_transcription_job(
-                    "test-job-advanced".to_string(),
-                    "s3://bucket/audio.flac".to_string(),
-                    audio_config,
-                    Some(transcription_config),
-                    Some("custom-medical-vocab-123".to_string()), // Vocabulary name provided
-                )
-                .await
-        });
+        let _result = transcribe_client
+            .start_transcription_job(
+                "test-job-advanced".to_string(),
+                "s3://bucket/audio.flac".to_string(),
+                audio_config,
+                Some(transcription_config),
+                Some("custom-medical-vocab-123".to_string()), // Vocabulary name provided
+            )
+            .await
+            .unwrap();
 
-        let request = mock_client.last_captured_request().unwrap();
+        let request = transcribe_client
+            .http_client
+            .last_captured_request()
+            .unwrap();
         let actual_request: StartTranscriptionJobRequest =
             serde_json::from_slice(request.body()).unwrap();
 
@@ -2703,15 +1786,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_start_transcription_job_with_speaker_diarization() {
-        use crate::client::{AudioConfig, AudioFormat, TranscriptionConfig};
-
+    #[wstd::test]
+    async fn test_start_transcription_job_with_speaker_diarization() {
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "ap-southeast-1";
 
-        let mock_client = Arc::new(MockHttpClient::new());
+        let mock_client = MockHttpClient::new();
 
         let mock_response = r#"{
                 "TranscriptionJob": {
@@ -2723,15 +1804,18 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(200)
-                .body(Bytes::from(mock_response))
+                .body(mock_response.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+        let mock_runtime = MockRuntime::new();
+
+        let transcribe_client = TranscribeClient::new(
             access_key.to_string(),
             secret_key.to_string(),
             region.to_string(),
-            mock_client.clone(),
+            mock_client,
+            mock_runtime,
         );
 
         let audio_config = AudioConfig {
@@ -2746,19 +1830,21 @@ mod tests {
             vocabulary: vec![],
         };
 
-        let _result = block_on(|_| async {
-            client
-                .start_transcription_job(
-                    "test-job-speakers".to_string(),
-                    "s3://bucket/meeting.ogg".to_string(),
-                    audio_config,
-                    Some(transcription_config),
-                    None,
-                )
-                .await
-        });
+        let _result = transcribe_client
+            .start_transcription_job(
+                "test-job-speakers".to_string(),
+                "s3://bucket/meeting.ogg".to_string(),
+                audio_config,
+                Some(transcription_config),
+                None,
+            )
+            .await
+            .unwrap();
 
-        let request = mock_client.last_captured_request().unwrap();
+        let request = transcribe_client
+            .http_client
+            .last_captured_request()
+            .unwrap();
         let actual_request: StartTranscriptionJobRequest =
             serde_json::from_slice(request.body()).unwrap();
 
@@ -2803,15 +1889,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_start_transcription_job_with_multi_channel() {
-        use crate::client::{AudioConfig, AudioFormat, TranscriptionConfig};
-
+    #[wstd::test]
+    async fn test_start_transcription_job_with_multi_channel() {
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "ca-central-1";
 
-        let mock_client = Arc::new(MockHttpClient::new());
+        let mock_client = MockHttpClient::new();
 
         let mock_response = r#"{
                 "TranscriptionJob": {
@@ -2823,15 +1907,18 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(200)
-                .body(Bytes::from(mock_response))
+                .body(mock_response.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+        let mock_runtime = MockRuntime::new();
+
+        let transcribe_client = TranscribeClient::new(
             access_key.to_string(),
             secret_key.to_string(),
             region.to_string(),
-            mock_client.clone(),
+            mock_client,
+            mock_runtime,
         );
 
         let audio_config = AudioConfig {
@@ -2846,19 +1933,21 @@ mod tests {
             vocabulary: vec!["A".to_string(), "B".to_string()],
         };
 
-        let _result = block_on(|_| async {
-            client
-                .start_transcription_job(
-                    "test-job-channels".to_string(),
-                    "s3://bucket/call-recording.wav".to_string(),
-                    audio_config,
-                    Some(transcription_config),
-                    Some("telephony-vocab".to_string()),
-                )
-                .await
-        });
+        let _result = transcribe_client
+            .start_transcription_job(
+                "test-job-channels".to_string(),
+                "s3://bucket/call-recording.wav".to_string(),
+                audio_config,
+                Some(transcription_config),
+                Some("telephony-vocab".to_string()),
+            )
+            .await
+            .unwrap();
 
-        let request = mock_client.last_captured_request().unwrap();
+        let request = transcribe_client
+            .http_client
+            .last_captured_request()
+            .unwrap();
         let actual_request: StartTranscriptionJobRequest =
             serde_json::from_slice(request.body()).unwrap();
 
@@ -2905,15 +1994,14 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_start_transcription_job_identify_language_ignores_vocabulary_and_model_settings() {
-        use crate::client::{AudioConfig, AudioFormat};
-
+    #[wstd::test]
+    async fn test_start_transcription_job_identify_language_ignores_vocabulary_and_model_settings()
+    {
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "us-east-1";
 
-        let mock_client = Arc::new(MockHttpClient::new());
+        let mock_client = MockHttpClient::new();
 
         let mock_response = r#"{
                "TranscriptionJob": {
@@ -2925,15 +2013,18 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(200)
-                .body(Bytes::from(mock_response))
+                .body(mock_response.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+        let mock_runtime = MockRuntime::new();
+
+        let transcribe_client = TranscribeClient::new(
             access_key.to_string(),
             secret_key.to_string(),
             region.to_string(),
-            mock_client.clone(),
+            mock_client,
+            mock_runtime,
         );
 
         let audio_config = AudioConfig {
@@ -2948,19 +2039,21 @@ mod tests {
             vocabulary: vec!["A".to_string(), "B".to_string()],
         };
 
-        let _result = block_on(|_| async {
-            client
-                .start_transcription_job(
-                    "test-job-identify".to_string(),
-                    "s3://bucket/unknown-language.mp3".to_string(),
-                    audio_config,
-                    Some(transcription_config),
-                    Some("some-vocab".to_string()), // This should be ignored
-                )
-                .await
-        });
+        let _result = transcribe_client
+            .start_transcription_job(
+                "test-job-identify".to_string(),
+                "s3://bucket/unknown-language.mp3".to_string(),
+                audio_config,
+                Some(transcription_config),
+                Some("some-vocab".to_string()), // This should be ignored
+            )
+            .await
+            .unwrap();
 
-        let request = mock_client.last_captured_request().unwrap();
+        let request = transcribe_client
+            .http_client
+            .last_captured_request()
+            .unwrap();
         let actual_request: StartTranscriptionJobRequest =
             serde_json::from_slice(request.body()).unwrap();
 
@@ -2996,13 +2089,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_wait_for_vocabulary_ready_success() {
+    #[wstd::test]
+    async fn test_wait_for_vocabulary_ready_success() {
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "us-east-1";
 
-        let mock_client = Arc::new(MockHttpClient::new());
+        let mock_client = MockHttpClient::new();
 
         // First call - vocabulary is still PENDING
         let pending_response = r#"{
@@ -3024,60 +2117,35 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(200)
-                .body(Bytes::from(pending_response))
+                .body(pending_response.as_bytes().to_vec())
                 .unwrap(),
         );
 
         mock_client.expect_response(
             Response::builder()
                 .status(200)
-                .body(Bytes::from(ready_response))
+                .body(ready_response.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+        let mock_runtime = MockRuntime::new();
+
+        let transcribe_client = TranscribeClient::new(
             access_key.to_string(),
             secret_key.to_string(),
             region.to_string(),
-            mock_client.clone(),
+            mock_client,
+            mock_runtime,
         );
 
-        // Mock runtime that tracks sleep calls
-        struct MockRuntime {
-            sleep_calls: std::cell::RefCell<Vec<Duration>>,
-        }
+        let _result = transcribe_client
+            .wait_for_vocabulary_ready("test-vocab", Duration::from_secs(300))
+            .await
+            .unwrap();
 
-        impl MockRuntime {
-            fn new() -> Self {
-                Self {
-                    sleep_calls: std::cell::RefCell::new(Vec::new()),
-                }
-            }
+        assert_eq!(transcribe_client.http_client.captured_request_count(), 2);
 
-            fn get_sleep_calls(&self) -> Vec<Duration> {
-                self.sleep_calls.borrow().clone()
-            }
-        }
-
-        impl golem_stt::runtime::AsyncRuntime for MockRuntime {
-            async fn sleep(&self, duration: Duration) {
-                self.sleep_calls.borrow_mut().push(duration);
-            }
-        }
-
-        let mock_runtime = MockRuntime::new();
-
-        let result = block_on(|_| async {
-            client
-                .wait_for_vocabulary_ready(&mock_runtime, "test-vocab", Duration::from_secs(300))
-                .await
-        });
-
-        assert!(result.is_ok(), "wait_for_vocabulary_ready should succeed");
-
-        assert_eq!(mock_client.captured_request_count(), 2);
-
-        let sleep_calls = mock_runtime.get_sleep_calls();
+        let sleep_calls = transcribe_client.runtime.get_sleep_calls();
         assert!(
             !sleep_calls.is_empty(),
             "Should have called sleep at least once"
@@ -3088,7 +2156,7 @@ mod tests {
             "First sleep should be 500ms"
         );
 
-        let captured_requests = mock_client.get_captured_requests();
+        let captured_requests = transcribe_client.http_client.get_captured_requests();
         for request in captured_requests.iter() {
             assert_eq!(request.method(), "POST");
             assert_eq!(
@@ -3117,13 +2185,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_wait_for_vocabulary_ready_failure() {
+    #[wstd::test]
+    async fn test_wait_for_vocabulary_ready_failure() {
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "us-east-1";
 
-        let mock_client = Arc::new(MockHttpClient::new());
+        let mock_client = MockHttpClient::new();
 
         // Vocabulary creation failed
         let failed_response = r#"{
@@ -3137,28 +2205,23 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(200)
-                .body(Bytes::from(failed_response))
+                .body(failed_response.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+        let mock_runtime = MockRuntime::new();
+
+        let transcribe_client = TranscribeClient::new(
             access_key.to_string(),
             secret_key.to_string(),
             region.to_string(),
-            mock_client.clone(),
+            mock_client,
+            mock_runtime,
         );
 
-        struct MockRuntime;
-        impl golem_stt::runtime::AsyncRuntime for MockRuntime {
-            async fn sleep(&self, _duration: Duration) {}
-        }
-        let mock_runtime = MockRuntime;
-
-        let result = block_on(|_| async {
-            client
-                .wait_for_vocabulary_ready(&mock_runtime, "test-vocab", Duration::from_secs(300))
-                .await
-        });
+        let result = transcribe_client
+            .wait_for_vocabulary_ready("test-vocab", Duration::from_secs(300))
+            .await;
 
         // Should fail with the specific error
         assert!(result.is_err());
@@ -3175,13 +2238,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_wait_for_vocabulary_ready_timeout() {
+    #[wstd::test]
+    async fn test_wait_for_vocabulary_ready_timeout() {
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "us-east-1";
 
-        let mock_client = Arc::new(MockHttpClient::new());
+        let mock_client = MockHttpClient::new();
 
         // Always return PENDING to simulate timeout
         let pending_response = r#"{
@@ -3196,17 +2259,10 @@ mod tests {
             mock_client.expect_response(
                 Response::builder()
                     .status(200)
-                    .body(Bytes::from(pending_response))
+                    .body(pending_response.as_bytes().to_vec())
                     .unwrap(),
             );
         }
-
-        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
-            access_key.to_string(),
-            secret_key.to_string(),
-            region.to_string(),
-            mock_client.clone(),
-        );
 
         struct MockRuntime {
             elapsed_time: std::cell::RefCell<Duration>,
@@ -3230,18 +2286,23 @@ mod tests {
 
         let mock_runtime = MockRuntime::new();
 
-        let result = block_on(|_| async {
-            client
-                .wait_for_vocabulary_ready(
-                    &mock_runtime,
-                    "test-vocab",
-                    Duration::from_millis(5), // Very short timeout
-                )
-                .await
-        });
+        let transcribe_client = TranscribeClient::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client,
+            mock_runtime,
+        );
+
+        let result = transcribe_client
+            .wait_for_vocabulary_ready(
+                "test-vocab",
+                Duration::from_millis(5), // Very short timeout
+            )
+            .await;
 
         assert!(
-            mock_runtime.elapsed_time.borrow().as_millis() > 0,
+            transcribe_client.runtime.elapsed_time.borrow().as_millis() > 0,
             "Elapsed time should be greater than zero"
         );
 
@@ -3259,13 +2320,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_wait_for_transcription_job_completion_success() {
+    #[wstd::test]
+    async fn test_wait_for_transcription_job_completion_success() {
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "us-east-1";
 
-        let mock_client = Arc::new(MockHttpClient::new());
+        let mock_client = MockHttpClient::new();
 
         // First call - job is IN_PROGRESS
         let in_progress_response = r#"{
@@ -3304,61 +2365,32 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(200)
-                .body(Bytes::from(in_progress_response))
+                .body(in_progress_response.as_bytes().to_vec())
                 .unwrap(),
         );
 
         mock_client.expect_response(
             Response::builder()
                 .status(200)
-                .body(Bytes::from(completed_response))
+                .body(completed_response.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+        let mock_runtime = MockRuntime::new();
+
+        let transcribe_client = TranscribeClient::new(
             access_key.to_string(),
             secret_key.to_string(),
             region.to_string(),
-            mock_client.clone(),
+            mock_client,
+            mock_runtime,
         );
 
-        struct MockRuntime {
-            sleep_calls: std::cell::RefCell<Vec<Duration>>,
-        }
+        let response = transcribe_client
+            .wait_for_transcription_job_completion("test-job", Duration::from_secs(3600))
+            .await
+            .unwrap();
 
-        impl MockRuntime {
-            fn new() -> Self {
-                Self {
-                    sleep_calls: std::cell::RefCell::new(Vec::new()),
-                }
-            }
-
-            fn get_sleep_calls(&self) -> Vec<Duration> {
-                self.sleep_calls.borrow().clone()
-            }
-        }
-
-        impl golem_stt::runtime::AsyncRuntime for MockRuntime {
-            async fn sleep(&self, duration: Duration) {
-                self.sleep_calls.borrow_mut().push(duration);
-            }
-        }
-
-        let mock_runtime = MockRuntime::new();
-
-        let result = block_on(|_| async {
-            client
-                .wait_for_transcription_job_completion(
-                    &mock_runtime,
-                    "test-job",
-                    Duration::from_secs(3600),
-                )
-                .await
-        });
-
-        // Should succeed and return the completed job
-        assert!(result.is_ok());
-        let response = result.unwrap();
         assert_eq!(
             response.transcription_job.transcription_job_status,
             "COMPLETED"
@@ -3372,10 +2404,10 @@ mod tests {
             .is_some());
 
         // Should have made exactly 2 API calls
-        assert_eq!(mock_client.captured_request_count(), 2);
+        assert_eq!(transcribe_client.http_client.captured_request_count(), 2);
 
         // Should have called sleep at least once
-        let sleep_calls = mock_runtime.get_sleep_calls();
+        let sleep_calls = transcribe_client.runtime.get_sleep_calls();
         assert!(!sleep_calls.is_empty());
         assert_eq!(
             sleep_calls[0],
@@ -3384,7 +2416,7 @@ mod tests {
         );
 
         // Verify the requests were get_transcription_job calls
-        let captured_requests = mock_client.get_captured_requests();
+        let captured_requests = transcribe_client.http_client.get_captured_requests();
         for request in captured_requests.iter() {
             assert_eq!(request.method(), "POST");
             assert_eq!(
@@ -3413,13 +2445,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_wait_for_transcription_job_completion_failure() {
+    #[wstd::test]
+    async fn test_wait_for_transcription_job_completion_failure() {
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "us-east-1";
 
-        let mock_client = Arc::new(MockHttpClient::new());
+        let mock_client = MockHttpClient::new();
 
         // Job failed
         let failed_response = r#"{
@@ -3441,32 +2473,23 @@ mod tests {
         mock_client.expect_response(
             Response::builder()
                 .status(200)
-                .body(Bytes::from(failed_response))
+                .body(failed_response.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+        let mock_runtime = MockRuntime::new();
+
+        let transcribe_client = TranscribeClient::new(
             access_key.to_string(),
             secret_key.to_string(),
             region.to_string(),
-            mock_client.clone(),
+            mock_client,
+            mock_runtime,
         );
 
-        struct MockRuntime;
-        impl golem_stt::runtime::AsyncRuntime for MockRuntime {
-            async fn sleep(&self, _duration: Duration) {}
-        }
-        let mock_runtime = MockRuntime;
-
-        let result = block_on(|_| async {
-            client
-                .wait_for_transcription_job_completion(
-                    &mock_runtime,
-                    "test-job",
-                    Duration::from_secs(3600),
-                )
-                .await
-        });
+        let result = transcribe_client
+            .wait_for_transcription_job_completion("test-job", Duration::from_secs(3600))
+            .await;
 
         // Should fail with the specific error
         assert!(result.is_err());
@@ -3483,13 +2506,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_wait_for_transcription_job_completion_timeout() {
+    #[wstd::test]
+    async fn test_wait_for_transcription_job_completion_timeout() {
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "us-east-1";
 
-        let mock_client = Arc::new(MockHttpClient::new());
+        let mock_client = MockHttpClient::new();
 
         // Always return IN_PROGRESS to simulate timeout
         let in_progress_response = r#"{
@@ -3511,17 +2534,10 @@ mod tests {
             mock_client.expect_response(
                 Response::builder()
                     .status(200)
-                    .body(Bytes::from(in_progress_response))
+                    .body(in_progress_response.as_bytes().to_vec())
                     .unwrap(),
             );
         }
-
-        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
-            access_key.to_string(),
-            secret_key.to_string(),
-            region.to_string(),
-            mock_client.clone(),
-        );
 
         struct MockRuntime {
             elapsed_time: std::cell::RefCell<Duration>,
@@ -3545,18 +2561,23 @@ mod tests {
 
         let mock_runtime = MockRuntime::new();
 
-        let result = block_on(|_| async {
-            client
-                .wait_for_transcription_job_completion(
-                    &mock_runtime,
-                    "test-job",
-                    Duration::from_millis(5), // Very short timeout
-                )
-                .await
-        });
+        let transcribe_client = TranscribeClient::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client,
+            mock_runtime,
+        );
+
+        let result = transcribe_client
+            .wait_for_transcription_job_completion(
+                "test-job",
+                Duration::from_millis(5), // Very short timeout
+            )
+            .await;
 
         assert!(
-            mock_runtime.elapsed_time.borrow().as_millis() > 0,
+            transcribe_client.runtime.elapsed_time.borrow().as_millis() > 0,
             "Elapsed time should be greater than zero"
         );
 
@@ -3574,8 +2595,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_download_transcript_json_with_diarization() {
+    #[wstd::test]
+    async fn test_download_transcript_json_with_diarization() {
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "us-east-1";
@@ -4099,29 +3120,30 @@ mod tests {
         mock_client.expect_response(
             http::Response::builder()
                 .status(200)
-                .body(bytes::Bytes::from(json_response))
+                .body(json_response.as_bytes().to_vec())
                 .unwrap(),
         );
 
-        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+        let mock_runtime = MockRuntime::new();
+
+        let transcribe_client = TranscribeClient::new(
             access_key.to_string(),
             secret_key.to_string(),
             region.to_string(),
             mock_client,
+            mock_runtime,
         );
 
-        let result = block_on(|_| async {
-            client
-                .download_transcript_json("test-job", "https://example.com/transcript.json")
-                .await
-                .expect("Failed to download transcript")
-        });
+        let result = transcribe_client
+            .download_transcript_json("test-job", "https://example.com/transcript.json")
+            .await
+            .expect("Failed to download transcript");
 
         assert_eq!(result, expected);
     }
 
-    #[test]
-    fn test_download_transcript_json_with_multi_channel() {
+    #[wstd::test]
+    async fn test_download_transcript_json_with_multi_channel() {
         let access_key = "AKIAIOSFODNN7EXAMPLE";
         let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let region = "us-east-1";
@@ -4846,24 +3868,25 @@ mod tests {
         mock_client.expect_response(
             http::Response::builder()
                 .status(200)
-                .body(bytes::Bytes::from(json_response))
+                .body(json_response.as_bytes().to_vec())
                 .unwrap(),
         );
 
+        let mock_runtime = MockRuntime::new();
+
         // Create transcribe client
-        let client: TranscribeClient<MockHttpClient> = TranscribeClient::new(
+        let transcribe_client = TranscribeClient::new(
             access_key.to_string(),
             secret_key.to_string(),
             region.to_string(),
             mock_client,
+            mock_runtime,
         );
 
-        let result = block_on(|_| async {
-            client
-                .download_transcript_json("test-job", "https://example.com/transcript.json")
-                .await
-                .expect("Failed to download transcript")
-        });
+        let result = transcribe_client
+            .download_transcript_json("test-job", "https://example.com/transcript.json")
+            .await
+            .expect("Failed to download transcript");
 
         assert_eq!(result, expected);
     }

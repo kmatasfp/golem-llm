@@ -1,16 +1,14 @@
 use std::{rc::Rc, time::Duration};
 
-use crate::aws::{S3Client, S3Service, TranscribeClient, TranscribeOutput, TranscribeService};
-use golem_stt::{
-    client::{ReqwestHttpClient, SttProviderClient},
-    error::Error,
-    languages::Language,
-    runtime::{AsyncRuntime, WasiAyncRuntime},
-};
+use golem_stt::{error::Error, languages::Language, transcription::SttProviderClient};
 
-use bytes::Bytes;
 use log::trace;
-use wasi_async_runtime::Reactor;
+
+use super::{
+    aws_s3::S3Service,
+    aws_transcribe::{TranscribeOutput, TranscribeService},
+    request::TranscriptionRequest,
+};
 
 const AWS_TRANSCRIBE_SUPPORTED_LANGUAGES: [Language; 104] = [
     Language::new("ab-GE", "Abkhaz", "აფხაზური"),
@@ -129,153 +127,36 @@ pub fn get_supported_languages() -> &'static [Language] {
     &AWS_TRANSCRIBE_SUPPORTED_LANGUAGES
 }
 
-#[allow(non_camel_case_types)]
-#[allow(unused)]
-#[derive(Debug, Clone)]
-pub enum AudioFormat {
-    wav,
-    mp3,
-    flac,
-    ogg,
-}
-
-impl core::fmt::Display for AudioFormat {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let string_representation = match self {
-            AudioFormat::wav => "wav",
-            AudioFormat::mp3 => "mp3",
-            AudioFormat::flac => "flac",
-            AudioFormat::ogg => "ogg",
-        };
-        write!(fmt, "{string_representation}")
+impl std::fmt::Debug for TranscriptionRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TranscriptionRequest")
+            .field("audio_size", &self.audio.len())
+            .field("audio_config", &self.audio_config)
+            .field("transcription_config", &self.transcription_config)
+            .finish()
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct AudioConfig {
-    pub format: AudioFormat,
-    pub channels: Option<u8>,
-}
-
-fn validate_request_id(request_id: &str) -> Result<(), String> {
-    if request_id.is_empty() {
-        return Err("Request ID cannot be empty".to_string());
-    }
-
-    // Check length - Transcribe support up to 200 characters for our use case
-    if request_id.len() > 200 {
-        return Err(
-            "Request ID too long (max 200 characters for S3 and Transcribe compatibility)"
-                .to_string(),
-        );
-    }
-
-    // https://docs.aws.amazon.com/transcribe/latest/APIReference/API_CreateVocabulary.html#transcribe-CreateVocabulary-request-VocabularyName
-    // AWS Transcribe vocabulary name pattern: ^[0-9a-zA-Z._-]+$ which is also S3-safe
-    let is_valid_char = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.';
-
-    if !request_id.chars().all(is_valid_char) {
-        return Err(
-                "Request ID contains invalid characters. Only alphanumeric characters, hyphens (-), underscores (_), and dots (.) are allowed for S3 and Transcribe compatibility".to_string()
-            );
-    }
-
-    if request_id.to_lowercase().starts_with("aws-") {
-        return Err(
-            "Request ID cannot start with 'aws-' (reserved prefix for AWS services)".to_string(),
-        );
-    }
-
-    // Ensure it starts with an alphanumeric character (good practice for both S3 and Transcribe)
-    if !request_id.chars().next().unwrap().is_ascii_alphanumeric() {
-        return Err("Request ID must start with an alphanumeric character".to_string());
-    }
-
-    if request_id.ends_with('-') || request_id.ends_with('_') || request_id.ends_with('.') {
-        return Err("Request ID cannot end with hyphens, underscores, or dots".to_string());
-    }
-
-    let problematic_patterns = ["--", "__", "..", "-_", "_-", "-.", "._", "_.", ".-"];
-    for pattern in &problematic_patterns {
-        if request_id.contains(pattern) {
-            return Err("Request ID cannot contain consecutive special characters".to_string());
-        }
-    }
-
-    if request_id.starts_with('.') {
-        return Err(
-            "Request ID cannot start with a dot (reserved for file extensions)".to_string(),
-        );
-    }
-
-    Ok(())
-}
-
-#[derive(Debug, Clone)]
-pub struct TranscriptionConfig {
-    pub language: Option<String>,
-    pub model: Option<String>,
-    pub enable_speaker_diarization: bool,
-    pub vocabulary: Vec<String>,
-}
-
-pub struct TranscribeApi<S3: S3Service, TC: TranscribeService, RT: AsyncRuntime> {
+pub struct TranscribeApi<S3: S3Service, TC: TranscribeService> {
     bucket_name: String,
     s3_client: S3,
     transcribe_client: TC,
-    runtime: RT,
 }
 
 #[allow(unused)]
-impl<S3: S3Service, TC: TranscribeService, RT: AsyncRuntime> TranscribeApi<S3, TC, RT> {
-    pub fn new(bucket_name: String, s3_client: S3, transcribe_client: TC, runtime: RT) -> Self {
+impl<S3: S3Service, TC: TranscribeService> TranscribeApi<S3, TC> {
+    pub fn new(bucket_name: String, s3_client: S3, transcribe_client: TC) -> Self {
         Self {
             bucket_name,
             s3_client,
             transcribe_client,
-            runtime,
         }
     }
 }
 
-impl
-    TranscribeApi<S3Client<ReqwestHttpClient>, TranscribeClient<ReqwestHttpClient>, WasiAyncRuntime>
-{
-    pub fn live(
-        bucket_name: String,
-        access_key: String,
-        secret_key: String,
-        region: String,
-        reactor: Reactor,
-    ) -> Self {
-        let reqwest_http_client = ReqwestHttpClient::new(reactor.clone());
-
-        let s3_client = S3Client::new(
-            access_key.clone(),
-            secret_key.clone(),
-            region.clone(),
-            reqwest_http_client.clone(),
-        );
-
-        let transcribe_client = TranscribeClient::new(
-            access_key.clone(),
-            secret_key.clone(),
-            region.clone(),
-            reqwest_http_client.clone(),
-        );
-
-        Self::new(
-            bucket_name,
-            s3_client,
-            transcribe_client,
-            WasiAyncRuntime::new(reactor.clone()),
-        )
-    }
-}
-
-impl<S3: S3Service, TC: TranscribeService, RT: AsyncRuntime>
+impl<S3: S3Service, TC: TranscribeService>
     SttProviderClient<TranscriptionRequest, TranscriptionResponse, Error>
-    for TranscribeApi<S3, TC, RT>
+    for TranscribeApi<S3, TC>
 {
     async fn transcribe_audio(
         &self,
@@ -347,11 +228,7 @@ impl<S3: S3Service, TC: TranscribeService, RT: AsyncRuntime>
 
                 if res.vocabulary_state == "PENDING" {
                     self.transcribe_client
-                        .wait_for_vocabulary_ready(
-                            &self.runtime,
-                            &request_id,
-                            Duration::from_secs(300),
-                        )
+                        .wait_for_vocabulary_ready(&request_id, Duration::from_secs(300))
                         .await?;
                 }
 
@@ -386,19 +263,16 @@ impl<S3: S3Service, TC: TranscribeService, RT: AsyncRuntime>
             });
         }
 
-        let completed_transcription_job =
-            if res.transcription_job.transcription_job_status == "IN_PROGRESS" {
-                self.transcribe_client
-                    .wait_for_transcription_job_completion(
-                        &self.runtime,
-                        &request_id,
-                        Duration::from_secs(3600 * 6),
-                    )
-                    .await?
-                    .transcription_job
-            } else {
-                res.transcription_job
-            };
+        let completed_transcription_job = if res.transcription_job.transcription_job_status
+            == "IN_PROGRESS"
+        {
+            self.transcribe_client
+                .wait_for_transcription_job_completion(&request_id, Duration::from_secs(3600 * 6))
+                .await?
+                .transcription_job
+        } else {
+            res.transcription_job
+        };
 
         if let Some(transcript) = completed_transcription_job.transcript {
             if let Some(transcript_uri) = transcript.transcript_file_uri {
@@ -437,23 +311,6 @@ impl<S3: S3Service, TC: TranscribeService, RT: AsyncRuntime>
     }
 }
 
-pub struct TranscriptionRequest {
-    pub request_id: String,
-    pub audio: Bytes,
-    pub audio_config: AudioConfig,
-    pub transcription_config: Option<TranscriptionConfig>,
-}
-
-impl std::fmt::Debug for TranscriptionRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TranscriptionRequest")
-            .field("audio_size", &self.audio.len())
-            .field("audio_config", &self.audio_config)
-            .field("transcription_config", &self.transcription_config)
-            .finish()
-    }
-}
-
 #[allow(unused)]
 #[derive(Debug, PartialEq)]
 pub struct TranscriptionResponse {
@@ -463,6 +320,60 @@ pub struct TranscriptionResponse {
     pub aws_transcription: TranscribeOutput,
 }
 
+fn validate_request_id(request_id: &str) -> Result<(), String> {
+    if request_id.is_empty() {
+        return Err("Request ID cannot be empty".to_string());
+    }
+
+    // Check length - Transcribe support up to 200 characters for our use case
+    if request_id.len() > 200 {
+        return Err(
+            "Request ID too long (max 200 characters for S3 and Transcribe compatibility)"
+                .to_string(),
+        );
+    }
+
+    // https://docs.aws.amazon.com/transcribe/latest/APIReference/API_CreateVocabulary.html#transcribe-CreateVocabulary-request-VocabularyName
+    // AWS Transcribe vocabulary name pattern: ^[0-9a-zA-Z._-]+$ which is also S3-safe
+    let is_valid_char = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.';
+
+    if !request_id.chars().all(is_valid_char) {
+        return Err(
+                "Request ID contains invalid characters. Only alphanumeric characters, hyphens (-), underscores (_), and dots (.) are allowed for S3 and Transcribe compatibility".to_string()
+            );
+    }
+
+    if request_id.to_lowercase().starts_with("aws-") {
+        return Err(
+            "Request ID cannot start with 'aws-' (reserved prefix for AWS services)".to_string(),
+        );
+    }
+
+    // Ensure it starts with an alphanumeric character (good practice for both S3 and Transcribe)
+    if !request_id.chars().next().unwrap().is_ascii_alphanumeric() {
+        return Err("Request ID must start with an alphanumeric character".to_string());
+    }
+
+    if request_id.ends_with('-') || request_id.ends_with('_') || request_id.ends_with('.') {
+        return Err("Request ID cannot end with hyphens, underscores, or dots".to_string());
+    }
+
+    let problematic_patterns = ["--", "__", "..", "-_", "_-", "-.", "._", "_.", ".-"];
+    for pattern in &problematic_patterns {
+        if request_id.contains(pattern) {
+            return Err("Request ID cannot contain consecutive special characters".to_string());
+        }
+    }
+
+    if request_id.starts_with('.') {
+        return Err(
+            "Request ID cannot start with a dot (reserved for file extensions)".to_string(),
+        );
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -470,13 +381,13 @@ mod tests {
         collections::VecDeque,
     };
 
-    use golem_stt::client;
-    use wasi_async_runtime::block_on;
-
-    use crate::aws::{
-        CreateVocabularyResponse, GetTranscriptionJobResponse, GetVocabularyResponse, S3Service,
-        StartTranscriptionJobResponse, TranscribeResults, Transcript, TranscriptText,
-        TranscriptionJob,
+    use crate::transcription::{
+        aws_transcribe::{
+            CreateVocabularyResponse, GetTranscriptionJobResponse, GetVocabularyResponse,
+            StartTranscriptionJobResponse, TranscribeResults, Transcript, TranscriptText,
+            TranscriptionJob,
+        },
+        request::{AudioConfig, AudioFormat, TranscriptionConfig},
     };
 
     use super::*;
@@ -720,7 +631,7 @@ mod tests {
             request_id: &str,
             bucket: &str,
             object_name: &str,
-            content: Bytes,
+            content: Vec<u8>,
         ) -> Result<(), Error> {
             self.captured_put_operations
                 .borrow_mut()
@@ -736,7 +647,7 @@ mod tests {
                 .pop_front()
                 .unwrap_or(Err((
                     request_id.to_string(),
-                    client::Error::Generic("unexpected error".to_string()),
+                    golem_stt::http::Error::Generic("unexpected error".to_string()),
                 )
                     .into()))
         }
@@ -760,7 +671,7 @@ mod tests {
                 .pop_front()
                 .unwrap_or(Err((
                     request_id.to_string(),
-                    client::Error::Generic("unexpected error".to_string()),
+                    golem_stt::http::Error::Generic("unexpected error".to_string()),
                 )
                     .into()))
         }
@@ -895,7 +806,7 @@ mod tests {
                 .pop_front()
                 .unwrap_or(Err((
                     vocabulary_name.clone(),
-                    golem_stt::client::Error::Generic("unexpected error".to_string()),
+                    golem_stt::http::Error::Generic("unexpected error".to_string()),
                 )
                     .into()))
         }
@@ -913,14 +824,13 @@ mod tests {
                 .pop_front()
                 .unwrap_or(Err((
                     vocabulary_name.to_string(),
-                    golem_stt::client::Error::Generic("unexpected error".to_string()),
+                    golem_stt::http::Error::Generic("unexpected error".to_string()),
                 )
                     .into()))
         }
 
-        async fn wait_for_vocabulary_ready<RT: AsyncRuntime>(
+        async fn wait_for_vocabulary_ready(
             &self,
-            _runtime: &RT,
             _request_id: &str,
             _max_wait_time: std::time::Duration,
         ) -> Result<(), Error> {
@@ -937,7 +847,7 @@ mod tests {
                 .pop_front()
                 .unwrap_or(Err((
                     vocabulary_name.to_string(),
-                    golem_stt::client::Error::Generic("unexpected error".to_string()),
+                    golem_stt::http::Error::Generic("unexpected error".to_string()),
                 )
                     .into()))
         }
@@ -965,7 +875,7 @@ mod tests {
                 .pop_front()
                 .unwrap_or(Err((
                     transcription_job_name.clone(),
-                    golem_stt::client::Error::Generic("unexpected error".to_string()),
+                    golem_stt::http::Error::Generic("unexpected error".to_string()),
                 )
                     .into()))
         }
@@ -983,14 +893,13 @@ mod tests {
                 .pop_front()
                 .unwrap_or(Err((
                     transcription_job_name.clone(),
-                    golem_stt::client::Error::Generic("unexpected error".to_string()),
+                    golem_stt::http::Error::Generic("unexpected error".to_string()),
                 )
                     .into()))
         }
 
-        async fn wait_for_transcription_job_completion<RT: AsyncRuntime>(
+        async fn wait_for_transcription_job_completion(
             &self,
-            _runtime: &RT,
             transcription_job_name: &str,
             _max_wait_time: std::time::Duration,
         ) -> Result<GetTranscriptionJobResponse, Error> {
@@ -1015,35 +924,27 @@ mod tests {
                 .pop_front()
                 .unwrap_or(Err((
                     transcription_job_name.to_string(),
-                    golem_stt::client::Error::Generic("unexpected error".to_string()),
+                    golem_stt::http::Error::Generic("unexpected error".to_string()),
                 )
                     .into()))
         }
     }
 
-    struct MockRuntime;
-
-    impl AsyncRuntime for MockRuntime {
-        async fn sleep(&self, _duration: std::time::Duration) {}
-    }
-
-    fn create_mock_transcribe_api() -> TranscribeApi<MockS3Client, MockTranscribeClient, MockRuntime>
-    {
+    fn create_mock_transcribe_api() -> TranscribeApi<MockS3Client, MockTranscribeClient> {
         TranscribeApi {
             bucket_name: "test-bucket".to_string(),
             s3_client: MockS3Client::new(),
             transcribe_client: MockTranscribeClient::new(),
-            runtime: MockRuntime,
         }
     }
 
-    #[test]
-    fn test_transcribe_audio_invalid_request_id_returns_error() {
+    #[wstd::test]
+    async fn test_transcribe_audio_invalid_request_id_returns_error() {
         let api = create_mock_transcribe_api();
 
         let request = TranscriptionRequest {
             request_id: "invalid request id".to_string(), // spaces are invalid
-            audio: Bytes::from("test audio"),
+            audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: Some(1),
@@ -1051,7 +952,7 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        let result = api.transcribe_audio(request).await;
         assert!(result.is_err());
 
         if let Err(Error::APIBadRequest { provider_error, .. }) = result {
@@ -1061,13 +962,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_transcribe_audio_vocabulary_without_language_returns_error() {
+    #[wstd::test]
+    async fn test_transcribe_audio_vocabulary_without_language_returns_error() {
         let api = create_mock_transcribe_api();
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: Bytes::from("test audio"),
+            audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: Some(1),
@@ -1080,7 +981,7 @@ mod tests {
             }),
         };
 
-        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        let result = api.transcribe_audio(request).await;
         assert!(result.is_err());
 
         if let Err(Error::APIBadRequest { provider_error, .. }) = result {
@@ -1091,13 +992,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_transcribe_audio_model_without_language_returns_error() {
+    #[wstd::test]
+    async fn test_transcribe_audio_model_without_language_returns_error() {
         let api = create_mock_transcribe_api();
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: Bytes::from("test audio"),
+            audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: Some(1),
@@ -1110,7 +1011,7 @@ mod tests {
             }),
         };
 
-        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        let result = api.transcribe_audio(request).await;
         assert!(result.is_err());
 
         if let Err(Error::APIBadRequest { provider_error, .. }) = result {
@@ -1121,8 +1022,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_transcribe_audio_uploads_to_s3() {
+    #[wstd::test]
+    async fn test_transcribe_audio_uploads_to_s3() {
         let api = create_mock_transcribe_api();
 
         api.s3_client.expect_put_object_response(Ok(()));
@@ -1170,7 +1071,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: Bytes::from("test audio data"),
+            audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: Some(1),
@@ -1178,7 +1079,7 @@ mod tests {
             transcription_config: None,
         };
 
-        let _ = block_on(|_| async { api.transcribe_audio(request).await });
+        let _ = api.transcribe_audio(request).await.unwrap();
 
         let captured_puts = api.s3_client.get_captured_put_operations();
         assert_eq!(captured_puts.len(), 1);
@@ -1189,8 +1090,8 @@ mod tests {
         assert_eq!(put_op.content_size, 15);
     }
 
-    #[test]
-    fn test_transcribe_audio_creates_vocabulary_when_provided() {
+    #[wstd::test]
+    async fn test_transcribe_audio_creates_vocabulary_when_provided() {
         let api = create_mock_transcribe_api();
 
         api.s3_client.expect_put_object_response(Ok(()));
@@ -1246,7 +1147,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: Bytes::from("test audio"),
+            audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::mp3,
                 channels: Some(1),
@@ -1259,7 +1160,7 @@ mod tests {
             }),
         };
 
-        let _ = block_on(|_| async { api.transcribe_audio(request).await });
+        let _ = api.transcribe_audio(request).await.unwrap();
 
         let captured_vocabulary = api.transcribe_client.get_captured_create_vocabulary();
         assert_eq!(captured_vocabulary.len(), 1);
@@ -1272,8 +1173,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_transcribe_audio_starts_transcription_job() {
+    #[wstd::test]
+    async fn test_transcribe_audio_starts_transcription_job() {
         let api = create_mock_transcribe_api();
 
         api.s3_client.expect_put_object_response(Ok(()));
@@ -1321,7 +1222,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: Bytes::from("test audio"),
+            audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::flac,
                 channels: Some(2),
@@ -1334,7 +1235,7 @@ mod tests {
             }),
         };
 
-        let _ = block_on(|_| async { api.transcribe_audio(request).await });
+        let _ = api.transcribe_audio(request).await.unwrap();
 
         let captured_transcription = api.transcribe_client.get_captured_start_transcription();
         assert_eq!(captured_transcription.len(), 1);
@@ -1356,8 +1257,8 @@ mod tests {
         assert_eq!(transcription_op.vocabulary_name, None);
     }
 
-    #[test]
-    fn test_transcribe_audio_downloads_transcript_and_returns_response() {
+    #[wstd::test]
+    async fn test_transcribe_audio_downloads_transcript_and_returns_response() {
         let api = create_mock_transcribe_api();
 
         api.s3_client.expect_put_object_response(Ok(()));
@@ -1405,7 +1306,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: Bytes::from("test audio data"),
+            audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::ogg,
                 channels: Some(1),
@@ -1418,7 +1319,7 @@ mod tests {
             }),
         };
 
-        let response = block_on(|_| async { api.transcribe_audio(request).await.unwrap() });
+        let response = api.transcribe_audio(request).await.unwrap();
 
         assert_eq!(response.audio_size_bytes, 15);
         assert_eq!(response.language, "fr-FR");
@@ -1433,8 +1334,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_transcribe_audio_cleans_up_resources() {
+    #[wstd::test]
+    async fn test_transcribe_audio_cleans_up_resources() {
         let api = create_mock_transcribe_api();
 
         api.s3_client.expect_put_object_response(Ok(()));
@@ -1490,7 +1391,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: Bytes::from("test audio"),
+            audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: Some(1),
@@ -1503,7 +1404,7 @@ mod tests {
             }),
         };
 
-        let _ = block_on(|_| async { api.transcribe_audio(request).await });
+        let _ = api.transcribe_audio(request).await.unwrap();
 
         // Check vocabulary was deleted
         let captured_vocab_deletes = api.transcribe_client.captured_delete_vocabulary.borrow();
@@ -1519,8 +1420,8 @@ mod tests {
         assert_eq!(delete_op.object_name, "test-123/audio.wav");
     }
 
-    #[test]
-    fn test_transcribe_audio_s3_upload_failure() {
+    #[wstd::test]
+    async fn test_transcribe_audio_s3_upload_failure() {
         let api = create_mock_transcribe_api();
 
         api.s3_client
@@ -1531,7 +1432,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: Bytes::from("test audio"),
+            audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: Some(1),
@@ -1539,7 +1440,7 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        let result = api.transcribe_audio(request).await;
         assert!(result.is_err());
 
         if let Err(Error::APIInternalServerError { provider_error, .. }) = result {
@@ -1549,8 +1450,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_transcribe_audio_vocabulary_creation_failure() {
+    #[wstd::test]
+    async fn test_transcribe_audio_vocabulary_creation_failure() {
         let api = create_mock_transcribe_api();
 
         api.s3_client.expect_put_object_response(Ok(()));
@@ -1565,7 +1466,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: Bytes::from("test audio"),
+            audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: Some(1),
@@ -1578,7 +1479,7 @@ mod tests {
             }),
         };
 
-        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        let result = api.transcribe_audio(request).await;
         assert!(result.is_err());
 
         if let Err(Error::APIBadRequest { provider_error, .. }) = result {
@@ -1589,8 +1490,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_transcribe_audio_transcription_job_failure() {
+    #[wstd::test]
+    async fn test_transcribe_audio_transcription_job_failure() {
         let api = create_mock_transcribe_api();
 
         api.s3_client.expect_put_object_response(Ok(()));
@@ -1615,7 +1516,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: Bytes::from("test audio"),
+            audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: Some(1),
@@ -1623,7 +1524,7 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        let result = api.transcribe_audio(request).await;
         assert!(result.is_err());
 
         if let Err(Error::APIBadRequest { provider_error, .. }) = result {
@@ -1634,8 +1535,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_transcribe_audio_transcript_download_failure() {
+    #[wstd::test]
+    async fn test_transcribe_audio_transcript_download_failure() {
         let api = create_mock_transcribe_api();
 
         api.s3_client.expect_put_object_response(Ok(()));
@@ -1670,7 +1571,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: Bytes::from("test audio"),
+            audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
                 channels: Some(1),
@@ -1678,7 +1579,7 @@ mod tests {
             transcription_config: None,
         };
 
-        let result = block_on(|_| async { api.transcribe_audio(request).await });
+        let result = api.transcribe_audio(request).await;
         assert!(result.is_err());
 
         if let Err(Error::APINotFound { provider_error, .. }) = result {

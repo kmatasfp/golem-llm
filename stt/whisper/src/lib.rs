@@ -1,30 +1,37 @@
-mod client;
-mod conversions;
-
 use futures_concurrency::future::Join;
+use golem_stt::http::WstdHttpClient;
+use golem_stt::transcription::SttProviderClient;
 use itertools::Itertools;
-use wasi_async_runtime::block_on;
 
-use crate::client::TranscriptionsApi;
-use client::TranscriptionRequest;
-use golem_stt::client::SttProviderClient;
 use golem_stt::error::Error;
-use golem_stt::golem::stt::types::SttError as WitSttError;
+use golem_stt::golem::stt::types::{
+    AudioFormat as WitAudioFormat, SttError as WitSttError, TimingInfo as WitTimingInfo,
+    TimingMarkType as WitTimingMarkType, TranscriptAlternative as WitTranscriptAlternative,
+    TranscriptionMetadata as WitTranscriptionMetadata, WordSegment as WitWordSegment,
+};
 
 use golem_stt::golem::stt::transcription::{
     FailedTranscription as WitFailedTranscription, Guest as TranscriptionGuest,
     MultiTranscriptionResult as WitMultiTranscriptionResult,
-    TranscriptionRequest as WitTranscriptionRequest, TranscriptionResult as WitTranscriptionResult,
+    TranscribeOptions as WitTranscribeOptions, TranscriptionRequest as WitTranscriptionRequest,
+    TranscriptionResult as WitTranscriptionResult,
 };
 
 use golem_stt::golem::stt::languages::{Guest as LanguageGuest, LanguageInfo};
+use transcription::{
+    AudioConfig, AudioFormat, TranscriptionConfig, TranscriptionRequest, TranscriptionResponse,
+    TranscriptionsApi, WhisperTranscription,
+};
+use wstd::runtime::block_on;
+
+mod transcription;
 
 #[allow(unused)]
 struct Component;
 
 impl LanguageGuest for Component {
     fn list_languages() -> Result<Vec<LanguageInfo>, WitSttError> {
-        let supported_languages = client::get_supported_languages();
+        let supported_languages = transcription::get_supported_languages();
         Ok(supported_languages
             .iter()
             .map(|lang| LanguageInfo {
@@ -42,8 +49,8 @@ impl TranscriptionGuest for Component {
             Error::EnvVariablesNotSet(format!("Failed to load OPENAI_API_KEY: {}", err))
         })?;
 
-        block_on(|reactor| async {
-            let api_client = TranscriptionsApi::live(api_key, reactor);
+        block_on(async {
+            let api_client = TranscriptionsApi::new(api_key, WstdHttpClient::default());
 
             let api_response = api_client.transcribe_audio(req.try_into()?).await?;
 
@@ -58,8 +65,8 @@ impl TranscriptionGuest for Component {
             Error::EnvVariablesNotSet(format!("Failed to load OPENAI_API_KEY: {}", err))
         })?;
 
-        block_on(|reactor| async {
-            let api_client = TranscriptionsApi::live(api_key, reactor);
+        block_on(async {
+            let api_client = TranscriptionsApi::new(api_key, WstdHttpClient::default());
 
             let mut successes: Vec<WitTranscriptionResult> = Vec::new();
             let mut failures: Vec<WitFailedTranscription> = Vec::new();
@@ -105,6 +112,143 @@ impl TranscriptionGuest for Component {
                 failures,
             })
         })
+    }
+}
+
+impl TryFrom<WitAudioFormat> for AudioFormat {
+    type Error = WitSttError;
+
+    fn try_from(wit_format: WitAudioFormat) -> Result<Self, Self::Error> {
+        match wit_format {
+            WitAudioFormat::Wav => Ok(AudioFormat::wav),
+            WitAudioFormat::Mp3 => Ok(AudioFormat::mp3),
+            WitAudioFormat::Flac => Ok(AudioFormat::flac),
+            WitAudioFormat::Ogg => Ok(AudioFormat::ogg),
+            format => Err(WitSttError::UnsupportedFormat(format!(
+                "{format:?}is not supported"
+            ))),
+        }
+    }
+}
+
+impl TryFrom<WitTranscribeOptions> for TranscriptionConfig {
+    type Error = WitSttError;
+
+    fn try_from(options: WitTranscribeOptions) -> Result<Self, Self::Error> {
+        let enable_timestamps = options.enable_timestamps.unwrap_or(false);
+
+        let prompt = options.speech_context.map(|c| c.join(", "));
+
+        if let Some(language_code) = &options.language {
+            if transcription::is_supported_language(language_code) {
+                return Err(WitSttError::UnsupportedLanguage(language_code.to_owned()));
+            }
+        }
+
+        Ok(TranscriptionConfig {
+            enable_timestamps,
+            language: options.language,
+            prompt,
+        })
+    }
+}
+
+impl TryFrom<WitTranscriptionRequest> for TranscriptionRequest {
+    type Error = WitSttError;
+
+    fn try_from(request: WitTranscriptionRequest) -> Result<Self, Self::Error> {
+        let audio = request.audio;
+
+        let transcription_config: Option<TranscriptionConfig> =
+            if let Some(options) = request.options {
+                Some(options.try_into()?)
+            } else {
+                None
+            };
+
+        Ok(TranscriptionRequest {
+            request_id: request.request_id,
+            audio,
+            audio_config: AudioConfig {
+                format: request.config.format.try_into()?,
+            },
+            transcription_config,
+        })
+    }
+}
+
+impl From<TranscriptionResponse> for WitTranscriptionResult {
+    fn from(response: TranscriptionResponse) -> Self {
+        match response.whisper_transcription {
+            WhisperTranscription::Words {
+                task: _,
+                language,
+                duration: _,
+                text,
+                words,
+                usage,
+            } => {
+                let metadata = WitTranscriptionMetadata {
+                    duration_seconds: usage.seconds as f32,
+                    audio_size_bytes: response.audio_size_bytes as u32,
+                    request_id: "".to_string(),
+                    model: Some("whisper-1".to_string()),
+                    language,
+                };
+
+                let wit_word_segments: Vec<WitWordSegment> = words
+                    .into_iter()
+                    .map(|word| WitWordSegment {
+                        text: word.word,
+                        timing_info: Some(WitTimingInfo {
+                            start_time_seconds: word.start as f32,
+                            end_time_seconds: word.end as f32,
+                            mark_type: WitTimingMarkType::Word,
+                        }),
+                        confidence: None,
+                        speaker_id: None,
+                    })
+                    .collect();
+
+                let alternative = WitTranscriptAlternative {
+                    text,
+                    confidence: 0.0,
+                    words: wit_word_segments,
+                };
+
+                WitTranscriptionResult {
+                    metadata,
+                    alternatives: vec![alternative],
+                }
+            }
+            WhisperTranscription::Segments {
+                task: _,
+                language,
+                duration: _,
+                text,
+                segments: _,
+                usage,
+            } => {
+                let metadata = WitTranscriptionMetadata {
+                    duration_seconds: usage.seconds as f32,
+                    audio_size_bytes: response.audio_size_bytes as u32,
+                    request_id: "".to_string(),
+                    model: Some("whisper-1".to_string()),
+                    language,
+                };
+
+                let alternative = WitTranscriptAlternative {
+                    text,
+                    confidence: 0.0,
+                    words: vec![],
+                };
+
+                WitTranscriptionResult {
+                    metadata,
+                    alternatives: vec![alternative],
+                }
+            }
+        }
     }
 }
 

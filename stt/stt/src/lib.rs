@@ -1,8 +1,8 @@
-pub mod client;
 pub mod error;
+pub mod http;
 pub mod languages;
 pub mod runtime;
-pub mod transcription_queue;
+pub mod transcription;
 
 wit_bindgen::generate!({
     path: "../wit",
