@@ -1,7 +1,8 @@
 use golem_stt::error::Error;
 use golem_stt::http::WstdHttpClient;
+use golem_stt::transcription::SttProviderClient;
 use transcription::{
-    AudioConfig, AudioFormat, Keyword, PreRecordedAudioApi, SttProviderClient, TranscriptionConfig,
+    AudioConfig, AudioFormat, Keyword, PreRecordedAudioApi, TranscriptionConfig,
     TranscriptionRequest, TranscriptionResponse,
 };
 

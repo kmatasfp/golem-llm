@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use golem_stt::{http::HttpClient, languages::Language};
+use golem_stt::{http::HttpClient, languages::Language, transcription::SttProviderClient};
 use http::{header::CONTENT_TYPE, Method, Request, StatusCode};
 use log::trace;
 use serde::{Deserialize, Serialize};
@@ -172,11 +172,6 @@ impl<HC: HttpClient> PreRecordedAudioApi<HC> {
             http_client,
         }
     }
-}
-
-#[allow(async_fn_in_trait)]
-pub trait SttProviderClient<REQ, RES, ERR: std::error::Error> {
-    async fn transcribe_audio(&self, request: REQ) -> Result<RES, ERR>;
 }
 
 impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionResponse, Error>
