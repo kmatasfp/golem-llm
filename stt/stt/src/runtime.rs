@@ -15,6 +15,12 @@ impl WasiAyncRuntime {
     }
 }
 
+impl Default for WasiAyncRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AsyncRuntime for WasiAyncRuntime {
     async fn sleep(&self, duration: Duration) {
         task::sleep(duration.into()).await;

@@ -133,9 +133,9 @@ impl AwsSignatureV4 {
         if !headers_for_signing.contains_key("host") {
             if let Some(host) = parts.uri.host() {
                 let host_header = if let Some(port) = parts.uri.port_u16() {
-                    if parts.uri.scheme_str() == Some("https") && port == 443 {
-                        host.to_string()
-                    } else if parts.uri.scheme_str() == Some("http") && port == 80 {
+                    if (parts.uri.scheme_str() == Some("https") && port == 443)
+                        || (parts.uri.scheme_str() == Some("http") && port == 80)
+                    {
                         host.to_string()
                     } else {
                         format!("{}:{}", host, port)
@@ -226,19 +226,19 @@ impl AwsSignatureV4 {
 
         let mut params: Vec<(String, String)> = query
             .split('&')
-            .filter_map(|param| {
+            .map(|param| {
                 if let Some(eq_pos) = param.find('=') {
                     let key = &param[..eq_pos];
                     let value = &param[eq_pos + 1..];
-                    Some((
+                    (
                         utf8_percent_encode(key, QUERY_ENCODE_SET).to_string(),
                         utf8_percent_encode(value, QUERY_ENCODE_SET).to_string(),
-                    ))
+                    )
                 } else {
-                    Some((
+                    (
                         utf8_percent_encode(param, QUERY_ENCODE_SET).to_string(),
                         String::new(),
-                    ))
+                    )
                 }
             })
             .collect();
@@ -403,8 +403,6 @@ mod tests {
 
         request
     }
-
-    // tests constructd based on spec here https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html
 
     #[test]
     fn test_uri_encoding_all_characters() {
@@ -700,7 +698,7 @@ mod tests {
         // Create the exact request from your specification
         let request = Request::builder()
             .method(Method::GET)
-            .uri("s3://examplebucket.s3.amazonaws.com/?max-keys=2&prefix=J")
+            .uri("https://transcribe.us-east-1.amazonaws.com:443/") // test also that in case of https port is stripped
             .body(body.as_bytes().into())
             .unwrap();
 

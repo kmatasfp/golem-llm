@@ -141,7 +141,7 @@ pub struct TranscriptionsApi<HC: HttpClient> {
 impl<HC: HttpClient> TranscriptionsApi<HC> {
     pub fn new(openai_api_key: String, http_client: HC) -> Self {
         Self {
-            openai_api_token: format!("Bearer {}", openai_api_key).into(),
+            openai_api_token: format!("Bearer {}", openai_api_key),
             http_client,
         }
     }
