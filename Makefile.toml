@@ -137,6 +137,7 @@ script = '''
 
 is_portable = eq ${1} "--portable"
 
+
 targets = array llm_openai llm_anthropic llm_grok llm_openrouter llm_ollama web_search_brave web_search_google web_search_serper web_search_tavily
 
 for target in ${targets}
@@ -153,6 +154,7 @@ script_runner = "@duckscript"
 script = '''
 
 is_portable = eq ${1} "--portable"
+
 
 targets = array llm_openai llm_anthropic llm_grok llm_openrouter llm_ollama websearch_brave websearch_google websearch_serper websearch_tavily
 
