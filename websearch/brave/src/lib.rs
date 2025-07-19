@@ -47,19 +47,12 @@ impl BraveSearch {
 
         // Check if more results are available
         if let Some(ref meta) = metadata {
-            // Check if we got the full count requested - if yes, there might be more
             let count = self.request.count.unwrap_or(10);
             let has_more_results = results.len() == (count as usize);
-
-            // Also check if next_page_token is available
             let has_next_page = meta.next_page_token.is_some();
-
-            // Only set finished if no more results available
             self.finished = !has_more_results || !has_next_page;
-
-            // Increment offset for next page if not finished
             if !self.finished {
-                self.current_offset += count;
+                self.current_offset += 1;
             }
         } else {
             self.finished = true;

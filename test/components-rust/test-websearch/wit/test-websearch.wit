@@ -14,5 +14,6 @@ interface test-websearch-api {
 
 world test-websearch {
   import golem:web-search/web-search@1.0.0;
+  import golem:web-search/types@1.0.0;
   export test-websearch-api;
 }

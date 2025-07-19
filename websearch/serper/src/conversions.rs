@@ -3,7 +3,7 @@ use golem_web_search::golem::web_search::web_search::{
     SearchError, SearchMetadata, SearchParams, SearchResult,
 };
 
-pub fn params_to_request(params: SearchParams, _page: u32) -> Result<SearchRequest, SearchError> {
+pub fn params_to_request(params: SearchParams, page: u32) -> Result<SearchRequest, SearchError> {
     // Validate query
     if params.query.trim().is_empty() {
         return Err(SearchError::InvalidQuery);
@@ -29,14 +29,12 @@ pub fn params_to_request(params: SearchParams, _page: u32) -> Result<SearchReque
             _ => lang,
         });
 
-    // Note: Serper's SearchRequest doesn't have pagination fields (page/start/offset)
-    // This is a limitation of the current API structure
-    // For now, we'll use the existing fields and track pagination in the lib.rs
     Ok(SearchRequest {
         q: params.query.clone(),
         gl,
         hl,
         num: params.max_results,
+        page: Some(page),
     })
 }
 
@@ -117,6 +115,7 @@ fn create_search_metadata(
         region: params.region.clone(),
         next_page_token,
         rate_limits: None,
+        current_page,
     }
 }
 

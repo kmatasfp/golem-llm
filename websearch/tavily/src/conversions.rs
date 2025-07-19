@@ -204,6 +204,7 @@ fn create_search_metadata(
         region: params.region.clone(),
         next_page_token,
         rate_limits: None,
+        current_page,
     }
 }
 

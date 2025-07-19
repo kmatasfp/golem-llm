@@ -18,7 +18,7 @@ struct GoogleSearch {
     params: SearchParams,
     finished: bool,
     metadata: Option<SearchMetadata>,
-    current_start: u32,
+    current_page: u32,
 }
 
 impl GoogleSearch {
@@ -29,7 +29,7 @@ impl GoogleSearch {
             params,
             finished: false,
             metadata: None,
-            current_start: 1,
+            current_page: 0,
         }
     }
 
@@ -40,30 +40,25 @@ impl GoogleSearch {
 
         // Update request with current start index
         let mut request = self.request.clone();
-        request.start = Some(self.current_start);
+        let max_results = self.request.max_results.unwrap_or(10);
+        request.start = Some(self.current_page * max_results + 1); // Google API is 1-based
 
         let response = self.client.search(request)?;
-        let (results, metadata) = response_to_results(response, &self.params, self.current_start);
+        let (results, metadata) = response_to_results(response, &self.params, self.current_page);
 
         // Check if more results are available
         if let Some(ref meta) = metadata {
-            // Check if we got the full count requested
-            let max_results = self.request.max_results.unwrap_or(10);
             let has_more_results = results.len() == (max_results as usize);
-
-            // Also check if next_page_token is available
             let has_next_page = meta.next_page_token.is_some();
-
-            // Also check against total_results if available
             let total_results = meta.total_results.unwrap_or(0);
-            let has_more_by_total = u64::from(self.current_start + max_results - 1) < total_results;
+            let has_more_by_total =
+                u64::from(self.current_page * max_results + max_results) < total_results;
 
-            // Only set finished if no more results available
             self.finished = !has_more_results || !has_next_page || !has_more_by_total;
 
-            // Increment start for next page if not finished
+            // Increment page for next request if not finished
             if !self.finished {
-                self.current_start += max_results;
+                self.current_page += 1;
             }
         } else {
             self.finished = true;

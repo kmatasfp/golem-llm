@@ -50,6 +50,8 @@ pub struct SearchRequest {
     pub hl: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub num: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

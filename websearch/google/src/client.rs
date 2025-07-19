@@ -1,6 +1,7 @@
 use golem_web_search::error::from_reqwest_error;
 use golem_web_search::golem::web_search::web_search::SearchError;
 use log::trace;
+use reqwest::Url;
 use reqwest::{Client, Method, Response};
 use serde::{Deserialize, Serialize};
 
@@ -30,62 +31,51 @@ impl GoogleSearchApi {
     pub fn search(&self, request: SearchRequest) -> Result<SearchResponse, SearchError> {
         trace!("Sending request to Google Custom Search API: {request:?}");
 
-        let mut url = format!(
-            "{BASE_URL}?key={}&cx={}&q={}",
-            self.api_key,
-            self.search_engine_id,
-            urlencoding::encode(&request.query)
-        );
-
-        if let Some(num) = request.max_results {
-            url.push_str(&format!("&num={num}"));
-        }
-
-        if let Some(start) = request.start {
-            url.push_str(&format!("&start={start}"));
-        }
-
-        if let Some(safe) = &request.safe {
-            url.push_str(&format!("&safe={safe}"));
-        }
-
-        if let Some(lr) = &request.lr {
-            url.push_str(&format!("&lr={lr}"));
-        }
-
-        if let Some(gl) = &request.gl {
-            url.push_str(&format!("&gl={gl}"));
-        }
-
-        if let Some(date_restrict) = &request.date_restrict {
-            url.push_str(&format!("&dateRestrict={date_restrict}"));
-        }
-
-        if let Some(site_search) = &request.site_search {
-            url.push_str(&format!("&siteSearch={}", urlencoding::encode(site_search)));
-        }
-
-        if let Some(site_search_filter) = &request.site_search_filter {
-            url.push_str(&format!("&siteSearchFilter={site_search_filter}"));
-        }
-
-        if request.img_type.is_some() || request.img_size.is_some() {
-            url.push_str("&searchType=image");
-
-            if let Some(img_type) = &request.img_type {
-                url.push_str(&format!("&imgType={img_type}"));
+        let mut url = Url::parse(BASE_URL).expect("Invalid base URL");
+        {
+            let mut query_pairs = url.query_pairs_mut();
+            query_pairs.append_pair("key", &self.api_key);
+            query_pairs.append_pair("cx", &self.search_engine_id);
+            query_pairs.append_pair("q", &urlencoding::encode(&request.query));
+            if let Some(num) = request.max_results {
+                query_pairs.append_pair("num", &num.to_string());
             }
-
-            if let Some(img_size) = &request.img_size {
-                url.push_str(&format!("&imgSize={img_size}"));
+            if let Some(start) = request.start {
+                query_pairs.append_pair("start", &start.to_string());
+            }
+            if let Some(safe) = &request.safe {
+                query_pairs.append_pair("safe", safe);
+            }
+            if let Some(lr) = &request.lr {
+                query_pairs.append_pair("lr", lr);
+            }
+            if let Some(gl) = &request.gl {
+                query_pairs.append_pair("gl", gl);
+            }
+            if let Some(date_restrict) = &request.date_restrict {
+                query_pairs.append_pair("dateRestrict", date_restrict);
+            }
+            if let Some(site_search) = &request.site_search {
+                query_pairs.append_pair("siteSearch", &urlencoding::encode(site_search));
+            }
+            if let Some(site_search_filter) = &request.site_search_filter {
+                query_pairs.append_pair("siteSearchFilter", site_search_filter);
+            }
+            if request.img_type.is_some() || request.img_size.is_some() {
+                query_pairs.append_pair("searchType", "image");
+                if let Some(img_type) = &request.img_type {
+                    query_pairs.append_pair("imgType", img_type);
+                }
+                if let Some(img_size) = &request.img_size {
+                    query_pairs.append_pair("imgSize", img_size);
+                }
             }
         }
-
         let response = self
             .client
-            .request(Method::GET, &url)
+            .request(Method::GET, url.as_str())
             .send()
-            .map_err(|err| from_reqwest_error("Request failed", err))?;
+            .map_err(|err| from_reqwest_error("Failed to send request", err))?;
 
         parse_response(response)
     }

@@ -143,12 +143,13 @@ fn create_search_metadata(
     SearchMetadata {
         query: params.query.clone(),
         total_results,
-        search_time_ms: Some((response.response_time * 1000.0) as f64),
+        search_time_ms: Some(response.response_time as f64),
         safe_search: params.safe_search,
         language: params.language.clone(),
         region: params.region.clone(),
         next_page_token,
         rate_limits: None,
+        current_page: current_start,
     }
 }
 

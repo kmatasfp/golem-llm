@@ -250,7 +250,7 @@ mod durable_impl {
             );
             if durability.is_live() {
                 let mut state = self.state.borrow_mut();
-                let (result, new_live_session) = match &*state {
+                let (result, new_live_session) = match &mut *state {
                     Some(DurableSearchSessionState::Live { session, .. }) => {
                         let result =
                             with_persistence_level(PersistenceLevel::PersistNothing, || {
@@ -270,7 +270,6 @@ mod durable_impl {
                             (Ok(Vec::new()), None)
                         } else {
                             let retry_params = Impl::retry_params(original_params, partial_results);
-
                             let (session, first_live_result) =
                                 with_persistence_level(PersistenceLevel::PersistNothing, || {
                                     let session =
@@ -278,18 +277,17 @@ mod durable_impl {
                                             retry_params,
                                         )
                                         .unwrap();
-
                                     for lazy_initialized_pollable in pollables {
                                         lazy_initialized_pollable.set(Impl::subscribe(&session));
                                     }
-
                                     let next = session.next_page();
                                     (session, next)
                                 });
                             let value = first_live_result.clone()?;
-                            let _ = durability.persist_infallible(NoInput, value);
-
-                            (first_live_result, Some(session))
+                            // Append new results to partial_results
+                            partial_results.extend(value.clone());
+                            let _ = durability.persist_infallible(NoInput, value.clone());
+                            (Ok(value), Some(session))
                         }
                     }
                     None => {
@@ -342,7 +340,21 @@ mod durable_impl {
                             session.get_metadata()
                         })
                     }
-                    Some(DurableSearchSessionState::Replay { metadata, .. }) => *metadata.clone(),
+                    Some(DurableSearchSessionState::Replay {
+                        original_params,
+                        partial_results,
+                        ..
+                    }) => Some(SearchMetadata {
+                        query: original_params.query.clone(),
+                        total_results: Some(partial_results.len() as u64),
+                        search_time_ms: None,
+                        safe_search: None,
+                        language: None,
+                        region: None,
+                        next_page_token: None,
+                        rate_limits: None,
+                        current_page: partial_results.len() as u32,
+                    }),
                     None => {
                         unreachable!()
                     }
@@ -494,6 +506,7 @@ mod durable_impl {
                     remaining: 999,
                     reset_timestamp: 1698761200,
                 }),
+                current_page: 0,
             });
         }
 

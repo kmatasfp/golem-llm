@@ -225,6 +225,16 @@ impl Guest for Component {
                     )
                 );
             }
+            // Assert and output current_page
+            let expected_page = 1; // After two next_page() calls, should be on page 1 (0-based)
+            assert_eq!(
+                metadata.current_page,
+                expected_page,
+                "Expected current_page to be {} after two next_page() calls, got {}",
+                expected_page,
+                metadata.current_page
+            );
+            output.push_str(&format!("  Current Page: {}\n", metadata.current_page));
         }
 
         output
