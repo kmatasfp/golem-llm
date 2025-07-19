@@ -18,17 +18,17 @@ pub fn params_to_request(params: SearchParams, start: u32) -> Result<SearchReque
         if !include_domains.is_empty() {
             let site_filter = include_domains
                 .iter()
-                .map(|domain| format!("site:{}", domain))
+                .map(|domain| format!("site:{domain}"))
                 .collect::<Vec<_>>()
                 .join(" OR ");
-            query = format!("({}) {}", site_filter, query);
+            query = format!("({site_filter}) {query}");
         }
     }
 
     // Add excluded domains
     if let Some(exclude_domains) = &params.exclude_domains {
         for domain in exclude_domains {
-            query.push_str(&format!(" -site:{}", domain));
+            query.push_str(&format!(" -site:{domain}"));
         }
     }
 

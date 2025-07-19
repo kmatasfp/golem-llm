@@ -38,27 +38,27 @@ impl GoogleSearchApi {
         );
 
         if let Some(num) = request.max_results {
-            url.push_str(&format!("&num={}", num));
+            url.push_str(&format!("&num={num}"));
         }
 
         if let Some(start) = request.start {
-            url.push_str(&format!("&start={}", start));
+            url.push_str(&format!("&start={start}"));
         }
 
         if let Some(safe) = &request.safe {
-            url.push_str(&format!("&safe={}", safe));
+            url.push_str(&format!("&safe={safe}"));
         }
 
         if let Some(lr) = &request.lr {
-            url.push_str(&format!("&lr={}", lr));
+            url.push_str(&format!("&lr={lr}"));
         }
 
         if let Some(gl) = &request.gl {
-            url.push_str(&format!("&gl={}", gl));
+            url.push_str(&format!("&gl={gl}"));
         }
 
         if let Some(date_restrict) = &request.date_restrict {
-            url.push_str(&format!("&dateRestrict={}", date_restrict));
+            url.push_str(&format!("&dateRestrict={date_restrict}"));
         }
 
         if let Some(site_search) = &request.site_search {
@@ -66,18 +66,18 @@ impl GoogleSearchApi {
         }
 
         if let Some(site_search_filter) = &request.site_search_filter {
-            url.push_str(&format!("&siteSearchFilter={}", site_search_filter));
+            url.push_str(&format!("&siteSearchFilter={site_search_filter}"));
         }
 
         if request.img_type.is_some() || request.img_size.is_some() {
             url.push_str("&searchType=image");
 
             if let Some(img_type) = &request.img_type {
-                url.push_str(&format!("&imgType={}", img_type));
+                url.push_str(&format!("&imgType={img_type}"));
             }
 
             if let Some(img_size) = &request.img_size {
-                url.push_str(&format!("&imgSize={}", img_size));
+                url.push_str(&format!("&imgSize={img_size}"));
             }
         }
 

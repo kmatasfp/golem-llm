@@ -17,7 +17,7 @@ pub fn params_to_request(
     let mut query = params.query.clone();
     if let Some(exclude_domains) = &params.exclude_domains {
         for domain in exclude_domains {
-            query.push_str(&format!(" -site:{}", domain));
+            query.push_str(&format!(" -site:{domain}"));
         }
     }
 
