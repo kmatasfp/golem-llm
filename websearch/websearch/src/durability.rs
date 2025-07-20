@@ -1,8 +1,5 @@
 use crate::exports::golem::web_search::web_search::Guest;
-use crate::exports::golem::web_search::web_search::{
-    SearchError, SearchMetadata, SearchParams, SearchResult,
-};
-use golem_rust::value_and_type::{FromValueAndType, IntoValue as IntoValueTrait};
+use crate::exports::golem::web_search::web_search::{SearchError, SearchParams, SearchResult};
 use std::marker::PhantomData;
 
 /// Wraps a websearch implementation with custom durability
@@ -12,23 +9,11 @@ pub struct Durablewebsearch<Impl> {
 
 /// Trait to be implemented in addition to the websearch `Guest` trait when wrapping it with `Durablewebsearch`.
 pub trait ExtendedwebsearchGuest: Guest + 'static {
-    /// Internal, provider specific state that fully captures current search session + current search results + current search metadata
-    type ReplayState: std::fmt::Debug + Clone + IntoValueTrait + FromValueAndType;
-
     /// Creates an instance of the websearch specific `SearchSession` without wrapping it in a `Resource`
     fn unwrapped_search_session(params: SearchParams) -> Result<Self::SearchSession, SearchError>;
 
     /// Used at the end of replay to go from replay to live mode
-    fn session_from_state(state: &Self::ReplayState) -> Self::SearchSession;
-
-    /// Used in live mode to record states that can be used for replay
-    fn session_to_state(session: &Self::SearchSession) -> Self::ReplayState;
-
-    /// Get the current search results from the state
-    fn search_result_from_state(state: &Self::ReplayState) -> Vec<SearchResult>;
-
-    /// Get the current search metadata from the state
-    fn search_metadata_from_state(state: &Self::ReplayState) -> Option<SearchMetadata>;
+    fn session_from_state(state: &Self::SearchSession) -> Self::SearchSession;
 
     /// Creates the retry prompt with a combination of the original search params, and the partially received
     /// search results. There is a default implementation here, but it can be overridden with provider-specific
@@ -37,16 +22,11 @@ pub trait ExtendedwebsearchGuest: Guest + 'static {
         original_params: &SearchParams,
         partial_results: &[SearchResult],
     ) -> SearchParams {
-        // For search, we typically want to continue from where we left off
-        // This could involve adjusting max_results or using pagination tokens
         let mut retry_params = original_params.clone();
-
         if let Some(max_results) = retry_params.max_results {
-            // Reduce max_results by the number of results we already have
             let remaining = max_results.saturating_sub(partial_results.len() as u32);
             retry_params.max_results = Some(remaining.max(1));
         }
-
         retry_params
     }
 }
@@ -95,6 +75,9 @@ mod durable_impl {
     use golem_rust::{with_persistence_level, PersistenceLevel};
     use std::cell::RefCell;
 
+    #[derive(Debug, golem_rust::IntoValue)]
+    struct NoInput;
+
     // Add the From implementation for SearchError to satisfy the Durability trait bounds
     impl From<&SearchError> for SearchError {
         fn from(error: &SearchError) -> Self {
@@ -122,10 +105,8 @@ mod durable_impl {
 
                 match result {
                     Ok(persisted_params) => {
-                        durability
-                            .persist(persisted_params.clone(), Ok(persisted_params.clone()))?;
                         Ok(SearchSession::new(DurableSearchSession::<Impl>::live(
-                            Impl::unwrapped_search_session(persisted_params).unwrap(),
+                            Impl::unwrapped_search_session(persisted_params)?,
                         )))
                     }
                     Err(error) => {
@@ -135,7 +116,7 @@ mod durable_impl {
                 }
             } else {
                 let result = durability.replay::<SearchParams, SearchError>()?;
-                let session = SearchSession::new(DurableSearchSession::<Impl>::replay(result));
+                let session = SearchSession::new(DurableSearchSession::<Impl>::replay(result)?);
                 Ok(session)
             }
         }
@@ -194,7 +175,6 @@ mod durable_impl {
             session: Impl::SearchSession,
         },
         Replay {
-            current_state: Impl::ReplayState,
             original_params: SearchParams,
             current_page: u32,
             finished: bool,
@@ -212,20 +192,14 @@ mod durable_impl {
             }
         }
 
-        fn replay(original_params: SearchParams) -> Self {
-            // Initialize with empty state - will be populated during replay
-            let current_state = Impl::session_to_state(
-                &Impl::unwrapped_search_session(original_params.clone()).unwrap(),
-            );
-
-            Self {
+        fn replay(original_params: SearchParams) -> Result<Self, SearchError> {
+            Ok(Self {
                 state: RefCell::new(Some(DurableSearchSessionState::Replay {
-                    current_state,
                     original_params,
                     current_page: 0,
                     finished: false,
                 })),
-            }
+            })
         }
     }
 
@@ -265,12 +239,12 @@ mod durable_impl {
                         match result {
                             Ok(value) => {
                                 let persisted_result =
-                                    durability.persist((0u8, 0u8), Ok(value.clone()))?;
+                                    durability.persist(NoInput, Ok(value.clone()))?;
                                 (Ok(persisted_result), None)
                             }
                             Err(error) => {
                                 let _ = durability.persist::<_, Vec<SearchResult>, SearchError>(
-                                    (0u8, 0u8),
+                                    NoInput,
                                     Err(error.clone()),
                                 );
                                 (Err(error), None)
@@ -278,7 +252,6 @@ mod durable_impl {
                         }
                     }
                     Some(DurableSearchSessionState::Replay {
-                        current_state,
                         original_params,
                         current_page,
                         finished,
@@ -286,42 +259,22 @@ mod durable_impl {
                         *current_page += 1;
 
                         if *finished {
-                            let empty_result = durability.persist((0u8, 0u8), Ok(Vec::new()))?;
+                            let empty_result = durability.persist(NoInput, Ok(Vec::new()))?;
                             (Ok(empty_result), None)
                         } else {
-                            // Get current partial results from state
-                            let partial_results = Impl::search_result_from_state(current_state);
-                            let retry_params =
-                                Impl::retry_params(original_params, &partial_results);
-
-                            let (session, first_live_result) =
-                                with_persistence_level(PersistenceLevel::PersistNothing, || {
-                                    let session = Impl::unwrapped_search_session(retry_params)?;
-                                    let next = session.next_page();
-                                    Ok::<
-                                        (
-                                            Impl::SearchSession,
-                                            Result<Vec<SearchResult>, SearchError>,
-                                        ),
-                                        SearchError,
-                                    >((session, next))
-                                })?;
-
-                            match first_live_result {
-                                Ok(value) => {
-                                    let persisted_result =
-                                        durability.persist((0u8, 0u8), Ok(value.clone()))?;
-                                    (Ok(persisted_result), Some(session))
-                                }
-                                Err(error) => {
-                                    let _ = durability
-                                        .persist::<_, Vec<SearchResult>, SearchError>(
-                                            (0u8, 0u8),
-                                            Err(error.clone()),
-                                        );
-                                    (Err(error), Some(session))
-                                }
+                            // Reconstruct session for the current page
+                            let session = Impl::unwrapped_search_session(original_params.clone())?;
+                            let mut last_results = Vec::new();
+                            for _ in 0..*current_page {
+                                last_results = session.next_page()?;
                             }
+                            // Check if this is the last page (no more results)
+                            if last_results.is_empty() {
+                                *finished = true;
+                            }
+                            let persisted_result =
+                                durability.persist(NoInput, Ok(last_results.clone()))?;
+                            (Ok(persisted_result), None)
                         }
                     }
                     None => {
@@ -344,9 +297,6 @@ mod durable_impl {
                     }
                     Some(DurableSearchSessionState::Replay { current_page, .. }) => {
                         *current_page += 1;
-                        // Update current_state to include the new results
-                        // This would need to be implemented by the provider to merge results into state
-                        // For now, we'll return the replayed result
                         Ok(result)
                     }
                     None => {
@@ -366,14 +316,17 @@ mod durable_impl {
                     })
                 }
                 Some(DurableSearchSessionState::Replay {
-                    current_state,
+                    original_params,
                     current_page,
                     ..
                 }) => {
                     // Get metadata from the current replay state and update current_page
-                    let mut metadata = Impl::search_metadata_from_state(current_state);
-                    if let Some(ref mut meta) = metadata {
-                        meta.current_page = *current_page;
+                    let session = Impl::unwrapped_search_session(original_params.clone()).ok()?;
+                    let mut metadata = None;
+                    for _ in 0..*current_page {
+                        if let Some(meta) = session.get_metadata() {
+                            metadata = Some(meta);
+                        }
                     }
                     metadata
                 }

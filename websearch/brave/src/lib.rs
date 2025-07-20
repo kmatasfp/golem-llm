@@ -45,15 +45,15 @@ impl BraveSearch {
         let response = self.client.search(request)?;
         let (results, metadata) = response_to_results(response, &self.params, self.current_offset);
 
+        // Always increment current_offset after a page fetch
+        self.current_offset += 1;
+
         // Check if more results are available
         if let Some(ref meta) = metadata {
             let count = self.request.count.unwrap_or(10);
             let has_more_results = results.len() == (count as usize);
             let has_next_page = meta.next_page_token.is_some();
             self.finished = !has_more_results || !has_next_page;
-            if !self.finished {
-                self.current_offset += 1;
-            }
         } else {
             self.finished = true;
         }

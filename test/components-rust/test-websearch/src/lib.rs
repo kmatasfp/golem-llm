@@ -163,6 +163,9 @@ impl Guest for Component {
             }
         }
 
+        // Add a delay before the next request to avoid rate limiting
+        std::thread::sleep(std::time::Duration::from_secs(2));
+
         // Crash simulation before getting second page
         if round == 2 {
             atomically(|| {
