@@ -9,16 +9,16 @@ members = [
     "llm/ollama",
     "llm/openai",
     "llm/openrouter",
-    "graph/graph",
-    "graph/arangodb",
-    "graph/janusgraph",
-    "graph/neo4j",
     "search/search",
     "search/elasticsearch",
     "search/algolia",
     "search/meilisearch",
     "search/opensearch",
-    "search/typesense"
+    "search/typesense",
+    "graph/graph",
+    "graph/arangodb",
+    "graph/janusgraph",
+    "graph/neo4j"
 ]
 
 [profile.release]
@@ -29,7 +29,7 @@ opt-level = 's'
 [workspace.dependencies]
 golem-llm = { path = "llm/llm", version = "0.0.0", default-features = false }
 golem-search = { path = "search/search", version = "0.0.0", default-features = false}
-golem-graph = { path = "graph/graph", version = "0.0.0", default-features = false }
+golem-graph = { path = "graph/graph" , version = "0.0.0" ,default-features =false}
 golem-rust = "1.6.0"
 log = "0.4.27"
 reqwest = { git = "https://github.com/golemcloud/reqwest", branch = "update-may-2025", features = [
