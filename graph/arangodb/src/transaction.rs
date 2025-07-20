@@ -4,6 +4,7 @@ use golem_graph::golem::graph::{
     transactions::{EdgeSpec, GuestTransaction, VertexSpec},
     types::{Direction, Edge, ElementId, FilterCondition, PropertyMap, SortSpec, Vertex},
 };
+use golem_graph::LOGGING_STATE;
 use serde_json::json;
 
 impl GuestTransaction for Transaction {
