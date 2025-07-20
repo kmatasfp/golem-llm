@@ -14,7 +14,7 @@ pub(crate) fn config_from_env() -> Result<ConnectionConfig, GraphError> {
     let port = env::var("JANUSGRAPH_PORT").map_or(Ok(None), |p| {
         p.parse::<u16>()
             .map(Some)
-            .map_err(|e| GraphError::ConnectionFailed(format!("Invalid JANUSGRAPH_PORT: {}", e)))
+            .map_err(|e| GraphError::ConnectionFailed(format!("Invalid JANUSGRAPH_PORT: {e}")))
     })?;
     let username = env::var("JANUSGRAPH_USER").ok();
     let password = env::var("JANUSGRAPH_PASSWORD").ok();
@@ -152,8 +152,7 @@ fn from_gremlin_id(value: &Value) -> Result<ElementId, GraphError> {
             }
         }
         Err(GraphError::InvalidPropertyType(format!(
-            "Unsupported element ID object from Gremlin: {:?}",
-            value
+            "Unsupported element ID object from Gremlin: {value:?}"
         )))
     } else {
         Err(GraphError::InvalidPropertyType(
@@ -339,7 +338,7 @@ pub(crate) fn parse_edge_from_gremlin(value: &Value) -> Result<Edge, GraphError>
 }
 
 pub(crate) fn parse_path_from_gremlin(value: &Value) -> Result<Path, GraphError> {
-    println!("[DEBUG][parse_path_from_gremlin] Input value: {:?}", value);
+    println!("[DEBUG][parse_path_from_gremlin] Input value: {value:?}");
 
     if let Some(obj) = value.as_object() {
         if let Some(path_type) = obj.get("@type") {
@@ -461,9 +460,9 @@ pub(crate) fn parse_path_from_gremlin(value: &Value) -> Result<Path, GraphError>
 
 pub(crate) fn element_id_to_key(id: &ElementId) -> String {
     match id {
-        ElementId::StringValue(s) => format!("s:{}", s),
-        ElementId::Int64(i) => format!("i:{}", i),
-        ElementId::Uuid(u) => format!("u:{}", u),
+        ElementId::StringValue(s) => format!("s:{s}"),
+        ElementId::Int64(i) => format!("i:{i}"),
+        ElementId::Uuid(u) => format!("u:{u}"),
     }
 }
 
@@ -556,7 +555,7 @@ mod tests {
         let uuid = "a1a2a3a4-b1b2-c1c2-d1d2-d3d4d5d6d7d8";
         assert_eq!(
             element_id_to_key(&ElementId::Uuid(uuid.to_string())),
-            format!("u:{}", uuid)
+            format!("u:{uuid}")
         );
     }
 }

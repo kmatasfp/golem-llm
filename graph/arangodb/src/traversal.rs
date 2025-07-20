@@ -37,8 +37,7 @@ impl Transaction {
         };
 
         let query_str = format!(
-            "FOR vertex, edge IN ANY SHORTEST_PATH @from_id TO @to_id {} RETURN {{vertex: vertex, edge: edge}}",
-            edge_collections_str
+            "FOR vertex, edge IN ANY SHORTEST_PATH @from_id TO @to_id {edge_collections_str} RETURN {{vertex: vertex, edge: edge}}"
         );
         let mut bind_vars = serde_json::Map::new();
         bind_vars.insert("from_id".to_string(), json!(from_id));
@@ -125,11 +124,10 @@ impl Transaction {
         } else {
             edge_collections.join(", ")
         };
-        let limit_clause = limit.map_or(String::new(), |l| format!("LIMIT {}", l));
+        let limit_clause = limit.map_or(String::new(), |l| format!("LIMIT {l}"));
 
         let query_str = format!(
-            "FOR v, e, p IN {}..{} OUTBOUND @from_id {} OPTIONS {{uniqueVertices: 'path'}} FILTER v._id == @to_id {} RETURN {{vertices: p.vertices, edges: p.edges}}",
-            min_depth, max_depth, edge_collections_str, limit_clause
+            "FOR v, e, p IN {min_depth}..{max_depth} OUTBOUND @from_id {edge_collections_str} OPTIONS {{uniqueVertices: 'path'}} FILTER v._id == @to_id {limit_clause} RETURN {{vertices: p.vertices, edges: p.edges}}"
         );
         let request = json!({
             "query": query_str,
@@ -168,7 +166,7 @@ impl Transaction {
         };
         let limit_clause = options
             .max_vertices
-            .map_or(String::new(), |l| format!("LIMIT {}", l));
+            .map_or(String::new(), |l| format!("LIMIT {l}"));
 
         let query_str = format!(
             "FOR v, e IN 1..{} {} @center_id {} {} RETURN {{vertex: v, edge: e}}",
@@ -249,8 +247,7 @@ impl Transaction {
         };
 
         let query_str = format!(
-            "FOR v IN {}..{} {} @start {} RETURN v",
-            distance, distance, dir_str, edge_collections_str
+            "FOR v IN {distance}..{distance} {dir_str} @start {edge_collections_str} RETURN v"
         );
         let request = json!({ "query": query_str, "bindVars": { "start": start } });
 

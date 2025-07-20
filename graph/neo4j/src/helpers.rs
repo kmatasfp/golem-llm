@@ -143,7 +143,7 @@ pub(crate) fn config_from_env() -> Result<ConnectionConfig, GraphError> {
     let port = env::var("NEO4J_PORT").map_or(Ok(None), |p| {
         p.parse::<u16>()
             .map(Some)
-            .map_err(|e| GraphError::ConnectionFailed(format!("Invalid NEO4J_PORT: {}", e)))
+            .map_err(|e| GraphError::ConnectionFailed(format!("Invalid NEO4J_PORT: {e}")))
     })?;
     let username = env::var("NEO4J_USER")
         .map_err(|_| GraphError::ConnectionFailed("Missing NEO4J_USER env var".to_string()))?;
@@ -164,9 +164,9 @@ pub(crate) fn config_from_env() -> Result<ConnectionConfig, GraphError> {
 
 pub(crate) fn element_id_to_key(id: &ElementId) -> String {
     match id {
-        ElementId::StringValue(s) => format!("s:{}", s),
-        ElementId::Int64(i) => format!("i:{}", i),
-        ElementId::Uuid(u) => format!("u:{}", u),
+        ElementId::StringValue(s) => format!("s:{s}"),
+        ElementId::Int64(i) => format!("i:{i}"),
+        ElementId::Uuid(u) => format!("u:{u}"),
     }
 }
 
@@ -239,7 +239,7 @@ mod tests {
         let uuid = "a1a2a3a4-b1b2-c1c2-d1d2-d3d4d5d6d7d8";
         assert_eq!(
             element_id_to_key(&ElementId::Uuid(uuid.to_string())),
-            format!("u:{}", uuid)
+            format!("u:{uuid}")
         );
     }
 }

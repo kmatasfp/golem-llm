@@ -56,12 +56,12 @@ pub(crate) fn to_json_value(value: PropertyValue) -> Result<Value, GraphError> {
                         let sign = if offset > 0 { '+' } else { '-' };
                         let hours = (offset.abs() / 60) as u8;
                         let minutes = (offset.abs() % 60) as u8;
-                        format!("{}{:02}:{:02}", sign, hours, minutes)
+                        format!("{sign}{hours:02}:{minutes:02}")
                     }
                 }
                 None => "".to_string(),
             };
-            Value::String(format!("{}T{}{}", date_str, time_str, tz_str))
+            Value::String(format!("{date_str}T{time_str}{tz_str}"))
         }
         PropertyValue::Duration(_) => {
             return Err(GraphError::UnsupportedOperation(
@@ -185,7 +185,7 @@ pub(crate) fn from_json_value(value: Value) -> Result<PropertyValue, GraphError>
                     .decode(b64_data)
                     .map(PropertyValue::Bytes)
                     .map_err(|e| {
-                        GraphError::InternalError(format!("Failed to decode base64 bytes: {}", e))
+                        GraphError::InternalError(format!("Failed to decode base64 bytes: {e}"))
                     });
             }
 
@@ -384,7 +384,7 @@ mod tests {
 
         match (original, converted) {
             (PropertyValue::Int64(o), PropertyValue::Int64(c)) => assert_eq!(o, c),
-            (o, c) => panic!("Type mismatch: expected {:?} got {:?}", o, c),
+            (o, c) => panic!("Type mismatch: expected {o:?} got {c:?}"),
         }
     }
 
@@ -419,7 +419,7 @@ mod tests {
                 assert_eq!(o.time.nanosecond, c.time.nanosecond);
                 assert_eq!(o.timezone_offset_minutes, c.timezone_offset_minutes);
             }
-            (o, c) => panic!("Type mismatch: expected {:?} got {:?}", o, c),
+            (o, c) => panic!("Type mismatch: expected {o:?} got {c:?}"),
         }
     }
 
@@ -443,7 +443,7 @@ mod tests {
                     assert!((o_alt - c_alt).abs() < f64::EPSILON);
                 }
             }
-            (o, c) => panic!("Type mismatch: expected {:?} got {:?}", o, c),
+            (o, c) => panic!("Type mismatch: expected {o:?} got {c:?}"),
         }
     }
 

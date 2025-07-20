@@ -141,25 +141,24 @@ pub mod mapping {
             // Client errors
             400 => {
                 if is_query_error(message) {
-                    GraphError::InvalidQuery(format!("Bad request - invalid query: {}", message))
+                    GraphError::InvalidQuery(format!("Bad request - invalid query: {message}"))
                 } else if is_property_type_error(message) {
                     GraphError::InvalidPropertyType(format!(
-                        "Bad request - invalid property: {}",
-                        message
+                        "Bad request - invalid property: {message}"
                     ))
                 } else if is_schema_violation(message, error_body) {
-                    GraphError::SchemaViolation(format!("Schema violation: {}", message))
+                    GraphError::SchemaViolation(format!("Schema violation: {message}"))
                 } else if is_constraint_violation(message) {
-                    GraphError::ConstraintViolation(format!("Constraint violation: {}", message))
+                    GraphError::ConstraintViolation(format!("Constraint violation: {message}"))
                 } else {
-                    GraphError::InternalError(format!("Bad request: {}", message))
+                    GraphError::InternalError(format!("Bad request: {message}"))
                 }
             }
             404 => {
                 if let Some(element_id) = extract_element_id_from_message(message) {
                     GraphError::ElementNotFound(element_id)
                 } else {
-                    GraphError::InternalError(format!("Resource not found: {}", message))
+                    GraphError::InternalError(format!("Resource not found: {message}"))
                 }
             }
             409 => {
@@ -168,27 +167,26 @@ pub mod mapping {
                         GraphError::DuplicateElement(element_id)
                     } else {
                         GraphError::ConstraintViolation(format!(
-                            "Duplicate constraint violation: {}",
-                            message
+                            "Duplicate constraint violation: {message}"
                         ))
                     }
                 } else {
                     GraphError::TransactionConflict
                 }
             }
-            412 => GraphError::ConstraintViolation(format!("Precondition failed: {}", message)),
-            422 => GraphError::SchemaViolation(format!("Unprocessable entity: {}", message)),
-            429 => GraphError::ResourceExhausted(format!("Too many requests: {}", message)),
+            412 => GraphError::ConstraintViolation(format!("Precondition failed: {message}")),
+            422 => GraphError::SchemaViolation(format!("Unprocessable entity: {message}")),
+            429 => GraphError::ResourceExhausted(format!("Too many requests: {message}")),
 
             // Server errors
-            500 => GraphError::InternalError(format!("Internal server error: {}", message)),
-            502 => GraphError::ServiceUnavailable(format!("Bad gateway: {}", message)),
-            503 => GraphError::ServiceUnavailable(format!("Service unavailable: {}", message)),
+            500 => GraphError::InternalError(format!("Internal server error: {message}")),
+            502 => GraphError::ServiceUnavailable(format!("Bad gateway: {message}")),
+            503 => GraphError::ServiceUnavailable(format!("Service unavailable: {message}")),
             504 => GraphError::Timeout,
-            507 => GraphError::ResourceExhausted(format!("Insufficient storage: {}", message)),
+            507 => GraphError::ResourceExhausted(format!("Insufficient storage: {message}")),
 
             // Default fallback
-            _ => GraphError::InternalError(format!("HTTP error [{}]: {}", status, message)),
+            _ => GraphError::InternalError(format!("HTTP error [{status}]: {message}")),
         }
     }
 
@@ -204,18 +202,18 @@ pub mod mapping {
         // Check for connection issues
         if error_msg.contains("connection") || error_msg.contains("connect") {
             if error_msg.contains("refused") || error_msg.contains("unreachable") {
-                return GraphError::ServiceUnavailable(format!("Service unavailable: {}", err));
+                return GraphError::ServiceUnavailable(format!("Service unavailable: {err}"));
             }
-            return GraphError::ConnectionFailed(format!("Connection failed: {}", err));
+            return GraphError::ConnectionFailed(format!("Connection failed: {err}"));
         }
 
         // Check for DNS/network issues
         if error_msg.contains("dns") || error_msg.contains("resolve") {
-            return GraphError::ConnectionFailed(format!("DNS resolution failed: {}", err));
+            return GraphError::ConnectionFailed(format!("DNS resolution failed: {err}"));
         }
 
         // Default case
-        GraphError::ConnectionFailed(format!("Request failed: {}", err))
+        GraphError::ConnectionFailed(format!("Request failed: {err}"))
     }
 
     /// Check if message indicates a query syntax error
@@ -362,56 +360,52 @@ pub fn from_reqwest_error(details: impl AsRef<str>, err: reqwest::Error) -> Grap
 pub fn from_arangodb_error_code(error_code: i64, message: &str) -> GraphError {
     match error_code {
         // Document/Element errors (1200-1299)
-        1202 => GraphError::InternalError(format!("Document not found: {}", message)),
-        1210 => GraphError::ConstraintViolation(format!("Unique constraint violated: {}", message)),
-        1213 => GraphError::SchemaViolation(format!("Collection not found: {}", message)),
-        1218 => GraphError::SchemaViolation(format!("Document handle bad: {}", message)),
-        1221 => GraphError::InvalidPropertyType(format!("Illegal document key: {}", message)),
-        1229 => GraphError::ConstraintViolation(format!("Document key missing: {}", message)),
+        1202 => GraphError::InternalError(format!("Document not found: {message}")),
+        1210 => GraphError::ConstraintViolation(format!("Unique constraint violated: {message}")),
+        1213 => GraphError::SchemaViolation(format!("Collection not found: {message}")),
+        1218 => GraphError::SchemaViolation(format!("Document handle bad: {message}")),
+        1221 => GraphError::InvalidPropertyType(format!("Illegal document key: {message}")),
+        1229 => GraphError::ConstraintViolation(format!("Document key missing: {message}")),
 
         // Query errors (1500-1599)
-        1501 => GraphError::InvalidQuery(format!("Query parse error: {}", message)),
-        1502 => GraphError::InvalidQuery(format!("Query empty: {}", message)),
-        1504 => GraphError::InvalidQuery(format!("Query number out of range: {}", message)),
-        1521 => GraphError::InvalidQuery(format!("AQL function not found: {}", message)),
-        1522 => GraphError::InvalidQuery(format!(
-            "AQL function argument number mismatch: {}",
-            message
-        )),
-        1540 => {
-            GraphError::InvalidPropertyType(format!("Invalid bind parameter type: {}", message))
+        1501 => GraphError::InvalidQuery(format!("Query parse error: {message}")),
+        1502 => GraphError::InvalidQuery(format!("Query empty: {message}")),
+        1504 => GraphError::InvalidQuery(format!("Query number out of range: {message}")),
+        1521 => GraphError::InvalidQuery(format!("AQL function not found: {message}")),
+        1522 => {
+            GraphError::InvalidQuery(format!("AQL function argument number mismatch: {message}"))
         }
-        1541 => GraphError::InvalidQuery(format!("No bind parameter value: {}", message)),
-        1562 => GraphError::InvalidQuery(format!("Variable already declared: {}", message)),
-        1563 => GraphError::InvalidQuery(format!("Variable not declared: {}", message)),
+        1540 => GraphError::InvalidPropertyType(format!("Invalid bind parameter type: {message}")),
+        1541 => GraphError::InvalidQuery(format!("No bind parameter value: {message}")),
+        1562 => GraphError::InvalidQuery(format!("Variable already declared: {message}")),
+        1563 => GraphError::InvalidQuery(format!("Variable not declared: {message}")),
         1579 => GraphError::Timeout,
 
         // Transaction errors (1650-1699)
-        1651 => GraphError::TransactionFailed(format!("Transaction already started: {}", message)),
-        1652 => GraphError::TransactionFailed(format!("Transaction not started: {}", message)),
+        1651 => GraphError::TransactionFailed(format!("Transaction already started: {message}")),
+        1652 => GraphError::TransactionFailed(format!("Transaction not started: {message}")),
         1653 => GraphError::TransactionFailed(format!(
-            "Transaction already committed/aborted: {}",
-            message
+            "Transaction already committed/aborted: {message}"
         )),
         1655 => GraphError::TransactionTimeout,
         1656 => GraphError::DeadlockDetected,
         1658 => GraphError::TransactionConflict,
 
         // Schema/Collection errors
-        1207 => GraphError::SchemaViolation(format!("Collection must be unloaded: {}", message)),
-        1228 => GraphError::SchemaViolation(format!("Document revision bad: {}", message)),
+        1207 => GraphError::SchemaViolation(format!("Collection must be unloaded: {message}")),
+        1228 => GraphError::SchemaViolation(format!("Document revision bad: {message}")),
 
         // Resource errors
-        32 => GraphError::ResourceExhausted(format!("Out of memory: {}", message)),
-        1104 => GraphError::ResourceExhausted(format!("Collection full: {}", message)),
+        32 => GraphError::ResourceExhausted(format!("Out of memory: {message}")),
+        1104 => GraphError::ResourceExhausted(format!("Collection full: {message}")),
 
         // Cluster/replication errors
-        1447 => GraphError::ServiceUnavailable(format!("Cluster backend unavailable: {}", message)),
+        1447 => GraphError::ServiceUnavailable(format!("Cluster backend unavailable: {message}")),
         1448 => GraphError::TransactionConflict,
-        1449 => GraphError::ServiceUnavailable(format!("Cluster coordinator error: {}", message)),
+        1449 => GraphError::ServiceUnavailable(format!("Cluster coordinator error: {message}")),
 
         // Default fallback
-        _ => GraphError::InternalError(format!("ArangoDB error [{}]: {}", error_code, message)),
+        _ => GraphError::InternalError(format!("ArangoDB error [{error_code}]: {message}")),
     }
 }
 

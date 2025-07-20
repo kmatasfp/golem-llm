@@ -19,7 +19,7 @@ impl JanusGraphApi {
         _username: Option<&str>,
         _password: Option<&str>,
     ) -> Result<Self, GraphError> {
-        let endpoint = format!("http://{}:{}/gremlin", host, port);
+        let endpoint = format!("http://{host}:{port}/gremlin");
         let client = Client::builder()
             .build()
             .expect("Failed to initialize HTTP client");
@@ -38,7 +38,7 @@ impl JanusGraphApi {
         _password: Option<&str>,
         session_id: String,
     ) -> Result<Self, GraphError> {
-        let endpoint = format!("http://{}:{}/gremlin", host, port);
+        let endpoint = format!("http://{host}:{port}/gremlin");
         let client = Client::builder()
             .build()
             .expect("Failed to initialize HTTP client");
@@ -69,7 +69,7 @@ impl JanusGraphApi {
         eprintln!("[JanusGraphApi] DEBUG - Full request details:");
         eprintln!("[JanusGraphApi] Endpoint: {}", self.endpoint);
         eprintln!("[JanusGraphApi] Session ID: {}", self.session_id);
-        eprintln!("[JanusGraphApi] Gremlin Query: {}", gremlin);
+        eprintln!("[JanusGraphApi] Gremlin Query: {gremlin}");
         eprintln!(
             "[JanusGraphApi] Request Body: {}",
             serde_json::to_string_pretty(&request_body)
@@ -77,7 +77,7 @@ impl JanusGraphApi {
         );
 
         let body_string = serde_json::to_string(&request_body).map_err(|e| {
-            GraphError::InternalError(format!("Failed to serialize request body: {}", e))
+            GraphError::InternalError(format!("Failed to serialize request body: {e}"))
         })?;
 
         eprintln!(
@@ -93,7 +93,7 @@ impl JanusGraphApi {
             .body(body_string)
             .send()
             .map_err(|e| {
-                eprintln!("[JanusGraphApi] ERROR - Request failed: {}", e);
+                eprintln!("[JanusGraphApi] ERROR - Request failed: {e}");
                 from_reqwest_error("JanusGraph request failed", e)
             })?;
 
@@ -112,7 +112,7 @@ impl JanusGraphApi {
         });
 
         let body_string = serde_json::to_string(&request_body).map_err(|e| {
-            GraphError::InternalError(format!("Failed to serialize request body: {}", e))
+            GraphError::InternalError(format!("Failed to serialize request body: {e}"))
         })?;
 
         let response = self
@@ -134,7 +134,7 @@ impl JanusGraphApi {
         });
 
         let body_string = serde_json::to_string(&request_body).map_err(|e| {
-            GraphError::InternalError(format!("Failed to serialize request body: {}", e))
+            GraphError::InternalError(format!("Failed to serialize request body: {e}"))
         })?;
 
         let response = self
@@ -158,12 +158,12 @@ impl JanusGraphApi {
 
         if status.is_success() {
             let response_body: Value = response.json().map_err(|e| {
-                GraphError::InternalError(format!("Failed to parse response body: {}", e))
+                GraphError::InternalError(format!("Failed to parse response body: {e}"))
             })?;
             Ok(response_body)
         } else {
             let error_body: Value = response.json().map_err(|e| {
-                GraphError::InternalError(format!("Failed to read error response: {}", e))
+                GraphError::InternalError(format!("Failed to read error response: {e}"))
             })?;
 
             let error_msg = error_body

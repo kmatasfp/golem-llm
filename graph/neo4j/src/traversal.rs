@@ -115,16 +115,15 @@ impl Transaction {
                 });
                 let depth = opts
                     .max_depth
-                    .map_or("*".to_string(), |d| format!("*1..{}", d));
+                    .map_or("*".to_string(), |d| format!("*1..{d}"));
                 format!("-[{}]-", format_args!("r{}{}", edge_types, depth))
             }
             None => "-[*]-".to_string(),
         };
 
-        let limit_clause = limit.map_or("".to_string(), |l| format!("LIMIT {}", l));
+        let limit_clause = limit.map_or("".to_string(), |l| format!("LIMIT {l}"));
         let statement_str = format!(
-            "MATCH p = (a){}(b) WHERE elementId(a) = $from_id AND elementId(b) = $to_id RETURN p {}",
-            path_spec, limit_clause
+            "MATCH p = (a){path_spec}(b) WHERE elementId(a) = $from_id AND elementId(b) = $to_id RETURN p {limit_clause}"
         );
 
         let statement = json!({
@@ -195,13 +194,12 @@ impl Transaction {
         let depth = options.depth;
         let limit_clause = options
             .max_vertices
-            .map_or("".to_string(), |l| format!("LIMIT {}", l));
+            .map_or("".to_string(), |l| format!("LIMIT {l}"));
 
         let full_query = format!(
-            "MATCH p = (c){}[r{}*1..{}]{}(n)\
+            "MATCH p = (c){left_arrow}[r{edge_type_str}*1..{depth}]{right_arrow}(n)\
           WHERE ( elementId(c) = $id OR id(c) = toInteger($id) )\
-          RETURN p {}",
-            left_arrow, edge_type_str, depth, right_arrow, limit_clause
+          RETURN p {limit_clause}"
         );
 
         let statement = json!({
@@ -285,8 +283,7 @@ impl Transaction {
         });
 
         let query = format!(
-            "MATCH (a){}[{}*{}]{}(b) WHERE elementId(a) = $id RETURN DISTINCT b",
-            left_arrow, edge_type_str, distance, right_arrow
+            "MATCH (a){left_arrow}[{edge_type_str}*{distance}]{right_arrow}(b) WHERE elementId(a) = $id RETURN DISTINCT b"
         );
 
         let statement = json!({

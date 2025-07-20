@@ -36,7 +36,7 @@ pub(crate) fn to_json_value(value: PropertyValue) -> Result<Value, GraphError> {
                 dt.time.second,
                 format_args!("{:09}", dt.time.nanosecond)
             );
-            Value::String(format!("{}T{}Z", date_str, time_str))
+            Value::String(format!("{date_str}T{time_str}Z"))
         }
         PropertyValue::Point(p) => {
             if let Some(alt) = p.altitude {
@@ -179,7 +179,7 @@ fn parse_iso_datetime(s: &str) -> Result<Datetime, ()> {
 
     let nanosecond = if time_part.len() > 9 && time_part.chars().nth(8) == Some('.') {
         let nano_str = &time_part[9..];
-        let nano_str_padded = format!("{:0<9}", nano_str);
+        let nano_str_padded = format!("{nano_str:0<9}");
         nano_str_padded[0..9].parse().map_err(|_| ())?
     } else {
         0

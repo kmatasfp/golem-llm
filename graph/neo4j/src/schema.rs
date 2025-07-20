@@ -49,7 +49,7 @@ impl GuestSchemaManager for SchemaManager {
                         if msg.contains("Enterprise Edition")
                             || msg.contains("ConstraintCreationFailed")
                         {
-                            println!("[WARN] Skipping property existence constraint: requires Neo4j Enterprise Edition. Error: {}", msg);
+                            println!("[WARN] Skipping property existence constraint: requires Neo4j Enterprise Edition. Error: {msg}");
                             tx.commit()?;
                         } else {
                             return Err(e);
@@ -368,7 +368,7 @@ impl GuestSchemaManager for SchemaManager {
 
     fn drop_index(&self, name: String) -> Result<(), GraphError> {
         let tx = self.graph.begin_transaction()?;
-        let query = format!("DROP INDEX {} IF EXISTS", name);
+        let query = format!("DROP INDEX {name} IF EXISTS");
         let statement = json!({ "statement": query, "parameters": {} });
         let statements = json!({ "statements": [statement] });
         tx.api

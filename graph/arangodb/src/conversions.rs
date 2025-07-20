@@ -46,12 +46,12 @@ pub(crate) fn to_arango_value(value: PropertyValue) -> Result<Value, GraphError>
                         let sign = if offset > 0 { '+' } else { '-' };
                         let hours = (offset.abs() / 60) as u8;
                         let minutes = (offset.abs() % 60) as u8;
-                        format!("{}{:02}:{:02}", sign, hours, minutes)
+                        format!("{sign}{hours:02}:{minutes:02}")
                     }
                 }
                 None => "".to_string(),
             };
-            Value::String(format!("{}T{}{}", date_str, time_str, tz_str))
+            Value::String(format!("{date_str}T{time_str}{tz_str}"))
         }
         PropertyValue::Duration(d) => {
             Value::String(format!("P{}S", d.seconds)) // Simplified ISO 8601 for duration

@@ -1,4 +1,5 @@
 use crate::{helpers, GraphArangoDbComponent, SchemaManager};
+use golem_graph::LOGGING_STATE;
 use golem_graph::{
     durability::ExtendedGuest,
     golem::graph::{
@@ -10,7 +11,6 @@ use golem_graph::{
         },
     },
 };
-use golem_graph::LOGGING_STATE;
 use std::sync::Arc;
 
 impl SchemaGuest for GraphArangoDbComponent {

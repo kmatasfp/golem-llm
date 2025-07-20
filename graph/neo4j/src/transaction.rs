@@ -319,7 +319,7 @@ impl GuestTransaction for Transaction {
         let syntax = cypher_syntax();
 
         let match_clause = match &vertex_type {
-            Some(vt) => format!("MATCH (n:`{}`)", vt),
+            Some(vt) => format!("MATCH (n:`{vt}`)"),
             None => "MATCH (n)".to_string(),
         };
 
@@ -328,12 +328,11 @@ impl GuestTransaction for Transaction {
         })?;
         let sort_clause = build_sort_clause(&sort, "n");
 
-        let limit_clause = limit.map_or("".to_string(), |l| format!("LIMIT {}", l));
-        let offset_clause = offset.map_or("".to_string(), |o| format!("SKIP {}", o));
+        let limit_clause = limit.map_or("".to_string(), |l| format!("LIMIT {l}"));
+        let offset_clause = offset.map_or("".to_string(), |o| format!("SKIP {o}"));
 
         let full_query = format!(
-            "{} {} RETURN n {} {} {}",
-            match_clause, where_clause, sort_clause, offset_clause, limit_clause
+            "{match_clause} {where_clause} RETURN n {sort_clause} {offset_clause} {limit_clause}"
         );
 
         let statement = json!({
@@ -634,12 +633,11 @@ impl GuestTransaction for Transaction {
         })?;
         let sort_clause = build_sort_clause(&sort, "r");
 
-        let limit_clause = limit.map_or("".to_string(), |l| format!("LIMIT {}", l));
-        let offset_clause = offset.map_or("".to_string(), |o| format!("SKIP {}", o));
+        let limit_clause = limit.map_or("".to_string(), |l| format!("LIMIT {l}"));
+        let offset_clause = offset.map_or("".to_string(), |o| format!("SKIP {o}"));
 
         let full_query = format!(
-            "{} {} RETURN elementId(r), type(r), properties(r), elementId(startNode(r)), elementId(endNode(r)) {} {} {}",
-            match_clause, where_clause, sort_clause, offset_clause, limit_clause
+            "{match_clause} {where_clause} RETURN elementId(r), type(r), properties(r), elementId(startNode(r)), elementId(endNode(r)) {sort_clause} {offset_clause} {limit_clause}"
         );
 
         let statement = json!({
@@ -709,11 +707,10 @@ impl GuestTransaction for Transaction {
             }
         });
 
-        let limit_clause = limit.map_or("".to_string(), |l| format!("LIMIT {}", l));
+        let limit_clause = limit.map_or("".to_string(), |l| format!("LIMIT {l}"));
 
         let full_query = format!(
-            "MATCH (a){}[r{}]{}(b) WHERE elementId(a) = $id RETURN b {}",
-            left_pattern, edge_type_str, right_pattern, limit_clause
+            "MATCH (a){left_pattern}[r{edge_type_str}]{right_pattern}(b) WHERE elementId(a) = $id RETURN b {limit_clause}"
         );
 
         let statement = json!({
@@ -786,11 +783,10 @@ impl GuestTransaction for Transaction {
             }
         });
 
-        let limit_clause = limit.map_or("".to_string(), |l| format!("LIMIT {}", l));
+        let limit_clause = limit.map_or("".to_string(), |l| format!("LIMIT {l}"));
 
         let full_query = format!(
-            "MATCH (a){}[r{}]{}(b) WHERE elementId(a) = $id RETURN elementId(r), type(r), properties(r), elementId(startNode(r)), elementId(endNode(r)) {}",
-            left_pattern, edge_type_str, right_pattern, limit_clause
+            "MATCH (a){left_pattern}[r{edge_type_str}]{right_pattern}(b) WHERE elementId(a) = $id RETURN elementId(r), type(r), properties(r), elementId(startNode(r)), elementId(endNode(r)) {limit_clause}"
         );
 
         let statement = json!({
@@ -980,9 +976,9 @@ impl GuestTransaction for Transaction {
         let merge_prop_clauses: Vec<String> = set_props
             .keys()
             .map(|k| {
-                let param_name = format!("match_{}", k);
+                let param_name = format!("match_{k}");
                 match_props.insert(param_name.clone(), set_props[k].clone());
-                format!("{}: ${}", k, param_name)
+                format!("{k}: ${param_name}")
             })
             .collect();
         let merge_clause = format!("{{ {} }}", merge_prop_clauses.join(", "));
@@ -1070,9 +1066,9 @@ impl GuestTransaction for Transaction {
         let merge_prop_clauses: Vec<String> = set_props
             .keys()
             .map(|k| {
-                let param_name = format!("match_{}", k);
+                let param_name = format!("match_{k}");
                 match_props.insert(param_name.clone(), set_props[k].clone());
-                format!("{}: ${}", k, param_name)
+                format!("{k}: ${param_name}")
             })
             .collect();
 

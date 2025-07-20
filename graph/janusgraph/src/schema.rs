@@ -91,7 +91,7 @@ impl GuestSchemaManager for SchemaManager {
 
     fn get_edge_label_schema(&self, label: String) -> Result<Option<EdgeLabelSchema>, GraphError> {
         // JanusGraph doesn't have getEdgeLabels() method, so we need to check directly
-        let script = format!("mgmt.getEdgeLabel('{}') != null", label);
+        let script = format!("mgmt.getEdgeLabel('{label}') != null");
         let result = self.execute_management_query(&script)?;
 
         let exists = if let Some(graphson_obj) = result.as_object() {
@@ -143,29 +143,25 @@ impl GuestSchemaManager for SchemaManager {
 
         for prop_name in &index.properties {
             script_parts.push(format!(
-                "if (mgmt.getPropertyKey('{}') == null) throw new IllegalArgumentException('Property key {} not found');",
-                prop_name, prop_name
+                "if (mgmt.getPropertyKey('{prop_name}') == null) throw new IllegalArgumentException('Property key {prop_name} not found');"
             ));
         }
 
         let container_name = index.container.as_deref().unwrap_or_default();
 
         script_parts.push(format!(
-            "def label = mgmt.getVertexLabel('{}'); def elementClass = Vertex.class;",
-            container_name
+            "def label = mgmt.getVertexLabel('{container_name}'); def elementClass = Vertex.class;"
         ));
         script_parts.push(format!(
-            "if (label == null) {{ label = mgmt.getEdgeLabel('{}'); elementClass = Edge.class; }}",
-            container_name
+            "if (label == null) {{ label = mgmt.getEdgeLabel('{container_name}'); elementClass = Edge.class; }}"
         ));
         script_parts.push(format!(
-            "if (label == null) throw new IllegalArgumentException('Label {} not found');",
-            container_name
+            "if (label == null) throw new IllegalArgumentException('Label {container_name} not found');"
         ));
 
         let mut index_builder = format!("mgmt.buildIndex('{}', elementClass)", index.name);
         for prop_name in &index.properties {
-            index_builder.push_str(&format!(".addKey(mgmt.getPropertyKey('{}'))", prop_name));
+            index_builder.push_str(&format!(".addKey(mgmt.getPropertyKey('{prop_name}'))"));
         }
 
         if index.unique {
@@ -174,7 +170,7 @@ impl GuestSchemaManager for SchemaManager {
 
         index_builder.push_str(".indexOnly(label).buildCompositeIndex();");
 
-        let wrapped_index_builder = format!("try {{ {} }} catch (Exception e) {{ if (!e.message.contains('already been defined')) throw e; }}", index_builder);
+        let wrapped_index_builder = format!("try {{ {index_builder} }} catch (Exception e) {{ if (!e.message.contains('already been defined')) throw e; }}");
         script_parts.push(wrapped_index_builder);
 
         let script = script_parts.join("; ");
@@ -276,7 +272,7 @@ impl SchemaManager {
             "
             try {{
                 mgmt = graph.openManagement();
-                result = {{ {} }}.call();
+                result = {{ {script} }}.call();
                 mgmt.commit();
                 return result;
             }} catch (Exception e) {{
@@ -285,8 +281,7 @@ impl SchemaManager {
                 }}
                 throw e;
             }}
-            ",
-            script
+            "
         );
 
         let mut last_error = None;

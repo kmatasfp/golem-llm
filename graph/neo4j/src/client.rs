@@ -21,8 +21,8 @@ impl Neo4jApi {
         username: &str,
         password: &str,
     ) -> Self {
-        let base_url = format!("http://{}:{}", host, port);
-        let auth = format!("{}:{}", username, password);
+        let base_url = format!("http://{host}:{port}");
+        let auth = format!("{username}:{password}");
         let auth_header = format!("Basic {}", STANDARD.encode(auth.as_bytes()));
         let client = Client::builder()
             .build()
@@ -56,7 +56,7 @@ impl Neo4jApi {
         tx_url: &str,
         statements: Value,
     ) -> Result<Value, GraphError> {
-        println!("[Neo4jApi] Cypher request: {}", statements);
+        println!("[Neo4jApi] Cypher request: {statements}");
         let resp = self
             .client
             .post(tx_url)
@@ -66,12 +66,12 @@ impl Neo4jApi {
             .send()
             .map_err(|e| from_reqwest_error("Neo4j execute in transaction failed", e))?;
         let json = Self::ensure_success_and_json(resp)?;
-        println!("[Neo4jApi] Cypher response: {}", json);
+        println!("[Neo4jApi] Cypher response: {json}");
         Ok(json)
     }
 
     pub(crate) fn commit_transaction(&self, tx_url: &str) -> Result<(), GraphError> {
-        let commit_url = format!("{}/commit", tx_url);
+        let commit_url = format!("{tx_url}/commit");
         let resp = self
             .client
             .post(&commit_url)

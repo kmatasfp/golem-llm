@@ -1,4 +1,5 @@
 use crate::{Graph, Transaction};
+use golem_graph::LOGGING_STATE;
 use golem_graph::{
     durability::ProviderGraph,
     golem::graph::{
@@ -7,7 +8,6 @@ use golem_graph::{
         transactions::Transaction as TransactionResource,
     },
 };
-use golem_graph::LOGGING_STATE;
 
 impl ProviderGraph for Graph {
     type Transaction = Transaction;

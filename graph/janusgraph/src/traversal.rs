@@ -34,10 +34,10 @@ fn build_traversal_step(
         if !labels.is_empty() {
             let key = format!("edge_labels_{}", bindings.len());
             bindings.insert(key.clone(), json!(labels));
-            return format!("{}({}).otherV()", base, key);
+            return format!("{base}({key}).otherV()");
         }
     }
-    format!("{}().otherV()", base)
+    format!("{base}().otherV()")
 }
 
 impl Transaction {
@@ -106,12 +106,10 @@ impl Transaction {
         bindings.insert("from_id".to_string(), id_to_json(from_vertex));
         bindings.insert("to_id".to_string(), id_to_json(to_vertex));
 
-        let mut gremlin = format!(
-            "g.V(from_id).repeat({}.simplePath()).until(hasId(to_id)).path()",
-            step
-        );
+        let mut gremlin =
+            format!("g.V(from_id).repeat({step}.simplePath()).until(hasId(to_id)).path()");
         if let Some(lim) = limit {
-            gremlin.push_str(&format!(".limit({})", lim));
+            gremlin.push_str(&format!(".limit({lim})"));
         }
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
@@ -151,7 +149,7 @@ impl Transaction {
             edge_step, options.depth
         );
         if let Some(lim) = options.max_vertices {
-            gremlin.push_str(&format!(".limit({})", lim));
+            gremlin.push_str(&format!(".limit({lim})"));
         }
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
@@ -229,8 +227,7 @@ impl Transaction {
         };
 
         let gremlin = format!(
-            "g.V(source_id).repeat({}({})).times({}).dedup().elementMap()",
-            step, label_key, distance
+            "g.V(source_id).repeat({step}({label_key})).times({distance}).dedup().elementMap()"
         );
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;

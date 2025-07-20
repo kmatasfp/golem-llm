@@ -163,7 +163,7 @@ pub(crate) fn config_from_env() -> Result<ConnectionConfig, GraphError> {
         .or_else(|_| env::var("ARANGODB_PORT"))
         .map_or(Ok(None), |p| {
             p.parse::<u16>().map(Some).map_err(|e| {
-                GraphError::ConnectionFailed(format!("Invalid ARANGO_PORT/ARANGODB_PORT: {}", e))
+                GraphError::ConnectionFailed(format!("Invalid ARANGO_PORT/ARANGODB_PORT: {e}"))
             })
         })?;
     let username = env::var("ARANGO_USER")

@@ -27,8 +27,7 @@ fn graphson_map_to_object(data: &Value) -> Result<Value, GraphError> {
             inner.to_string()
         } else {
             return Err(GraphError::InternalError(format!(
-                "Expected string key in GraphSON Map, got {}",
-                k
+                "Expected string key in GraphSON Map, got {k}"
             )));
         };
 
@@ -85,18 +84,15 @@ impl GuestTransaction for Transaction {
         bindings.insert("vertex_label".to_string(), json!(vertex_type));
 
         for (i, (key, value)) in properties.into_iter().enumerate() {
-            let binding_key = format!("p{}", i);
-            gremlin.push_str(&format!(".property(k{}, {})", i, binding_key));
-            bindings.insert(format!("k{}", i), json!(key));
+            let binding_key = format!("p{i}");
+            gremlin.push_str(&format!(".property(k{i}, {binding_key})"));
+            bindings.insert(format!("k{i}"), json!(key));
             bindings.insert(binding_key, conversions::to_json_value(value)?);
         }
         gremlin.push_str(".elementMap()");
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
-        eprintln!(
-            "[JanusGraphApi] Raw vertex creation response: {:?}",
-            response
-        );
+        eprintln!("[JanusGraphApi] Raw vertex creation response: {response:?}");
         let element = first_list_item(&response["result"]["data"])?;
         let obj = graphson_map_to_object(element)?;
 
@@ -173,9 +169,9 @@ impl GuestTransaction for Transaction {
         );
 
         for (i, (k, v)) in properties.into_iter().enumerate() {
-            let kb = format!("k{}", i);
-            let vb = format!("v{}", i);
-            gremlin.push_str(&format!(".property({}, {})", kb, vb));
+            let kb = format!("k{i}");
+            let vb = format!("v{i}");
+            gremlin.push_str(&format!(".property({kb}, {vb})"));
             bindings.insert(kb.clone(), json!(k));
             bindings.insert(vb.clone(), conversions::to_json_value(v)?);
         }
@@ -261,9 +257,9 @@ impl GuestTransaction for Transaction {
         bindings.insert("vertex_id".to_string(), id_json);
 
         for (i, (k, v)) in updates.into_iter().enumerate() {
-            let kb = format!("k{}", i);
-            let vb = format!("v{}", i);
-            gremlin.push_str(&format!(".property({}, {})", kb, vb));
+            let kb = format!("k{i}");
+            let vb = format!("v{i}");
+            gremlin.push_str(&format!(".property({kb}, {vb})"));
             bindings.insert(kb, json!(k));
             bindings.insert(vb, conversions::to_json_value(v)?);
         }
@@ -282,7 +278,7 @@ impl GuestTransaction for Transaction {
         }
         .ok_or_else(|| GraphError::ElementNotFound(id_clone.clone()))?;
 
-        println!("[DEBUG update_vertex] raw row = {:#}", row);
+        println!("[DEBUG update_vertex] raw row = {row:#}");
 
         let mut flat = serde_json::Map::new();
         if row.get("@type") == Some(&json!("g:Map")) {
@@ -359,27 +355,19 @@ impl GuestTransaction for Transaction {
                 .execute(gremlin, Some(Value::Object(bindings.clone())));
             match resp {
                 Ok(_) => {
-                    log::info!(
-                        "[delete_vertex] dropped vertex {:?} (attempt {})",
-                        id,
-                        attempt
-                    );
+                    log::info!("[delete_vertex] dropped vertex {id:?} (attempt {attempt})");
                     return Ok(());
                 }
                 Err(GraphError::InvalidQuery(msg))
                     if msg.contains("Lock expired") && attempt == 1 =>
                 {
                     log::warn!(
-                        "[delete_vertex] Lock expired on vertex {:?}, retrying drop (1/2)",
-                        id
+                        "[delete_vertex] Lock expired on vertex {id:?}, retrying drop (1/2)"
                     );
                     continue;
                 }
                 Err(GraphError::InvalidQuery(msg)) if msg.contains("Lock expired") => {
-                    log::warn!(
-                        "[delete_vertex] Lock expired again on {:?}, ignoring cleanup",
-                        id
-                    );
+                    log::warn!("[delete_vertex] Lock expired again on {id:?}, ignoring cleanup");
                     return Ok(());
                 }
                 Err(e) => {
@@ -426,16 +414,13 @@ impl GuestTransaction for Transaction {
                 off + limit.unwrap_or(10_000)
             ));
         } else if let Some(lim) = limit {
-            gremlin.push_str(&format!(".limit({})", lim));
+            gremlin.push_str(&format!(".limit({lim})"));
         }
 
         gremlin.push_str(".elementMap()");
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
-        println!(
-            "[DEBUG][find_vertices] Raw Gremlin response: {:?}",
-            response
-        );
+        println!("[DEBUG][find_vertices] Raw Gremlin response: {response:?}");
 
         // Handle GraphSON g:List structure
         let data = &response["result"]["data"];
@@ -454,10 +439,7 @@ impl GuestTransaction for Transaction {
             .map(|item| {
                 let result = helpers::parse_vertex_from_gremlin(item);
                 if let Err(ref e) = result {
-                    println!(
-                        "[DEBUG][find_vertices] Parse error for item {:?}: {:?}",
-                        item, e
-                    );
+                    println!("[DEBUG][find_vertices] Parse error for item {item:?}: {e:?}");
                 }
                 result
             })
@@ -494,9 +476,9 @@ impl GuestTransaction for Transaction {
         bindings.insert("edge_label".into(), json!(edge_type));
 
         for (i, (k, v)) in properties.into_iter().enumerate() {
-            let kb = format!("k{}", i);
-            let vb = format!("v{}", i);
-            gremlin.push_str(&format!(".property({}, {})", kb, vb));
+            let kb = format!("k{i}");
+            let vb = format!("v{i}");
+            gremlin.push_str(&format!(".property({kb}, {vb})"));
             bindings.insert(kb.clone(), json!(k));
             bindings.insert(vb.clone(), conversions::to_json_value(v)?);
             println!("[LOG create_edge] bound {} -> {:?}", kb, bindings[&kb]);
@@ -542,7 +524,7 @@ impl GuestTransaction for Transaction {
         } else if let Some(obj) = row.as_object() {
             flat = obj.clone();
         } else {
-            println!("[ERROR create_edge] unexpected row format: {:#?}", row);
+            println!("[ERROR create_edge] unexpected row format: {row:#?}");
             return Err(GraphError::InternalError("Unexpected row format".into()));
         }
 
@@ -603,7 +585,7 @@ impl GuestTransaction for Transaction {
         } else {
             return Ok(None);
         };
-        println!("[LOG get_edge] unwrapped row = {:#?}", row);
+        println!("[LOG get_edge] unwrapped row = {row:#?}");
 
         let mut flat = serde_json::Map::new();
         if row.get("@type") == Some(&json!("g:Map")) {
@@ -691,9 +673,9 @@ impl GuestTransaction for Transaction {
         bindings.insert("edge_id".to_string(), id_json.clone());
 
         for (i, (k, v)) in properties.iter().enumerate() {
-            let kb = format!("k{}", i);
-            let vb = format!("v{}", i);
-            gremlin_update.push_str(&format!(".sideEffect(property({}, {}))", kb, vb));
+            let kb = format!("k{i}");
+            let vb = format!("v{i}");
+            gremlin_update.push_str(&format!(".sideEffect(property({kb}, {vb}))"));
             bindings.insert(kb.clone(), json!(k));
             bindings.insert(vb.clone(), conversions::to_json_value(v.clone())?);
         }
@@ -736,7 +718,7 @@ impl GuestTransaction for Transaction {
                     vv.clone()
                 };
                 flat.insert(key.clone(), val.clone());
-                log::info!("[update_edge] flat[{}] = {:#?}", key, val);
+                log::info!("[update_edge] flat[{key}] = {val:#?}");
             }
         } else if let Some(obj) = row.as_object() {
             flat = obj.clone();
@@ -799,9 +781,9 @@ impl GuestTransaction for Transaction {
         bindings.insert("edge_id".into(), id_json);
 
         for (i, (k, v)) in updates.into_iter().enumerate() {
-            let kb = format!("k{}", i);
-            let vb = format!("v{}", i);
-            gremlin.push_str(&format!(".property({}, {})", kb, vb));
+            let kb = format!("k{i}");
+            let vb = format!("v{i}");
+            gremlin.push_str(&format!(".property({kb}, {vb})"));
             bindings.insert(kb.clone(), json!(k));
             bindings.insert(vb.clone(), conversions::to_json_value(v)?);
         }
@@ -851,7 +833,7 @@ impl GuestTransaction for Transaction {
                 };
 
                 flat.insert(key.clone(), val.clone());
-                println!("[LOG update_edge] flat[{}] = {:#?}", key, val);
+                println!("[LOG update_edge] flat[{key}] = {val:#?}");
             }
         } else if let Some(obj) = row.as_object() {
             flat = obj.clone();
@@ -946,7 +928,7 @@ impl GuestTransaction for Transaction {
                 off + limit.unwrap_or(10_000)
             ));
         } else if let Some(lim) = limit {
-            gremlin.push_str(&format!(".limit({})", lim));
+            gremlin.push_str(&format!(".limit({lim})"));
         }
 
         gremlin.push_str(".elementMap()");
@@ -990,22 +972,22 @@ impl GuestTransaction for Transaction {
                     .iter()
                     .enumerate()
                     .map(|(i, label)| {
-                        let binding_key = format!("label_{}", i);
+                        let binding_key = format!("label_{i}");
                         bindings.insert(binding_key.clone(), json!(label));
                         binding_key
                     })
                     .collect();
                 let labels_str = label_bindings.join(", ");
-                format!("g.V(vertex_id).{}({})", direction_step, labels_str)
+                format!("g.V(vertex_id).{direction_step}({labels_str})")
             } else {
-                format!("g.V(vertex_id).{}()", direction_step)
+                format!("g.V(vertex_id).{direction_step}()")
             }
         } else {
-            format!("g.V(vertex_id).{}()", direction_step)
+            format!("g.V(vertex_id).{direction_step}()")
         };
 
         if let Some(lim) = limit {
-            gremlin.push_str(&format!(".limit({})", lim));
+            gremlin.push_str(&format!(".limit({lim})"));
         }
 
         gremlin.push_str(".elementMap()");
@@ -1056,22 +1038,22 @@ impl GuestTransaction for Transaction {
                     .iter()
                     .enumerate()
                     .map(|(i, label)| {
-                        let binding_key = format!("edge_label_{}", i);
+                        let binding_key = format!("edge_label_{i}");
                         bindings.insert(binding_key.clone(), json!(label));
                         binding_key
                     })
                     .collect();
                 let labels_str = label_bindings.join(", ");
-                format!("g.V(vertex_id).{}({})", direction_step, labels_str)
+                format!("g.V(vertex_id).{direction_step}({labels_str})")
             } else {
-                format!("g.V(vertex_id).{}()", direction_step)
+                format!("g.V(vertex_id).{direction_step}()")
             }
         } else {
-            format!("g.V(vertex_id).{}()", direction_step)
+            format!("g.V(vertex_id).{direction_step}()")
         };
 
         if let Some(lim) = limit {
-            gremlin.push_str(&format!(".limit({})", lim));
+            gremlin.push_str(&format!(".limit({lim})"));
         }
 
         gremlin.push_str(".elementMap()");
@@ -1104,14 +1086,14 @@ impl GuestTransaction for Transaction {
         let mut bindings = serde_json::Map::new();
 
         for (i, spec) in vertices.iter().enumerate() {
-            let label_binding = format!("l{}", i);
-            gremlin.push_str(&format!(".addV({})", label_binding));
+            let label_binding = format!("l{i}");
+            gremlin.push_str(&format!(".addV({label_binding})"));
             bindings.insert(label_binding, json!(spec.vertex_type));
 
             for (j, (key, value)) in spec.properties.iter().enumerate() {
-                let key_binding = format!("k_{}_{}", i, j);
-                let val_binding = format!("v_{}_{}", i, j);
-                gremlin.push_str(&format!(".property({}, {})", key_binding, val_binding));
+                let key_binding = format!("k_{i}_{j}");
+                let val_binding = format!("v_{i}_{j}");
+                gremlin.push_str(&format!(".property({key_binding}, {val_binding})"));
                 bindings.insert(key_binding, json!(key));
                 bindings.insert(val_binding, conversions::to_json_value(value.clone())?);
             }
@@ -1143,9 +1125,9 @@ impl GuestTransaction for Transaction {
         let mut edge_queries = Vec::new();
 
         for (i, edge_spec) in edges.iter().enumerate() {
-            let from_binding = format!("from_{}", i);
-            let to_binding = format!("to_{}", i);
-            let label_binding = format!("label_{}", i);
+            let from_binding = format!("from_{i}");
+            let to_binding = format!("to_{i}");
+            let label_binding = format!("label_{i}");
 
             let from_id_json = match &edge_spec.from_vertex {
                 ElementId::StringValue(s) => json!(s),
@@ -1162,15 +1144,13 @@ impl GuestTransaction for Transaction {
             bindings.insert(to_binding.clone(), to_id_json);
             bindings.insert(label_binding.clone(), json!(edge_spec.edge_type));
 
-            let mut edge_query = format!(
-                "g.V({}).addE({}).to(g.V({}))",
-                from_binding, label_binding, to_binding
-            );
+            let mut edge_query =
+                format!("g.V({from_binding}).addE({label_binding}).to(g.V({to_binding}))");
 
             for (j, (key, value)) in edge_spec.properties.iter().enumerate() {
-                let key_binding = format!("k_{}_{}", i, j);
-                let val_binding = format!("v_{}_{}", i, j);
-                edge_query.push_str(&format!(".property({}, {})", key_binding, val_binding));
+                let key_binding = format!("k_{i}_{j}");
+                let val_binding = format!("v_{i}_{j}");
+                edge_query.push_str(&format!(".property({key_binding}, {val_binding})"));
                 bindings.insert(key_binding, json!(key));
                 bindings.insert(val_binding, conversions::to_json_value(value.clone())?);
             }
@@ -1209,26 +1189,24 @@ impl GuestTransaction for Transaction {
         let mut bindings = serde_json::Map::new();
 
         for (i, (key, value)) in properties.iter().enumerate() {
-            let key_binding = format!("mk_{}", i);
-            let val_binding = format!("mv_{}", i);
-            gremlin_match.push_str(&format!(".has({}, {})", key_binding, val_binding));
+            let key_binding = format!("mk_{i}");
+            let val_binding = format!("mv_{i}");
+            gremlin_match.push_str(&format!(".has({key_binding}, {val_binding})"));
             bindings.insert(key_binding, json!(key.clone()));
             bindings.insert(val_binding, conversions::to_json_value(value.clone())?);
         }
 
-        let mut gremlin_create = format!("addV('{}')", vertex_type);
+        let mut gremlin_create = format!("addV('{vertex_type}')");
         for (i, (key, value)) in properties.iter().enumerate() {
-            let key_binding = format!("ck_{}", i);
-            let val_binding = format!("cv_{}", i);
-            gremlin_create.push_str(&format!(".property({}, {})", key_binding, val_binding));
+            let key_binding = format!("ck_{i}");
+            let val_binding = format!("cv_{i}");
+            gremlin_create.push_str(&format!(".property({key_binding}, {val_binding})"));
             bindings.insert(key_binding, json!(key.clone()));
             bindings.insert(val_binding, conversions::to_json_value(value.clone())?);
         }
 
-        let gremlin = format!(
-            "{}.fold().coalesce(unfold(), {}).elementMap()",
-            gremlin_match, gremlin_create
-        );
+        let gremlin =
+            format!("{gremlin_match}.fold().coalesce(unfold(), {gremlin_create}).elementMap()");
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
@@ -1281,27 +1259,25 @@ impl GuestTransaction for Transaction {
         );
 
         for (i, (k, v)) in properties.iter().enumerate() {
-            let mk = format!("ek_{}", i);
-            let mv = format!("ev_{}", i);
-            gremlin_match.push_str(&format!(".has({}, {})", mk, mv));
+            let mk = format!("ek_{i}");
+            let mv = format!("ev_{i}");
+            gremlin_match.push_str(&format!(".has({mk}, {mv})"));
             bindings.insert(mk, json!(k));
             bindings.insert(mv, conversions::to_json_value(v.clone())?);
         }
 
         let mut gremlin_create =
-            format!("addE('{}').from(__.V(from_id)).to(__.V(to_id))", edge_label);
+            format!("addE('{edge_label}').from(__.V(from_id)).to(__.V(to_id))");
         for (i, (k, v)) in properties.into_iter().enumerate() {
-            let ck = format!("ck_{}", i);
-            let cv = format!("cv_{}", i);
-            gremlin_create.push_str(&format!(".property({}, {})", ck, cv));
+            let ck = format!("ck_{i}");
+            let cv = format!("cv_{i}");
+            gremlin_create.push_str(&format!(".property({ck}, {cv})"));
             bindings.insert(ck, json!(k));
             bindings.insert(cv, conversions::to_json_value(v)?);
         }
 
-        let gremlin = format!(
-            "{}.fold().coalesce(unfold(), {}).elementMap()",
-            gremlin_match, gremlin_create
-        );
+        let gremlin =
+            format!("{gremlin_match}.fold().coalesce(unfold(), {gremlin_create}).elementMap()");
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
         let result_data = response["result"]["data"]

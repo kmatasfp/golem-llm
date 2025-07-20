@@ -277,7 +277,7 @@ impl GuestTransaction for Transaction {
 
         let limit_val = limit.unwrap_or(100); // Default limit
         let offset_val = offset.unwrap_or(0);
-        query_parts.push(format!("LIMIT {}, {}", offset_val, limit_val));
+        query_parts.push(format!("LIMIT {offset_val}, {limit_val}"));
         query_parts.push("RETURN v".to_string());
 
         let full_query = query_parts.join(" ");
@@ -533,7 +533,7 @@ impl GuestTransaction for Transaction {
 
         let limit_val = limit.unwrap_or(100);
         let offset_val = offset.unwrap_or(0);
-        query_parts.push(format!("LIMIT {}, {}", offset_val, limit_val));
+        query_parts.push(format!("LIMIT {offset_val}, {limit_val}"));
         query_parts.push("RETURN e".to_string());
 
         let full_query = query_parts.join(" ");

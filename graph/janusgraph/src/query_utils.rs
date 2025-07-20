@@ -38,10 +38,7 @@ pub(crate) fn build_gremlin_filter_step(
     let json_value = crate::conversions::to_json_value(condition.value.clone())?;
     binding_map.insert(value_binding.clone(), json_value);
 
-    Ok(format!(
-        ".has({}, {}({}))",
-        key_binding, predicate, value_binding
-    ))
+    Ok(format!(".has({key_binding}, {predicate}({value_binding}))"))
 }
 
 pub(crate) fn build_gremlin_sort_clause(sort_specs: &[SortSpec]) -> String {

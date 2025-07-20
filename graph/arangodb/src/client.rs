@@ -19,10 +19,10 @@ pub struct ArangoDbApi {
 
 impl ArangoDbApi {
     pub fn new(host: &str, port: u16, username: &str, password: &str, database_name: &str) -> Self {
-        let base_url = format!("http://{}:{}/_db/{}", host, port, database_name);
+        let base_url = format!("http://{host}:{port}/_db/{database_name}");
         let auth_header = format!(
             "Basic {}",
-            general_purpose::STANDARD.encode(format!("{}:{}", username, password))
+            general_purpose::STANDARD.encode(format!("{username}:{password}"))
         );
 
         let client = Client::builder()
@@ -51,7 +51,7 @@ impl ArangoDbApi {
 
         if let Some(body_value) = body {
             let body_string = serde_json::to_string(body_value).map_err(|e| {
-                GraphError::InternalError(format!("Failed to serialize request body: {}", e))
+                GraphError::InternalError(format!("Failed to serialize request body: {e}"))
             })?;
 
             request_builder = request_builder
@@ -73,27 +73,25 @@ impl ArangoDbApi {
 
         if status.is_success() {
             let response_body: Value = response.json().map_err(|e| {
-                GraphError::InternalError(format!("Failed to parse response body: {}", e))
+                GraphError::InternalError(format!("Failed to parse response body: {e}"))
             })?;
 
             if let Some(result) = response_body.get("result") {
                 serde_json::from_value(result.clone()).map_err(|e| {
                     GraphError::InternalError(format!(
-                        "Failed to deserialize successful response: {}",
-                        e
+                        "Failed to deserialize successful response: {e}"
                     ))
                 })
             } else {
                 serde_json::from_value(response_body).map_err(|e| {
                     GraphError::InternalError(format!(
-                        "Failed to deserialize successful response: {}",
-                        e
+                        "Failed to deserialize successful response: {e}"
                     ))
                 })
             }
         } else {
             let error_body: Value = response.json().map_err(|e| {
-                GraphError::InternalError(format!("Failed to read error response: {}", e))
+                GraphError::InternalError(format!("Failed to read error response: {e}"))
             })?;
 
             let error_msg = error_body
@@ -168,13 +166,13 @@ impl ArangoDbApi {
     }
 
     pub fn commit_transaction(&self, transaction_id: &str) -> Result<(), GraphError> {
-        let endpoint = format!("/_api/transaction/{}", transaction_id);
+        let endpoint = format!("/_api/transaction/{transaction_id}");
         let _: Value = self.execute(Method::PUT, &endpoint, None)?;
         Ok(())
     }
 
     pub fn rollback_transaction(&self, transaction_id: &str) -> Result<(), GraphError> {
-        let endpoint = format!("/_api/transaction/{}", transaction_id);
+        let endpoint = format!("/_api/transaction/{transaction_id}");
         let _: Value = self.execute(Method::DELETE, &endpoint, None)?;
         Ok(())
     }
@@ -187,7 +185,7 @@ impl ArangoDbApi {
         let url = format!("{}/_api/cursor", self.base_url);
 
         let body_string = serde_json::to_string(&query)
-            .map_err(|e| GraphError::InternalError(format!("Failed to serialize query: {}", e)))?;
+            .map_err(|e| GraphError::InternalError(format!("Failed to serialize query: {e}")))?;
 
         let response = self
             .client
@@ -285,7 +283,7 @@ impl ArangoDbApi {
             body["name"] = json!(index_name);
         }
 
-        let endpoint = format!("/_api/index?collection={}", collection);
+        let endpoint = format!("/_api/index?collection={collection}");
         let _: Value = self.execute(Method::POST, &endpoint, Some(&body))?;
         Ok(())
     }
@@ -303,7 +301,7 @@ impl ArangoDbApi {
                         if let Some(idx_name) = idx["name"].as_str() {
                             if idx_name == name {
                                 if let Some(idx_id) = idx["id"].as_str() {
-                                    let delete_endpoint = format!("/_api/index/{}", idx_id);
+                                    let delete_endpoint = format!("/_api/index/{idx_id}");
                                     let _: Value =
                                         self.execute(Method::DELETE, &delete_endpoint, None)?;
                                     return Ok(());
@@ -316,8 +314,7 @@ impl ArangoDbApi {
         }
 
         Err(GraphError::InternalError(format!(
-            "Index '{}' not found",
-            name
+            "Index '{name}' not found"
         )))
     }
 
@@ -453,7 +450,7 @@ impl ArangoDbApi {
     }
 
     pub fn get_transaction_status(&self, transaction_id: &str) -> Result<String, GraphError> {
-        let endpoint = format!("/_api/transaction/{}", transaction_id);
+        let endpoint = format!("/_api/transaction/{transaction_id}");
         let response: TransactionStatusResponse = self.execute(Method::GET, &endpoint, None)?;
         Ok(response.status)
     }
