@@ -2,33 +2,29 @@ use golem_web_search::error::from_reqwest_error;
 use golem_web_search::golem::web_search::web_search::SearchError;
 use log::trace;
 use reqwest::Method;
-use reqwest::{Client, Response};
+use reqwest::{ Response };
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::{ Deserialize, Serialize };
 use std::fmt::Debug;
 
 const BASE_URL: &str = "https://api.tavily.com/search";
 
 /// The Tavily Search API client for web search with deep document indexing.
 pub struct TavilySearchApi {
-    client: Client,
+    client: reqwest::Client,
+    api_key: String,
 }
 
 impl TavilySearchApi {
-    pub fn new(_api_key: String) -> Self {
-        let client = Client::builder()
-            .user_agent("Golem-Web-Search/1.0")
-            .build()
-            .expect("Failed to initialize HTTP client");
-
-        Self { client }
+    pub fn new(api_key: String) -> Self {
+        let client = reqwest::Client::new();
+        Self { client, api_key }
     }
 
-    pub fn search(&self, request: SearchRequest) -> Result<SearchResponse, SearchError> {
+    pub fn search(&self, mut request: SearchRequest) -> Result<SearchResponse, SearchError> {
         trace!("Sending request to Tavily Search API: {request:?}");
-
-        let response = self
-            .client
+        request.api_key = self.api_key.clone();
+        let response = self.client
             .request(Method::POST, BASE_URL)
             .header("Content-Type", "application/json")
             .json(&request)
@@ -109,19 +105,17 @@ fn parse_response<T: DeserializeOwned + Debug>(response: Response) -> Result<T, 
                     401 => SearchError::BackendError("Invalid API key".to_string()),
                     403 => SearchError::BackendError("API key quota exceeded".to_string()),
                     429 => SearchError::RateLimited(60), // Default to 60 seconds
-                    _ => SearchError::BackendError(format!(
-                        "Request failed with {}: {}",
-                        status, error_body.error
-                    )),
+                    _ =>
+                        SearchError::BackendError(
+                            format!("Request failed with {}: {}", status, error_body.error)
+                        ),
                 };
 
                 Err(search_error)
             }
             Err(_) => {
                 // Fallback for non-JSON error responses
-                Err(SearchError::BackendError(format!(
-                    "Request failed with status {status}"
-                )))
+                Err(SearchError::BackendError(format!("Request failed with status {status}")))
             }
         }
     }

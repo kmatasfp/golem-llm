@@ -144,7 +144,7 @@ impl Guest for Component {
         let mut output = String::new();
         output.push_str("Search session started successfully!\n\n");
         let name = std::env::var("GOLEM_WORKER_NAME").unwrap();
-        let round = 0;
+        let mut round = 0;
 
         // Get first page
         println!("Getting first page...");
@@ -162,12 +162,13 @@ impl Guest for Component {
                 output.push_str(&format!("{}\n\n", error_msg));
             }
         }
+        round += 1;
 
         // Add a delay before the next request to avoid rate limiting
         std::thread::sleep(std::time::Duration::from_secs(2));
 
         // Crash simulation before getting second page
-        if round == 2 {
+        if round == 1 {
             atomically(|| {
                 let client = TestHelperApi::new(&name);
                 let answer = client.blocking_inc_and_get();

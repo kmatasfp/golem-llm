@@ -3,12 +3,19 @@ mod conversions;
 
 use std::cell::RefCell;
 
-use crate::client::{BraveSearchApi, SearchRequest};
-use crate::conversions::{params_to_request, response_to_results, validate_search_params};
+use crate::client::{ BraveSearchApi, SearchRequest };
+use crate::conversions::{ params_to_request, response_to_results, validate_search_params };
 use golem_web_search::golem::web_search::web_search::{
-    Guest, GuestSearchSession, SearchError, SearchMetadata, SearchParams, SearchResult,
+    Guest,
+    GuestSearchSession,
+    SearchError,
+    SearchMetadata,
+    SearchParams,
+    SearchResult,
     SearchSession,
 };
+use golem_web_search::durability::Durablewebsearch;
+use golem_web_search::durability::ExtendedwebsearchGuest;
 
 use golem_web_search::LOGGING_STATE;
 
@@ -99,14 +106,16 @@ impl BraveSearchComponent {
     }
 
     fn get_api_key() -> Result<String, SearchError> {
-        std::env::var(Self::API_KEY_VAR).map_err(|_| {
-            SearchError::BackendError("BRAVE_API_KEY environment variable not set".to_string())
-        })
+        std::env
+            ::var(Self::API_KEY_VAR)
+            .map_err(|_| {
+                SearchError::BackendError("BRAVE_API_KEY environment variable not set".to_string())
+            })
     }
 
     fn execute_search(
         params: SearchParams,
-        api_key: String,
+        api_key: String
     ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
         validate_search_params(&params)?;
 
@@ -121,7 +130,7 @@ impl BraveSearchComponent {
 
     fn start_search_session(
         params: SearchParams,
-        api_key: String,
+        api_key: String
     ) -> Result<BraveSearchSession, SearchError> {
         validate_search_params(&params)?;
 
@@ -145,11 +154,36 @@ impl Guest for BraveSearchComponent {
     }
 
     fn search_once(
-        params: SearchParams,
+        params: SearchParams
     ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
         Self::execute_search(params, Self::get_api_key()?)
     }
 }
 
-golem_web_search::export_websearch!(BraveSearchComponent with_types_in golem_web_search);
+impl ExtendedwebsearchGuest for BraveSearchComponent {
+    type ReplayState = SearchParams;
+
+    fn unwrapped_search_session(params: SearchParams) -> Result<Self::SearchSession, SearchError> {
+        let client = Self::create_client()?;
+        let api_key = Self::get_api_key()?;
+        let request = crate::conversions::params_to_request(params.clone(), api_key, 0)?;
+        let search = BraveSearch::new(client, request, params);
+        Ok(BraveSearchSession::new(search))
+    }
+
+    fn session_to_state(session: &Self::SearchSession) -> Self::ReplayState {
+        session.0.borrow().params.clone()
+    }
+
+    fn session_from_state(state: &Self::ReplayState) -> Result<Self::SearchSession, SearchError> {
+        let client = Self::create_client()?;
+        let api_key = Self::get_api_key()?;
+        let request = crate::conversions::params_to_request(state.clone(), api_key, 0)?;
+        let search = BraveSearch::new(client, request, state.clone());
+        Ok(BraveSearchSession::new(search))
+    }
+}
+
+type DurableBraveComponent = Durablewebsearch<BraveSearchComponent>;
+golem_web_search::export_websearch!(DurableBraveComponent with_types_in golem_web_search);

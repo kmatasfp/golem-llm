@@ -3,12 +3,19 @@ mod conversions;
 
 use std::cell::RefCell;
 
-use crate::client::{GoogleSearchApi, SearchRequest};
-use crate::conversions::{params_to_request, response_to_results, validate_search_params};
+use crate::client::{ GoogleSearchApi, SearchRequest };
+use crate::conversions::{ params_to_request, response_to_results, validate_search_params };
 use golem_web_search::golem::web_search::web_search::{
-    Guest, GuestSearchSession, SearchError, SearchMetadata, SearchParams, SearchResult,
+    Guest,
+    GuestSearchSession,
+    SearchError,
+    SearchMetadata,
+    SearchParams,
+    SearchResult,
     SearchSession,
 };
+use golem_web_search::durability::Durablewebsearch;
+use golem_web_search::durability::ExtendedwebsearchGuest;
 
 use golem_web_search::LOGGING_STATE;
 
@@ -101,21 +108,25 @@ impl GoogleCustomSearchComponent {
     const SEARCH_ENGINE_ID_VAR: &'static str = "GOOGLE_SEARCH_ENGINE_ID";
 
     fn create_client() -> Result<GoogleSearchApi, SearchError> {
-        let api_key = std::env::var(Self::API_KEY_VAR).map_err(|_| {
-            SearchError::BackendError("GOOGLE_API_KEY environment variable not set".to_string())
-        })?;
+        let api_key = std::env
+            ::var(Self::API_KEY_VAR)
+            .map_err(|_| {
+                SearchError::BackendError("GOOGLE_API_KEY environment variable not set".to_string())
+            })?;
 
-        let search_engine_id = std::env::var(Self::SEARCH_ENGINE_ID_VAR).map_err(|_| {
-            SearchError::BackendError(
-                "GOOGLE_SEARCH_ENGINE_ID environment variable not set".to_string(),
-            )
-        })?;
+        let search_engine_id = std::env
+            ::var(Self::SEARCH_ENGINE_ID_VAR)
+            .map_err(|_| {
+                SearchError::BackendError(
+                    "GOOGLE_SEARCH_ENGINE_ID environment variable not set".to_string()
+                )
+            })?;
 
         Ok(GoogleSearchApi::new(api_key, search_engine_id))
     }
 
     fn execute_search(
-        params: SearchParams,
+        params: SearchParams
     ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
         validate_search_params(&params)?;
 
@@ -151,11 +162,34 @@ impl Guest for GoogleCustomSearchComponent {
     }
 
     fn search_once(
-        params: SearchParams,
+        params: SearchParams
     ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
         Self::execute_search(params)
     }
 }
 
-golem_web_search::export_websearch!(GoogleCustomSearchComponent with_types_in golem_web_search);
+impl ExtendedwebsearchGuest for GoogleCustomSearchComponent {
+    type ReplayState = SearchParams;
+
+    fn unwrapped_search_session(params: SearchParams) -> Result<Self::SearchSession, SearchError> {
+        let client = Self::create_client()?;
+        let request = crate::conversions::params_to_request(params.clone(), 1)?;
+        let search = GoogleSearch::new(client, request, params);
+        Ok(GoogleSearchSession::new(search))
+    }
+
+    fn session_to_state(session: &Self::SearchSession) -> Self::ReplayState {
+        session.0.borrow().params.clone()
+    }
+
+    fn session_from_state(state: &Self::ReplayState) -> Result<Self::SearchSession, SearchError> {
+        let client = GoogleCustomSearchComponent::create_client()?;
+        let request = crate::conversions::params_to_request(state.clone(), 1)?;
+        let search = GoogleSearch::new(client, request, state.clone());
+        Ok(GoogleSearchSession::new(search))
+    }
+}
+
+type DurableGoogleComponent = Durablewebsearch<GoogleCustomSearchComponent>;
+golem_web_search::export_websearch!(DurableGoogleComponent with_types_in golem_web_search);

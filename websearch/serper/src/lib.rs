@@ -3,12 +3,19 @@ mod conversions;
 
 use std::cell::RefCell;
 
-use crate::client::{SearchRequest, SerperSearchApi};
-use crate::conversions::{params_to_request, response_to_results, validate_search_params};
+use crate::client::{ SearchRequest, SerperSearchApi };
+use crate::conversions::{ params_to_request, response_to_results, validate_search_params };
 use golem_web_search::golem::web_search::web_search::{
-    Guest, GuestSearchSession, SearchError, SearchMetadata, SearchParams, SearchResult,
+    Guest,
+    GuestSearchSession,
+    SearchError,
+    SearchMetadata,
+    SearchParams,
+    SearchResult,
     SearchSession,
 };
+use golem_web_search::durability::Durablewebsearch;
+use golem_web_search::durability::ExtendedwebsearchGuest;
 
 use golem_web_search::LOGGING_STATE;
 
@@ -39,8 +46,10 @@ impl SerperSearch {
         }
 
         // Update request with current page
-        let request =
-            crate::conversions::params_to_request(self.params.clone(), self.current_page)?;
+        let request = crate::conversions::params_to_request(
+            self.params.clone(),
+            self.current_page
+        )?;
 
         let response = self.client.search(request)?;
         let (results, metadata) = response_to_results(response, &self.params, self.current_page);
@@ -94,15 +103,17 @@ impl SerperSearchComponent {
     const API_KEY_VAR: &'static str = "SERPER_API_KEY";
 
     fn create_client() -> Result<SerperSearchApi, SearchError> {
-        let api_key = std::env::var(Self::API_KEY_VAR).map_err(|_| {
-            SearchError::BackendError("SERPER_API_KEY environment variable not set".to_string())
-        })?;
+        let api_key = std::env
+            ::var(Self::API_KEY_VAR)
+            .map_err(|_| {
+                SearchError::BackendError("SERPER_API_KEY environment variable not set".to_string())
+            })?;
 
         Ok(SerperSearchApi::new(api_key))
     }
 
     fn execute_search(
-        params: SearchParams,
+        params: SearchParams
     ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
         validate_search_params(&params)?;
 
@@ -138,11 +149,34 @@ impl Guest for SerperSearchComponent {
     }
 
     fn search_once(
-        params: SearchParams,
+        params: SearchParams
     ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
         Self::execute_search(params)
     }
 }
 
-golem_web_search::export_websearch!(SerperSearchComponent with_types_in golem_web_search);
+impl ExtendedwebsearchGuest for SerperSearchComponent {
+    type ReplayState = SearchParams;
+
+    fn unwrapped_search_session(params: SearchParams) -> Result<Self::SearchSession, SearchError> {
+        let client = Self::create_client()?;
+        let request = crate::conversions::params_to_request(params.clone(), 0)?;
+        let search = SerperSearch::new(client, request, params);
+        Ok(SerperSearchSession::new(search))
+    }
+
+    fn session_to_state(session: &Self::SearchSession) -> Self::ReplayState {
+        session.0.borrow().params.clone()
+    }
+
+    fn session_from_state(state: &Self::ReplayState) -> Result<Self::SearchSession, SearchError> {
+        let client = Self::create_client()?;
+        let request = crate::conversions::params_to_request(state.clone(), 0)?;
+        let search = SerperSearch::new(client, request, state.clone());
+        Ok(SerperSearchSession::new(search))
+    }
+}
+
+type DurableSerperComponent = Durablewebsearch<SerperSearchComponent>;
+golem_web_search::export_websearch!(DurableSerperComponent with_types_in golem_web_search);
