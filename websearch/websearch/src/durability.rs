@@ -1,5 +1,6 @@
 use crate::exports::golem::web_search::web_search::Guest;
 use crate::exports::golem::web_search::web_search::{SearchError, SearchParams, SearchResult};
+use golem_rust::value_and_type::{FromValueAndType, IntoValue as IntoValueTrait};
 use std::marker::PhantomData;
 
 /// Wraps a websearch implementation with custom durability
@@ -9,11 +10,14 @@ pub struct Durablewebsearch<Impl> {
 
 /// Trait to be implemented in addition to the websearch `Guest` trait when wrapping it with `Durablewebsearch`.
 pub trait ExtendedwebsearchGuest: Guest + 'static {
+    type ReplayState: std::fmt::Debug + Clone + IntoValueTrait + FromValueAndType;
+
     /// Creates an instance of the websearch specific `SearchSession` without wrapping it in a `Resource`
     fn unwrapped_search_session(params: SearchParams) -> Result<Self::SearchSession, SearchError>;
 
     /// Used at the end of replay to go from replay to live mode
-    fn session_from_state(state: &Self::SearchSession) -> Self::SearchSession;
+    fn session_to_state(session: &Self::SearchSession) -> Self::ReplayState;
+    fn session_from_state(state: &Self::ReplayState) -> Self::SearchSession;
 
     /// Creates the retry prompt with a combination of the original search params, and the partially received
     /// search results. There is a default implementation here, but it can be overridden with provider-specific
@@ -75,9 +79,6 @@ mod durable_impl {
     use golem_rust::{with_persistence_level, PersistenceLevel};
     use std::cell::RefCell;
 
-    #[derive(Debug, golem_rust::IntoValue)]
-    struct NoInput;
-
     // Add the From implementation for SearchError to satisfy the Durability trait bounds
     impl From<&SearchError> for SearchError {
         fn from(error: &SearchError) -> Self {
@@ -85,7 +86,10 @@ mod durable_impl {
         }
     }
 
-    impl<Impl: ExtendedwebsearchGuest> Guest for Durablewebsearch<Impl> {
+    impl<Impl: ExtendedwebsearchGuest> Guest for Durablewebsearch<Impl>
+    where
+        Impl::ReplayState: From<SearchParams>,
+    {
         type SearchSession = DurableSearchSession<Impl>;
 
         fn start_search(params: SearchParams) -> Result<SearchSession, SearchError> {
@@ -115,8 +119,9 @@ mod durable_impl {
                     }
                 }
             } else {
-                let result = durability.replay::<SearchParams, SearchError>()?;
-                let session = SearchSession::new(DurableSearchSession::<Impl>::replay(result)?);
+                let replay_state = durability.replay::<Impl::ReplayState, SearchError>()?;
+                let session =
+                    SearchSession::new(DurableSearchSession::<Impl>::replay(replay_state)?);
                 Ok(session)
             }
         }
@@ -175,8 +180,7 @@ mod durable_impl {
             session: Impl::SearchSession,
         },
         Replay {
-            original_params: SearchParams,
-            current_page: u32,
+            replay_state: Impl::ReplayState,
             finished: bool,
         },
     }
@@ -192,11 +196,10 @@ mod durable_impl {
             }
         }
 
-        fn replay(original_params: SearchParams) -> Result<Self, SearchError> {
+        fn replay(replay_state: Impl::ReplayState) -> Result<Self, SearchError> {
             Ok(Self {
                 state: RefCell::new(Some(DurableSearchSessionState::Replay {
-                    original_params,
-                    current_page: 0,
+                    replay_state,
                     finished: false,
                 })),
             })
@@ -238,13 +241,15 @@ mod durable_impl {
 
                         match result {
                             Ok(value) => {
+                                let replay_state = Impl::session_to_state(session);
                                 let persisted_result =
-                                    durability.persist(NoInput, Ok(value.clone()))?;
+                                    durability.persist(replay_state.clone(), Ok(value.clone()))?;
                                 (Ok(persisted_result), None)
                             }
                             Err(error) => {
+                                let replay_state = Impl::session_to_state(session);
                                 let _ = durability.persist::<_, Vec<SearchResult>, SearchError>(
-                                    NoInput,
+                                    replay_state,
                                     Err(error.clone()),
                                 );
                                 (Err(error), None)
@@ -252,29 +257,36 @@ mod durable_impl {
                         }
                     }
                     Some(DurableSearchSessionState::Replay {
-                        original_params,
-                        current_page,
+                        replay_state,
                         finished,
                     }) => {
-                        *current_page += 1;
-
                         if *finished {
-                            let empty_result = durability.persist(NoInput, Ok(Vec::new()))?;
+                            let empty_result =
+                                durability.persist(replay_state.clone(), Ok(Vec::new()))?;
                             (Ok(empty_result), None)
                         } else {
-                            // Reconstruct session for the current page
-                            let session = Impl::unwrapped_search_session(original_params.clone())?;
-                            let mut last_results = Vec::new();
-                            for _ in 0..*current_page {
-                                last_results = session.next_page()?;
+                            let session = Impl::session_from_state(replay_state);
+                            let result = session.next_page();
+                            match result {
+                                Ok(value) => {
+                                    let new_replay_state = Impl::session_to_state(&session);
+                                    let persisted_result = durability
+                                        .persist(new_replay_state.clone(), Ok(value.clone()))?;
+                                    // Update replay_state for next call
+                                    *replay_state = new_replay_state;
+                                    (Ok(persisted_result), None)
+                                }
+                                Err(error) => {
+                                    let new_replay_state = Impl::session_to_state(&session);
+                                    let _ = durability
+                                        .persist::<_, Vec<SearchResult>, SearchError>(
+                                            new_replay_state.clone(),
+                                            Err(error.clone()),
+                                        );
+                                    *replay_state = new_replay_state;
+                                    (Err(error), None)
+                                }
                             }
-                            // Check if this is the last page (no more results)
-                            if last_results.is_empty() {
-                                *finished = true;
-                            }
-                            let persisted_result =
-                                durability.persist(NoInput, Ok(last_results.clone()))?;
-                            (Ok(persisted_result), None)
                         }
                     }
                     None => {
@@ -295,10 +307,7 @@ mod durable_impl {
                     Some(DurableSearchSessionState::Live { .. }) => {
                         unreachable!("Durable search session cannot be in live mode during replay");
                     }
-                    Some(DurableSearchSessionState::Replay { current_page, .. }) => {
-                        *current_page += 1;
-                        Ok(result)
-                    }
+                    Some(DurableSearchSessionState::Replay { .. }) => Ok(result),
                     None => {
                         unreachable!();
                     }
@@ -310,25 +319,13 @@ mod durable_impl {
             let state = self.state.borrow();
             match &*state {
                 Some(DurableSearchSessionState::Live { session }) => {
-                    // Always delegate to the underlying live session
                     with_persistence_level(PersistenceLevel::PersistNothing, || {
                         session.get_metadata()
                     })
                 }
-                Some(DurableSearchSessionState::Replay {
-                    original_params,
-                    current_page,
-                    ..
-                }) => {
-                    // Get metadata from the current replay state and update current_page
-                    let session = Impl::unwrapped_search_session(original_params.clone()).ok()?;
-                    let mut metadata = None;
-                    for _ in 0..*current_page {
-                        if let Some(meta) = session.get_metadata() {
-                            metadata = Some(meta);
-                        }
-                    }
-                    metadata
+                Some(DurableSearchSessionState::Replay { replay_state, .. }) => {
+                    let session = Impl::session_from_state(replay_state);
+                    session.get_metadata()
                 }
                 None => {
                     unreachable!()
