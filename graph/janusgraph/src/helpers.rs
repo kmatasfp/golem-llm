@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use std::env;
 
 pub(crate) fn config_from_env() -> Result<ConnectionConfig, GraphError> {
-    dotenvy::dotenv().ok();
+    // todo dotenvy::dotenv().ok();
     let host = env::var("JANUSGRAPH_HOST")
         .map_err(|_| GraphError::ConnectionFailed("Missing JANUSGRAPH_HOST env var".to_string()))?;
     let port = env::var("JANUSGRAPH_PORT").map_or(Ok(None), |p| {
