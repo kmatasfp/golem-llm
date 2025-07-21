@@ -289,7 +289,7 @@ mod durable_impl {
                     None => unreachable!(),
                 }
             } else {
-                let (result, _replay_state) =
+                let (result, next_replay_state) =
                     durability.replay::<(Vec<SearchResult>, Impl::ReplayState), SearchError>()?;
                 let mut state = self.state.borrow_mut();
 
@@ -299,7 +299,7 @@ mod durable_impl {
                     }
                     Some(DurableSearchSessionState::Replay { replay_state: _ }) => {
                         *state = Some(DurableSearchSessionState::Replay {
-                            replay_state: _replay_state.clone(),
+                            replay_state: next_replay_state.clone(),
                         });
                         Ok(result)
                     }
