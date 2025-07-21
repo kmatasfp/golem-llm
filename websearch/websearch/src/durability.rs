@@ -227,7 +227,7 @@ mod durable_impl {
 
             if durability.is_live() {
                 let mut state = self.state.borrow_mut();
-                let (result, new_live_session) = match &mut *state {
+                match &mut *state {
                     Some(DurableSearchSessionState::Live { session }) => {
                         let result =
                             with_persistence_level(PersistenceLevel::PersistNothing, || {
@@ -235,55 +235,49 @@ mod durable_impl {
                             });
 
                         match result {
-                            Ok(ref value) => {
-                                let persisted_result = durability.persist(
-                                    NoInput,
-                                    Ok((value.clone(), Impl::session_to_state(session))),
-                                )?;
-                                (Ok(persisted_result.0), None)
+                            Ok(value) => {
+                                let replay_state = Impl::session_to_state(session);
+                                let persisted_result = durability
+                                    .persist(NoInput, Ok((value.clone(), replay_state)))?;
+                                Ok(persisted_result.0)
                             }
-                            Err(ref error) => {
+                            Err(error) => {
                                 let _ = durability.persist::<
                                     _,
                                     (Vec<SearchResult>, Impl::ReplayState),
                                     SearchError
                                 >(NoInput, Err(error.clone()));
-                                (Err(error.clone()), None)
+                                Err(error)
                             }
                         }
                     }
                     Some(DurableSearchSessionState::Replay { replay_state }) => {
                         let session = Impl::session_from_state(replay_state)?;
-                        let result = session.next_page();
+                        let result =
+                            with_persistence_level(PersistenceLevel::PersistNothing, || {
+                                session.next_page()
+                            });
+
                         match result {
-                            Ok(ref value) => {
-                                let persisted_result = durability.persist(
-                                    NoInput,
-                                    Ok((value.clone(), Impl::session_to_state(&session))),
-                                )?;
-                                *replay_state = Impl::session_to_state(&session);
-                                (Ok(persisted_result.0), None)
+                            Ok(value) => {
+                                let new_replay_state = Impl::session_to_state(&session);
+                                let persisted_result = durability
+                                    .persist(NoInput, Ok((value.clone(), new_replay_state)))?;
+                                *state = Some(DurableSearchSessionState::Live { session });
+                                Ok(persisted_result.0)
                             }
-                            Err(ref error) => {
+                            Err(error) => {
                                 let _ = durability.persist::<
                                     _,
                                     (Vec<SearchResult>, Impl::ReplayState),
                                     SearchError
                                 >(NoInput, Err(error.clone()));
-                                (Err(error.clone()), None)
+                                Err(error)
                             }
                         }
                     }
-                    None => {
-                        unreachable!()
-                    }
-                };
-
-                if let Some(session) = new_live_session {
-                    *state = Some(DurableSearchSessionState::Live { session });
+                    None => unreachable!(),
                 }
-
-                result
             } else {
                 let (result, _replay_state) =
                     durability.replay::<(Vec<SearchResult>, Impl::ReplayState), SearchError>()?;
