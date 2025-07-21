@@ -17,8 +17,9 @@ use golem_web_search::LOGGING_STATE;
 // Define a custom ReplayState struct
 #[derive(Debug, Clone, PartialEq, golem_rust::FromValueAndType, golem_rust::IntoValue)]
 pub struct BraveReplayState {
-    pub params: SearchParams,
     pub api_key: String,
+    pub current_offset: u32,
+    pub metadata: Option<SearchMetadata>,
 }
 
 struct BraveSearch {
@@ -176,16 +177,22 @@ impl ExtendedwebsearchGuest for BraveSearchComponent {
     fn session_to_state(session: &Self::SearchSession) -> Self::ReplayState {
         let search = session.0.borrow();
         BraveReplayState {
-            params: search.params.clone(),
             api_key: search.client.api_key().clone(),
+            current_offset: search.current_offset,
+            metadata: search.metadata.clone(),
         }
     }
 
-    fn session_from_state(state: &Self::ReplayState) -> Result<Self::SearchSession, SearchError> {
+    fn session_from_state(
+        state: &Self::ReplayState,
+        params: SearchParams,
+    ) -> Result<Self::SearchSession, SearchError> {
         let client = BraveSearchApi::new(state.api_key.clone());
         let request =
-            crate::conversions::params_to_request(state.params.clone(), state.api_key.clone(), 0)?;
-        let search = BraveSearch::new(client, request, state.params.clone());
+            crate::conversions::params_to_request(params.clone(), state.api_key.clone(), 0)?;
+        let mut search = BraveSearch::new(client, request, params);
+        search.current_offset = state.current_offset;
+        search.metadata = state.metadata.clone();
         Ok(BraveSearchSession::new(search))
     }
 }
@@ -197,10 +204,11 @@ impl BraveSearchApi {
 }
 
 impl From<SearchParams> for BraveReplayState {
-    fn from(params: SearchParams) -> Self {
+    fn from(_params: SearchParams) -> Self {
         BraveReplayState {
-            params,
             api_key: String::new(), // Not used in real replay, only for macro compatibility
+            current_offset: 0,
+            metadata: None,
         }
     }
 }

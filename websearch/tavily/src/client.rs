@@ -12,7 +12,7 @@ const BASE_URL: &str = "https://api.tavily.com/search";
 /// The Tavily Search API client for web search with deep document indexing.
 pub struct TavilySearchApi {
     client: reqwest::Client,
-    api_key: String,
+    pub api_key: String,
 }
 
 impl TavilySearchApi {

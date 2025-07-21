@@ -10,8 +10,8 @@ const BASE_URL: &str = "https://www.googleapis.com/customsearch/v1";
 /// Google Custom Search API client for web search.
 pub struct GoogleSearchApi {
     client: Client,
-    api_key: String,
-    search_engine_id: String,
+    pub api_key: String,
+    pub search_engine_id: String,
 }
 
 impl GoogleSearchApi {

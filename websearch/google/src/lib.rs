@@ -14,6 +14,14 @@ use golem_web_search::golem::web_search::web_search::{
 
 use golem_web_search::LOGGING_STATE;
 
+#[derive(Debug, Clone, PartialEq, golem_rust::FromValueAndType, golem_rust::IntoValue)]
+pub struct GoogleReplayState {
+    pub api_key: String,
+    pub search_engine_id: String,
+    pub current_page: u32,
+    pub metadata: Option<SearchMetadata>,
+}
+
 struct GoogleSearch {
     client: GoogleSearchApi,
     request: SearchRequest,
@@ -161,7 +169,7 @@ impl Guest for GoogleCustomSearchComponent {
 }
 
 impl ExtendedwebsearchGuest for GoogleCustomSearchComponent {
-    type ReplayState = SearchParams;
+    type ReplayState = GoogleReplayState;
 
     fn unwrapped_search_session(params: SearchParams) -> Result<Self::SearchSession, SearchError> {
         let client = Self::create_client()?;
@@ -171,16 +179,49 @@ impl ExtendedwebsearchGuest for GoogleCustomSearchComponent {
     }
 
     fn session_to_state(session: &Self::SearchSession) -> Self::ReplayState {
-        session.0.borrow().params.clone()
+        let search = session.0.borrow();
+        GoogleReplayState {
+            api_key: search.client.api_key().to_string(),
+            search_engine_id: search.client.search_engine_id().to_string(),
+            current_page: search.current_page,
+            metadata: search.metadata.clone(),
+        }
     }
 
-    fn session_from_state(state: &Self::ReplayState) -> Result<Self::SearchSession, SearchError> {
-        let client = GoogleCustomSearchComponent::create_client()?;
-        let request = crate::conversions::params_to_request(state.clone(), 1)?;
-        let search = GoogleSearch::new(client, request, state.clone());
+    fn session_from_state(
+        state: &Self::ReplayState,
+        params: SearchParams,
+    ) -> Result<Self::SearchSession, SearchError> {
+        let client = GoogleSearchApi::new(state.api_key.clone(), state.search_engine_id.clone());
+        let request = crate::conversions::params_to_request(params.clone(), 1)?;
+        let mut search = GoogleSearch::new(client, request, params);
+        search.current_page = state.current_page;
+        search.metadata = state.metadata.clone();
+
         Ok(GoogleSearchSession::new(search))
     }
 }
 
 type DurableGoogleComponent = Durablewebsearch<GoogleCustomSearchComponent>;
 golem_web_search::export_websearch!(DurableGoogleComponent with_types_in golem_web_search);
+
+impl From<SearchParams> for GoogleReplayState {
+    fn from(_params: SearchParams) -> Self {
+        GoogleReplayState {
+            api_key: String::new(), // Not used in real replay, only for macro compatibility
+            search_engine_id: String::new(),
+            current_page: 0,
+            metadata: None,
+        }
+    }
+}
+
+impl GoogleSearchApi {
+    pub fn api_key(&self) -> &String {
+        &self.api_key
+    }
+
+    pub fn search_engine_id(&self) -> &String {
+        &self.search_engine_id
+    }
+}

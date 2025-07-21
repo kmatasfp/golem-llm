@@ -11,7 +11,7 @@ const BASE_URL: &str = "https://google.serper.dev/search";
 
 /// The Serper Search API client for Google-powered web search.
 pub struct SerperSearchApi {
-    api_key: String,
+    pub api_key: String,
     client: Client,
 }
 

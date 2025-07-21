@@ -14,6 +14,13 @@ use golem_web_search::golem::web_search::web_search::{
 
 use golem_web_search::LOGGING_STATE;
 
+#[derive(Debug, Clone, PartialEq, golem_rust::FromValueAndType, golem_rust::IntoValue)]
+pub struct TavilyReplayState {
+    pub api_key: String,
+    pub current_page: u32,
+    pub metadata: Option<SearchMetadata>,
+}
+
 struct TavilySearch {
     client: TavilySearchApi,
     params: SearchParams,
@@ -149,7 +156,7 @@ impl Guest for TavilySearchComponent {
 }
 
 impl ExtendedwebsearchGuest for TavilySearchComponent {
-    type ReplayState = SearchParams;
+    type ReplayState = TavilyReplayState;
 
     fn unwrapped_search_session(params: SearchParams) -> Result<Self::SearchSession, SearchError> {
         let client = Self::create_client()?;
@@ -160,17 +167,44 @@ impl ExtendedwebsearchGuest for TavilySearchComponent {
     }
 
     fn session_to_state(session: &Self::SearchSession) -> Self::ReplayState {
-        session.0.borrow().params.clone()
+        let search = session.0.borrow();
+        TavilyReplayState {
+            api_key: search.client.api_key().to_string(),
+            current_page: search.current_page,
+            metadata: search.metadata.clone(),
+        }
     }
 
-    fn session_from_state(state: &Self::ReplayState) -> Result<Self::SearchSession, SearchError> {
-        let client = Self::create_client()?;
-        let api_key = Self::get_api_key()?;
-        let request = crate::conversions::params_to_request(state.clone(), api_key, 1)?;
-        let search = TavilySearch::new(client, request, state.clone());
+    fn session_from_state(
+        state: &Self::ReplayState,
+        params: SearchParams,
+    ) -> Result<Self::SearchSession, SearchError> {
+        let client = TavilySearchApi::new(state.api_key.clone());
+        let request =
+            crate::conversions::params_to_request(params.clone(), state.api_key.clone(), 1)?;
+        let mut search = TavilySearch::new(client, request, params);
+        search.current_page = state.current_page;
+        search.metadata = state.metadata.clone();
+
         Ok(TavilySearchSession::new(search))
     }
 }
 
 type DurableTavilyComponent = Durablewebsearch<TavilySearchComponent>;
 golem_web_search::export_websearch!(DurableTavilyComponent with_types_in golem_web_search);
+
+impl From<SearchParams> for TavilyReplayState {
+    fn from(_params: SearchParams) -> Self {
+        TavilyReplayState {
+            api_key: String::new(), // Not used in real replay, only for macro compatibility
+            current_page: 0,
+            metadata: None,
+        }
+    }
+}
+
+impl TavilySearchApi {
+    pub fn api_key(&self) -> &String {
+        &self.api_key
+    }
+}

@@ -17,7 +17,10 @@ pub trait ExtendedwebsearchGuest: Guest + 'static {
 
     /// Used at the end of replay to go from replay to live mode
     fn session_to_state(session: &Self::SearchSession) -> Self::ReplayState;
-    fn session_from_state(state: &Self::ReplayState) -> Result<Self::SearchSession, SearchError>;
+    fn session_from_state(
+        state: &Self::ReplayState,
+        params: SearchParams,
+    ) -> Result<Self::SearchSession, SearchError>;
 
     /// Creates the retry prompt with a combination of the original search params, and the partially received
     /// search results. There is a default implementation here, but it can be overridden with provider-specific
@@ -113,7 +116,8 @@ mod durable_impl {
                 match result {
                     Ok(persisted_params) => {
                         Ok(SearchSession::new(DurableSearchSession::<Impl>::live(
-                            Impl::unwrapped_search_session(persisted_params)?,
+                            Impl::unwrapped_search_session(persisted_params.clone())?,
+                            persisted_params,
                         )))
                     }
                     Err(error) => {
@@ -124,7 +128,7 @@ mod durable_impl {
             } else {
                 let replay_state = durability.replay::<Impl::ReplayState, SearchError>()?;
                 let session =
-                    SearchSession::new(DurableSearchSession::<Impl>::replay(replay_state)?);
+                    SearchSession::new(DurableSearchSession::<Impl>::replay(replay_state, params)?);
                 Ok(session)
             }
         }
@@ -185,18 +189,24 @@ mod durable_impl {
 
     pub struct DurableSearchSession<Impl: ExtendedwebsearchGuest> {
         state: RefCell<Option<DurableSearchSessionState<Impl>>>,
+        params: SearchParams,
     }
 
     impl<Impl: ExtendedwebsearchGuest> DurableSearchSession<Impl> {
-        fn live(session: Impl::SearchSession) -> Self {
+        fn live(session: Impl::SearchSession, params: SearchParams) -> Self {
             Self {
                 state: RefCell::new(Some(DurableSearchSessionState::Live { session })),
+                params,
             }
         }
 
-        fn replay(replay_state: Impl::ReplayState) -> Result<Self, SearchError> {
+        fn replay(
+            replay_state: Impl::ReplayState,
+            params: SearchParams,
+        ) -> Result<Self, SearchError> {
             Ok(Self {
                 state: RefCell::new(Some(DurableSearchSessionState::Replay { replay_state })),
+                params,
             })
         }
     }
@@ -252,7 +262,7 @@ mod durable_impl {
                         }
                     }
                     Some(DurableSearchSessionState::Replay { replay_state }) => {
-                        let session = Impl::session_from_state(replay_state)?;
+                        let session = Impl::session_from_state(replay_state, self.params.clone())?;
                         let result =
                             with_persistence_level(PersistenceLevel::PersistNothing, || {
                                 session.next_page()
@@ -287,7 +297,12 @@ mod durable_impl {
                     Some(DurableSearchSessionState::Live { .. }) => {
                         unreachable!("Durable search session cannot be in live mode during replay");
                     }
-                    Some(DurableSearchSessionState::Replay { .. }) => Ok(result),
+                    Some(DurableSearchSessionState::Replay { replay_state: _ }) => {
+                        *state = Some(DurableSearchSessionState::Replay {
+                            replay_state: _replay_state.clone(),
+                        });
+                        Ok(result)
+                    }
                     None => {
                         unreachable!();
                     }
@@ -304,7 +319,8 @@ mod durable_impl {
                     })
                 }
                 Some(DurableSearchSessionState::Replay { replay_state }) => {
-                    let session = Impl::session_from_state(replay_state).ok()?;
+                    let session =
+                        Impl::session_from_state(replay_state, self.params.clone()).ok()?;
                     session.get_metadata()
                 }
                 None => {

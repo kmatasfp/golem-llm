@@ -14,6 +14,13 @@ use golem_web_search::golem::web_search::web_search::{
 
 use golem_web_search::LOGGING_STATE;
 
+#[derive(Debug, Clone, PartialEq, golem_rust::FromValueAndType, golem_rust::IntoValue)]
+pub struct SerperReplayState {
+    pub api_key: String,
+    pub current_page: u32,
+    pub metadata: Option<SearchMetadata>,
+}
+
 struct SerperSearch {
     client: SerperSearchApi,
     request: SearchRequest,
@@ -95,11 +102,14 @@ struct SerperSearchComponent;
 impl SerperSearchComponent {
     const API_KEY_VAR: &'static str = "SERPER_API_KEY";
 
-    fn create_client() -> Result<SerperSearchApi, SearchError> {
-        let api_key = std::env::var(Self::API_KEY_VAR).map_err(|_| {
+    fn get_api_key() -> Result<String, SearchError> {
+        std::env::var(Self::API_KEY_VAR).map_err(|_| {
             SearchError::BackendError("SERPER_API_KEY environment variable not set".to_string())
-        })?;
+        })
+    }
 
+    fn create_client() -> Result<SerperSearchApi, SearchError> {
+        let api_key = Self::get_api_key()?;
         Ok(SerperSearchApi::new(api_key))
     }
 
@@ -148,7 +158,7 @@ impl Guest for SerperSearchComponent {
 }
 
 impl ExtendedwebsearchGuest for SerperSearchComponent {
-    type ReplayState = SearchParams;
+    type ReplayState = SerperReplayState;
 
     fn unwrapped_search_session(params: SearchParams) -> Result<Self::SearchSession, SearchError> {
         let client = Self::create_client()?;
@@ -158,16 +168,42 @@ impl ExtendedwebsearchGuest for SerperSearchComponent {
     }
 
     fn session_to_state(session: &Self::SearchSession) -> Self::ReplayState {
-        session.0.borrow().params.clone()
+        let search = session.0.borrow();
+        SerperReplayState {
+            api_key: search.client.api_key().to_string(),
+            current_page: search.current_page,
+            metadata: search.metadata.clone(),
+        }
     }
 
-    fn session_from_state(state: &Self::ReplayState) -> Result<Self::SearchSession, SearchError> {
-        let client = Self::create_client()?;
-        let request = crate::conversions::params_to_request(state.clone(), 0)?;
-        let search = SerperSearch::new(client, request, state.clone());
+    fn session_from_state(
+        state: &Self::ReplayState,
+        params: SearchParams,
+    ) -> Result<Self::SearchSession, SearchError> {
+        let client = SerperSearchApi::new(state.api_key.clone());
+        let request = crate::conversions::params_to_request(params.clone(), 0)?;
+        let mut search = SerperSearch::new(client, request, params);
+        search.current_page = state.current_page;
+        search.metadata = state.metadata.clone();
         Ok(SerperSearchSession::new(search))
     }
 }
 
 type DurableSerperComponent = Durablewebsearch<SerperSearchComponent>;
 golem_web_search::export_websearch!(DurableSerperComponent with_types_in golem_web_search);
+
+impl From<SearchParams> for SerperReplayState {
+    fn from(_params: SearchParams) -> Self {
+        SerperReplayState {
+            api_key: String::new(), // Not used in real replay, only for macro compatibility
+            current_page: 0,
+            metadata: None,
+        }
+    }
+}
+
+impl SerperSearchApi {
+    pub fn api_key(&self) -> &String {
+        &self.api_key
+    }
+}
