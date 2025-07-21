@@ -17,56 +17,82 @@ use golem_web_search::LOGGING_STATE;
 #[derive(Debug, Clone, PartialEq, golem_rust::FromValueAndType, golem_rust::IntoValue)]
 pub struct TavilyReplayState {
     pub api_key: String,
-    pub current_page: u32,
     pub metadata: Option<SearchMetadata>,
 }
 
 struct TavilySearch {
     client: TavilySearchApi,
     params: SearchParams,
+    all_results: Vec<SearchResult>,
+    page_size: usize,
+    current_page: usize,
     finished: bool,
     metadata: Option<SearchMetadata>,
-    current_page: u32,
 }
 
 impl TavilySearch {
     fn new(client: TavilySearchApi, _request: SearchRequest, params: SearchParams) -> Self {
+        let page_size = params.max_results.unwrap_or(10) as usize;
         Self {
             client,
             params,
+            all_results: Vec::new(),
+            page_size,
+            current_page: 0,
             finished: false,
             metadata: None,
-            current_page: 0,
         }
+    }
+
+    fn fetch_all_results(&mut self) -> Result<(), SearchError> {
+        let api_key = std::env::var("TAVILY_API_KEY").unwrap_or_default();
+        let request = crate::conversions::params_to_request(self.params.clone(), api_key, 0)?;
+        let response = self.client.search(request)?;
+        let (results, metadata) = response_to_results(response, &self.params, 0);
+        self.all_results = results;
+        self.metadata = metadata;
+        Ok(())
     }
 
     fn next_page(&mut self) -> Result<Vec<SearchResult>, SearchError> {
         if self.finished {
             return Ok(vec![]);
         }
-
-        let api_key = std::env::var("TAVILY_API_KEY").unwrap_or_default();
-        let request =
-            crate::conversions::params_to_request(self.params.clone(), api_key, self.current_page)?;
-
-        let response = self.client.search(request)?;
-        let (results, metadata) = response_to_results(response, &self.params, self.current_page);
-
-        // Check if more results are available
-        if let Some(ref meta) = metadata {
-            if meta.next_page_token.is_none() {
-                self.finished = true;
-            } else {
-                self.current_page += 1;
-            }
+        if self.all_results.is_empty() {
+            self.fetch_all_results()?;
+        }
+        let start = self.current_page * self.page_size;
+        let end = ((self.current_page + 1) * self.page_size).min(self.all_results.len());
+        let page_results = if start < self.all_results.len() {
+            self.all_results[start..end].to_vec()
         } else {
+            Vec::new()
+        };
+        // Update metadata for this page
+        let total_results = Some(self.all_results.len() as u64);
+        let next_page_token = if end < self.all_results.len() {
+            Some((self.current_page + 1).to_string())
+        } else {
+            None
+        };
+        let current_page = self.current_page as u32;
+        self.metadata = Some(SearchMetadata {
+            query: self.params.query.clone(),
+            total_results,
+            search_time_ms: None,
+            safe_search: self.params.safe_search,
+            language: self.params.language.clone(),
+            region: self.params.region.clone(),
+            next_page_token,
+            rate_limits: None,
+            current_page,
+        });
+        self.current_page += 1;
+        if end >= self.all_results.len() {
             self.finished = true;
         }
-
-        self.metadata = metadata;
-        Ok(results)
+        Ok(page_results)
     }
-
     fn get_metadata(&self) -> Option<SearchMetadata> {
         self.metadata.clone()
     }
@@ -157,35 +183,29 @@ impl Guest for TavilySearchComponent {
 
 impl ExtendedwebsearchGuest for TavilySearchComponent {
     type ReplayState = TavilyReplayState;
-
     fn unwrapped_search_session(params: SearchParams) -> Result<Self::SearchSession, SearchError> {
         let client = Self::create_client()?;
         let api_key = Self::get_api_key()?;
-        let request = crate::conversions::params_to_request(params.clone(), api_key, 1)?;
+        let request = crate::conversions::params_to_request(params.clone(), api_key, 0)?;
         let search = TavilySearch::new(client, request, params);
         Ok(TavilySearchSession::new(search))
     }
-
     fn session_to_state(session: &Self::SearchSession) -> Self::ReplayState {
         let search = session.0.borrow();
         TavilyReplayState {
             api_key: search.client.api_key().to_string(),
-            current_page: search.current_page,
             metadata: search.metadata.clone(),
         }
     }
-
     fn session_from_state(
         state: &Self::ReplayState,
         params: SearchParams,
     ) -> Result<Self::SearchSession, SearchError> {
         let client = TavilySearchApi::new(state.api_key.clone());
         let request =
-            crate::conversions::params_to_request(params.clone(), state.api_key.clone(), 1)?;
+            crate::conversions::params_to_request(params.clone(), state.api_key.clone(), 0)?;
         let mut search = TavilySearch::new(client, request, params);
-        search.current_page = state.current_page;
         search.metadata = state.metadata.clone();
-
         Ok(TavilySearchSession::new(search))
     }
 }
@@ -197,7 +217,6 @@ impl From<SearchParams> for TavilyReplayState {
     fn from(_params: SearchParams) -> Self {
         TavilyReplayState {
             api_key: String::new(), // Not used in real replay, only for macro compatibility
-            current_page: 0,
             metadata: None,
         }
     }

@@ -141,7 +141,6 @@ pub fn validate_search_params(params: &SearchParams) -> Result<(), SearchError> 
     if params.query.trim().is_empty() {
         return Err(SearchError::InvalidQuery);
     }
-
     if let Some(max_results) = params.max_results {
         if max_results > 20 {
             return Err(SearchError::UnsupportedFeature(
@@ -149,6 +148,20 @@ pub fn validate_search_params(params: &SearchParams) -> Result<(), SearchError> 
             ));
         }
     }
-
+    if params.include_images == Some(true) {
+        return Err(SearchError::UnsupportedFeature(
+            "include-images not supported".to_string(),
+        ));
+    }
+    if params.include_html == Some(true) {
+        return Err(SearchError::UnsupportedFeature(
+            "include-html not supported".to_string(),
+        ));
+    }
+    if params.advanced_answer == Some(true) {
+        return Err(SearchError::UnsupportedFeature(
+            "advanced-answer not supported".to_string(),
+        ));
+    }
     Ok(())
 }

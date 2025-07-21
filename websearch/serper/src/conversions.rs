@@ -34,7 +34,7 @@ pub fn params_to_request(params: SearchParams, page: u32) -> Result<SearchReques
         gl,
         hl,
         num: params.max_results,
-        page: Some(page),
+        page: Some(page), // 1-based
     })
 }
 
@@ -115,7 +115,7 @@ fn create_search_metadata(
         region: params.region.clone(),
         next_page_token,
         rate_limits: None,
-        current_page,
+        current_page, // 1-based
     }
 }
 
@@ -131,6 +131,30 @@ pub fn validate_search_params(params: &SearchParams) -> Result<(), SearchError> 
             ));
         }
     }
-
+    if params.safe_search.is_some() {
+        return Err(SearchError::UnsupportedFeature(
+            "safe_search not supported".to_string(),
+        ));
+    }
+    if params.include_html == Some(true) {
+        return Err(SearchError::UnsupportedFeature(
+            "include-html not supported".to_string(),
+        ));
+    }
+    if params.time_range.is_some() {
+        return Err(SearchError::UnsupportedFeature(
+            "time-range not supported".to_string(),
+        ));
+    }
+    if params.include_images == Some(true) {
+        return Err(SearchError::UnsupportedFeature(
+            "include-images not supported".to_string(),
+        ));
+    }
+    if params.advanced_answer == Some(true) {
+        return Err(SearchError::UnsupportedFeature(
+            "advanced-answer not supported".to_string(),
+        ));
+    }
     Ok(())
 }

@@ -65,6 +65,9 @@ pub struct SearchMetadata {
     /// Rate limit information
     #[serde(rename = "rate-limits")]
     pub rate_limits: Option<RateLimitInfo>,
+    /// Current page number
+    #[serde(rename = "current-page")]
+    pub current_page: u32,
 }
 
 /// Level of safe search filtering.

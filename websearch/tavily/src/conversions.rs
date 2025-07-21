@@ -173,28 +173,9 @@ fn extract_domain(url: &str) -> Option<String> {
 fn create_search_metadata(
     response: &SearchResponse,
     params: &SearchParams,
-    current_page: u32,
+    _current_page: u32,
 ) -> SearchMetadata {
-    let has_more_results = {
-        let requested_count = params.max_results.unwrap_or(10);
-        response.results.len() == (requested_count as usize)
-    };
-
-    // Create next page token if more results are available
-    let next_page_token = if has_more_results {
-        let next_page = current_page + 1;
-        Some(next_page.to_string())
-    } else {
-        None
-    };
-
-    // Tavily doesn't provide total results count, so we estimate based on results returned
-    let total_results = if (response.results.len() as u32) >= params.max_results.unwrap_or(10) {
-        Some(100000u64) // Conservative estimate
-    } else {
-        Some(response.results.len() as u64)
-    };
-
+    let total_results = Some(response.results.len() as u64);
     SearchMetadata {
         query: params.query.clone(),
         total_results,
@@ -202,25 +183,32 @@ fn create_search_metadata(
         safe_search: params.safe_search,
         language: params.language.clone(),
         region: params.region.clone(),
-        next_page_token,
+        next_page_token: None,
         rate_limits: None,
-        current_page,
+        current_page: 0,
     }
 }
 
 pub fn validate_search_params(params: &SearchParams) -> Result<(), SearchError> {
-    // Only validate essential parameters - be more permissive
     if params.query.trim().is_empty() {
         return Err(SearchError::InvalidQuery);
     }
-
-    // Allow higher max_results but cap at reasonable limit
     if let Some(max_results) = params.max_results {
         if max_results > 500 {
             return Err(SearchError::UnsupportedFeature(
                 "max_results cannot exceed 500 for Tavily Search".to_string(),
             ));
         }
+    }
+    if params.safe_search.is_some() {
+        return Err(SearchError::UnsupportedFeature(
+            "safe_search not supported".to_string(),
+        ));
+    }
+    if params.include_html == Some(true) {
+        return Err(SearchError::UnsupportedFeature(
+            "include-html not supported".to_string(),
+        ));
     }
     Ok(())
 }

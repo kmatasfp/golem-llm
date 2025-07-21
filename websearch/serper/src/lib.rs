@@ -27,7 +27,7 @@ struct SerperSearch {
     params: SearchParams,
     finished: bool,
     metadata: Option<SearchMetadata>,
-    current_page: u32,
+    current_page: u32, // 1-based
 }
 
 impl SerperSearch {
@@ -38,39 +38,38 @@ impl SerperSearch {
             params,
             finished: false,
             metadata: None,
-            current_page: 0,
+            current_page: 1, // 1-based
         }
     }
-
     fn next_page(&mut self) -> Result<Vec<SearchResult>, SearchError> {
         if self.finished {
             return Ok(vec![]);
         }
-
-        // Update request with current page
         let request =
             crate::conversions::params_to_request(self.params.clone(), self.current_page)?;
-
         let response = self.client.search(request)?;
         let (results, metadata) = response_to_results(response, &self.params, self.current_page);
-
-        // Check if more results are available
-        if let Some(ref meta) = metadata {
-            let num_results = self.request.num.unwrap_or(10);
-            let has_more_results = results.len() == (num_results as usize);
-            let has_next_page = meta.next_page_token.is_some();
-            self.finished = !has_more_results || !has_next_page;
-            if !self.finished {
-                self.current_page += 1;
-            }
+        // Determine if more results are available
+        let num_results = self.request.num.unwrap_or(10);
+        let has_more_results = results.len() == (num_results as usize);
+        let next_page_token = if has_more_results {
+            Some((self.current_page + 1).to_string())
+        } else {
+            None
+        };
+        // Update metadata for this page
+        self.metadata = metadata.map(|mut m| {
+            m.current_page = self.current_page;
+            m.next_page_token = next_page_token.clone();
+            m
+        });
+        if has_more_results {
+            self.current_page += 1;
         } else {
             self.finished = true;
         }
-
-        self.metadata = metadata;
         Ok(results)
     }
-
     fn get_metadata(&self) -> Option<SearchMetadata> {
         self.metadata.clone()
     }
@@ -162,7 +161,7 @@ impl ExtendedwebsearchGuest for SerperSearchComponent {
 
     fn unwrapped_search_session(params: SearchParams) -> Result<Self::SearchSession, SearchError> {
         let client = Self::create_client()?;
-        let request = crate::conversions::params_to_request(params.clone(), 0)?;
+        let request = crate::conversions::params_to_request(params.clone(), 1)?;
         let search = SerperSearch::new(client, request, params);
         Ok(SerperSearchSession::new(search))
     }
@@ -181,7 +180,7 @@ impl ExtendedwebsearchGuest for SerperSearchComponent {
         params: SearchParams,
     ) -> Result<Self::SearchSession, SearchError> {
         let client = SerperSearchApi::new(state.api_key.clone());
-        let request = crate::conversions::params_to_request(params.clone(), 0)?;
+        let request = crate::conversions::params_to_request(params.clone(), state.current_page)?;
         let mut search = SerperSearch::new(client, request, params);
         search.current_page = state.current_page;
         search.metadata = state.metadata.clone();
