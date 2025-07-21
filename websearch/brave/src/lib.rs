@@ -3,21 +3,23 @@ mod conversions;
 
 use std::cell::RefCell;
 
-use crate::client::{ BraveSearchApi, SearchRequest };
-use crate::conversions::{ params_to_request, response_to_results, validate_search_params };
-use golem_web_search::golem::web_search::web_search::{
-    Guest,
-    GuestSearchSession,
-    SearchError,
-    SearchMetadata,
-    SearchParams,
-    SearchResult,
-    SearchSession,
-};
+use crate::client::{BraveSearchApi, SearchRequest};
+use crate::conversions::{params_to_request, response_to_results, validate_search_params};
 use golem_web_search::durability::Durablewebsearch;
 use golem_web_search::durability::ExtendedwebsearchGuest;
+use golem_web_search::golem::web_search::web_search::{
+    Guest, GuestSearchSession, SearchError, SearchMetadata, SearchParams, SearchResult,
+    SearchSession,
+};
 
 use golem_web_search::LOGGING_STATE;
+
+// Define a custom ReplayState struct
+#[derive(Debug, Clone, PartialEq, golem_rust::FromValueAndType, golem_rust::IntoValue)]
+pub struct BraveReplayState {
+    pub params: SearchParams,
+    pub api_key: String,
+}
 
 struct BraveSearch {
     client: BraveSearchApi,
@@ -106,16 +108,14 @@ impl BraveSearchComponent {
     }
 
     fn get_api_key() -> Result<String, SearchError> {
-        std::env
-            ::var(Self::API_KEY_VAR)
-            .map_err(|_| {
-                SearchError::BackendError("BRAVE_API_KEY environment variable not set".to_string())
-            })
+        std::env::var(Self::API_KEY_VAR).map_err(|_| {
+            SearchError::BackendError("BRAVE_API_KEY environment variable not set".to_string())
+        })
     }
 
     fn execute_search(
         params: SearchParams,
-        api_key: String
+        api_key: String,
     ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
         validate_search_params(&params)?;
 
@@ -130,7 +130,7 @@ impl BraveSearchComponent {
 
     fn start_search_session(
         params: SearchParams,
-        api_key: String
+        api_key: String,
     ) -> Result<BraveSearchSession, SearchError> {
         validate_search_params(&params)?;
 
@@ -154,34 +154,54 @@ impl Guest for BraveSearchComponent {
     }
 
     fn search_once(
-        params: SearchParams
+        params: SearchParams,
     ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
         Self::execute_search(params, Self::get_api_key()?)
     }
 }
 
+// ExtendedwebsearchGuest implementation
 impl ExtendedwebsearchGuest for BraveSearchComponent {
-    type ReplayState = SearchParams;
+    type ReplayState = BraveReplayState;
 
     fn unwrapped_search_session(params: SearchParams) -> Result<Self::SearchSession, SearchError> {
-        let client = Self::create_client()?;
         let api_key = Self::get_api_key()?;
+        let client = BraveSearchApi::new(api_key.clone());
         let request = crate::conversions::params_to_request(params.clone(), api_key, 0)?;
         let search = BraveSearch::new(client, request, params);
         Ok(BraveSearchSession::new(search))
     }
 
     fn session_to_state(session: &Self::SearchSession) -> Self::ReplayState {
-        session.0.borrow().params.clone()
+        let search = session.0.borrow();
+        BraveReplayState {
+            params: search.params.clone(),
+            api_key: search.client.api_key().clone(),
+        }
     }
 
     fn session_from_state(state: &Self::ReplayState) -> Result<Self::SearchSession, SearchError> {
-        let client = Self::create_client()?;
-        let api_key = Self::get_api_key()?;
-        let request = crate::conversions::params_to_request(state.clone(), api_key, 0)?;
-        let search = BraveSearch::new(client, request, state.clone());
+        let client = BraveSearchApi::new(state.api_key.clone());
+        let request =
+            crate::conversions::params_to_request(state.params.clone(), state.api_key.clone(), 0)?;
+        let search = BraveSearch::new(client, request, state.params.clone());
         Ok(BraveSearchSession::new(search))
+    }
+}
+
+impl BraveSearchApi {
+    pub fn api_key(&self) -> &String {
+        &self.api_key
+    }
+}
+
+impl From<SearchParams> for BraveReplayState {
+    fn from(params: SearchParams) -> Self {
+        BraveReplayState {
+            params,
+            api_key: String::new(), // Not used in real replay, only for macro compatibility
+        }
     }
 }
 

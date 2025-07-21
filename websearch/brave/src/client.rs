@@ -2,9 +2,9 @@ use golem_web_search::error::from_reqwest_error;
 use golem_web_search::golem::web_search::web_search::SearchError;
 use log::trace;
 use reqwest::Method;
-use reqwest::{ Client, Response };
+use reqwest::{Client, Response};
 use serde::de::DeserializeOwned;
-use serde::{ Deserialize, Serialize };
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
 const BASE_URL: &str = "https://api.search.brave.com/res/v1/web/search";
@@ -12,7 +12,7 @@ const BASE_URL: &str = "https://api.search.brave.com/res/v1/web/search";
 /// The Brave Search API client for web search.
 pub struct BraveSearchApi {
     client: Client,
-    api_key: String,
+    pub api_key: String,
 }
 
 impl BraveSearchApi {
@@ -28,17 +28,16 @@ impl BraveSearchApi {
     pub fn search(&self, request: SearchRequest) -> Result<SearchResponse, SearchError> {
         trace!("Sending request to Brave Search API: {request:?}");
 
-        let response = self.client
+        let response = self
+            .client
             .request(Method::GET, BASE_URL)
             .header("X-Subscription-Token", &self.api_key)
             .header("Accept", "application/json")
-            .query(
-                &[
-                    ("q", &request.query),
-                    ("count", &request.count.unwrap_or(10).to_string()),
-                    ("offset", &request.offset.unwrap_or(0).to_string()),
-                ]
-            )
+            .query(&[
+                ("q", &request.query),
+                ("count", &request.count.unwrap_or(10).to_string()),
+                ("offset", &request.offset.unwrap_or(0).to_string()),
+            ])
             .send()
             .map_err(|err| from_reqwest_error("Request failed", err))?;
 
@@ -108,17 +107,19 @@ fn parse_response<T: DeserializeOwned + Debug>(response: Response) -> Result<T, 
                     401 => SearchError::BackendError("Invalid API key".to_string()),
                     403 => SearchError::BackendError("API key quota exceeded".to_string()),
                     429 => SearchError::RateLimited(60), // Default to 60 seconds
-                    _ =>
-                        SearchError::BackendError(
-                            format!("Request failed with {}: {}", status, error_body.message)
-                        ),
+                    _ => SearchError::BackendError(format!(
+                        "Request failed with {}: {}",
+                        status, error_body.message
+                    )),
                 };
 
                 Err(search_error)
             }
             Err(_) => {
                 // Fallback for non-JSON error responses
-                Err(SearchError::BackendError(format!("Request failed with status {status}")))
+                Err(SearchError::BackendError(format!(
+                    "Request failed with status {status}"
+                )))
             }
         }
     }
