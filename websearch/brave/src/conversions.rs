@@ -3,11 +3,7 @@ use golem_web_search::golem::web_search::web_search::{
     SearchError, SearchMetadata, SearchParams, SearchResult,
 };
 
-pub fn params_to_request(
-    params: SearchParams,
-    api_key: String,
-    offset: u32,
-) -> Result<SearchRequest, SearchError> {
+pub fn params_to_request(params: SearchParams, offset: u32) -> Result<SearchRequest, SearchError> {
     // Validate query
     if params.query.trim().is_empty() {
         return Err(SearchError::InvalidQuery);
@@ -22,7 +18,6 @@ pub fn params_to_request(
     }
 
     Ok(SearchRequest {
-        api_key,
         query,
         count: Some(params.max_results.unwrap_or(10)),
         offset: Some(offset),
@@ -33,7 +28,7 @@ pub fn response_to_results(
     response: SearchResponse,
     original_params: &SearchParams,
     current_offset: u32,
-) -> (Vec<SearchResult>, Option<SearchMetadata>) {
+) -> (Vec<SearchResult>, SearchMetadata) {
     let mut results = Vec::new();
 
     // Process web results
@@ -44,7 +39,7 @@ pub fn response_to_results(
     }
 
     let metadata = create_search_metadata(&response, original_params, current_offset);
-    (results, Some(metadata))
+    (results, metadata)
 }
 
 fn web_result_to_search_result(item: &WebResult, index: usize) -> SearchResult {

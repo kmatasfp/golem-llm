@@ -55,7 +55,7 @@ pub fn response_to_results(
     response: SearchResponse,
     original_params: &SearchParams,
     current_start: u32,
-) -> (Vec<SearchResult>, Option<SearchMetadata>) {
+) -> (Vec<SearchResult>, SearchMetadata) {
     let mut results = Vec::new();
 
     // Process web results - note: SearchResponse.results, not SearchResponse.web
@@ -64,7 +64,7 @@ pub fn response_to_results(
     }
 
     let metadata = create_search_metadata(&response, original_params, current_start);
-    (results, Some(metadata))
+    (results, metadata)
 }
 
 fn web_result_to_search_result(item: &ClientSearchResult, index: usize) -> SearchResult {
@@ -117,19 +117,11 @@ fn create_search_metadata(
     params: &SearchParams,
     current_start: u32,
 ) -> SearchMetadata {
-    // Check if we got the full count requested
-    let has_more_results = {
-        let requested_count = params.max_results.unwrap_or(10);
-        response.results.len() == (requested_count as usize)
-    };
-
     // Create next page token if more results are available
-    let next_page_token = if has_more_results {
-        let next_start = current_start + params.max_results.unwrap_or(10);
-        Some(next_start.to_string())
-    } else {
-        None
-    };
+    let next_page_token = response
+        .next_page
+        .as_ref()
+        .map(|p| p.start_index.to_string());
 
     // Use the actual total_results from the response
     let total_results = response.total_results.or_else(|| {

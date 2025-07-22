@@ -1,5 +1,5 @@
 use crate::exports::golem::web_search::web_search::Guest;
-use crate::exports::golem::web_search::web_search::{SearchError, SearchParams, SearchResult};
+use crate::exports::golem::web_search::web_search::{SearchError, SearchParams};
 use golem_rust::value_and_type::{FromValueAndType, IntoValue as IntoValueTrait};
 use std::marker::PhantomData;
 
@@ -21,21 +21,6 @@ pub trait ExtendedwebsearchGuest: Guest + 'static {
         state: &Self::ReplayState,
         params: SearchParams,
     ) -> Result<Self::SearchSession, SearchError>;
-
-    /// Creates the retry prompt with a combination of the original search params, and the partially received
-    /// search results. There is a default implementation here, but it can be overridden with provider-specific
-    /// parameters if needed.
-    fn retry_params(
-        original_params: &SearchParams,
-        partial_results: &[SearchResult],
-    ) -> SearchParams {
-        let mut retry_params = original_params.clone();
-        if let Some(max_results) = retry_params.max_results {
-            let remaining = max_results.saturating_sub(partial_results.len() as u32);
-            retry_params.max_results = Some(remaining.max(1));
-        }
-        retry_params
-    }
 }
 
 /// When the durability feature flag is off, wrapping with `Durablewebsearch` is just a passthrough
@@ -92,14 +77,11 @@ mod durable_impl {
         }
     }
 
-    impl<Impl: ExtendedwebsearchGuest> Guest for Durablewebsearch<Impl>
-    where
-        Impl::ReplayState: From<SearchParams>,
-    {
+    impl<Impl: ExtendedwebsearchGuest> Guest for Durablewebsearch<Impl> {
         type SearchSession = DurableSearchSession<Impl>;
 
         fn start_search(params: SearchParams) -> Result<SearchSession, SearchError> {
-            let durability = Durability::<SearchParams, SearchError>::new(
+            let durability = Durability::<Impl::ReplayState, SearchError>::new(
                 "golem_websearch",
                 "start_search",
                 DurableFunctionType::WriteRemote,
@@ -107,29 +89,26 @@ mod durable_impl {
 
             if durability.is_live() {
                 let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                    match Impl::start_search(params.clone()) {
-                        Ok(_session) => Ok(params.clone()),
-                        Err(e) => Err(e),
-                    }
+                    Impl::unwrapped_search_session(params.clone())
                 });
 
                 match result {
-                    Ok(persisted_params) => {
+                    Ok(session) => {
+                        let replay_state = Impl::session_to_state(&session);
+                        let _ = durability.persist(params.clone(), Ok(replay_state));
                         Ok(SearchSession::new(DurableSearchSession::<Impl>::live(
-                            Impl::unwrapped_search_session(persisted_params.clone())?,
-                            persisted_params,
+                            session, params,
                         )))
                     }
                     Err(error) => {
-                        durability.persist(params.clone(), Err(error.clone()))?;
+                        let _ = durability.persist(params.clone(), Err(error.clone()));
                         Err(error)
                     }
                 }
             } else {
                 let replay_state = durability.replay::<Impl::ReplayState, SearchError>()?;
-                let session =
-                    SearchSession::new(DurableSearchSession::<Impl>::replay(replay_state, params)?);
-                Ok(session)
+                let session = DurableSearchSession::<Impl>::replay(replay_state, params)?;
+                Ok(SearchSession::new(session))
             }
         }
 

@@ -42,7 +42,7 @@ pub fn response_to_results(
     response: SearchResponse,
     original_params: &SearchParams,
     current_page: u32,
-) -> (Vec<SearchResult>, Option<SearchMetadata>) {
+) -> (Vec<SearchResult>, SearchMetadata) {
     let mut results = Vec::new();
 
     // Process organic search results
@@ -51,7 +51,7 @@ pub fn response_to_results(
     }
 
     let metadata = create_search_metadata(&response, original_params, current_page);
-    (results, Some(metadata))
+    (results, metadata)
 }
 
 fn serper_result_to_search_result(item: &SerperSearchResult, index: usize) -> SearchResult {

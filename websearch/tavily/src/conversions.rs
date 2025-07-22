@@ -64,7 +64,7 @@ pub fn response_to_results(
     response: SearchResponse,
     original_params: &SearchParams,
     current_page: u32,
-) -> (Vec<SearchResult>, Option<SearchMetadata>) {
+) -> (Vec<SearchResult>, SearchMetadata) {
     let mut results = Vec::new();
 
     // Process main search results
@@ -97,7 +97,7 @@ pub fn response_to_results(
     }
 
     let metadata = create_search_metadata(&response, original_params, current_page);
-    (results, Some(metadata))
+    (results, metadata)
 }
 
 fn tavily_result_to_search_result(
@@ -173,9 +173,17 @@ fn extract_domain(url: &str) -> Option<String> {
 fn create_search_metadata(
     response: &SearchResponse,
     params: &SearchParams,
-    _current_page: u32,
+    current_page: u32,
 ) -> SearchMetadata {
     let total_results = Some(response.results.len() as u64);
+    let next_page_token = if (response.results.len() as u32)
+        > (current_page + 1) * params.max_results.unwrap_or(10)
+    {
+        Some((current_page + 1).to_string())
+    } else {
+        None
+    };
+
     SearchMetadata {
         query: params.query.clone(),
         total_results,
@@ -183,9 +191,9 @@ fn create_search_metadata(
         safe_search: params.safe_search,
         language: params.language.clone(),
         region: params.region.clone(),
-        next_page_token: None,
+        next_page_token,
         rate_limits: None,
-        current_page: 0,
+        current_page,
     }
 }
 

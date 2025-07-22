@@ -34,6 +34,10 @@ impl TavilySearchApi {
 
         parse_response(response)
     }
+
+    pub fn api_key(&self) -> &String {
+        &self.api_key
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -20,13 +20,13 @@ pub struct BraveReplayState {
     pub api_key: String,
     pub current_offset: u32,
     pub metadata: Option<SearchMetadata>,
+    pub finished: bool,
 }
 
 struct BraveSearch {
     client: BraveSearchApi,
     request: SearchRequest,
     params: SearchParams,
-    finished: bool,
     metadata: Option<SearchMetadata>,
     current_offset: u32,
 }
@@ -37,17 +37,12 @@ impl BraveSearch {
             client,
             request,
             params,
-            finished: false,
             metadata: None,
             current_offset: 0,
         }
     }
 
-    fn next_page(&mut self) -> Result<Vec<SearchResult>, SearchError> {
-        if self.finished {
-            return Ok(vec![]);
-        }
-
+    fn next_page(&mut self) -> Result<(Vec<SearchResult>, bool), SearchError> {
         // Update request with current offset
         let mut request = self.request.clone();
         request.offset = Some(self.current_offset);
@@ -59,17 +54,13 @@ impl BraveSearch {
         self.current_offset += 1;
 
         // Check if more results are available
-        if let Some(ref meta) = metadata {
-            let count = self.request.count.unwrap_or(10);
-            let has_more_results = results.len() == (count as usize);
-            let has_next_page = meta.next_page_token.is_some();
-            self.finished = !has_more_results || !has_next_page;
-        } else {
-            self.finished = true;
-        }
+        let count = self.request.count.unwrap_or(10);
+        let has_more_results = results.len() == (count as usize);
+        let has_next_page = metadata.next_page_token.is_some();
+        let finished = !has_more_results || !has_next_page;
 
-        self.metadata = metadata;
-        Ok(results)
+        self.metadata = Some(metadata);
+        Ok((results, finished))
     }
 
     fn get_metadata(&self) -> Option<SearchMetadata> {
@@ -89,7 +80,8 @@ impl BraveSearchSession {
 impl GuestSearchSession for BraveSearchSession {
     fn next_page(&self) -> Result<Vec<SearchResult>, SearchError> {
         let mut search = self.0.borrow_mut();
-        search.next_page()
+        let (results, _) = search.next_page()?;
+        Ok(results)
     }
 
     fn get_metadata(&self) -> Option<SearchMetadata> {
@@ -116,12 +108,12 @@ impl BraveSearchComponent {
 
     fn execute_search(
         params: SearchParams,
-        api_key: String,
-    ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
+        _api_key: String,
+    ) -> Result<(Vec<SearchResult>, SearchMetadata), SearchError> {
         validate_search_params(&params)?;
 
         let client = Self::create_client()?;
-        let request = params_to_request(params.clone(), api_key.clone(), 0)?;
+        let request = params_to_request(params.clone(), 0)?;
 
         let response = client.search(request)?;
         let (results, metadata) = response_to_results(response, &params, 0);
@@ -131,12 +123,12 @@ impl BraveSearchComponent {
 
     fn start_search_session(
         params: SearchParams,
-        api_key: String,
+        _api_key: String,
     ) -> Result<BraveSearchSession, SearchError> {
         validate_search_params(&params)?;
 
         let client = Self::create_client()?;
-        let request = params_to_request(params.clone(), api_key.clone(), 0)?;
+        let request = params_to_request(params.clone(), 0)?;
 
         let search = BraveSearch::new(client, request, params);
         Ok(BraveSearchSession::new(search))
@@ -158,7 +150,8 @@ impl Guest for BraveSearchComponent {
         params: SearchParams,
     ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
-        Self::execute_search(params, Self::get_api_key()?)
+        let (results, metadata) = Self::execute_search(params, Self::get_api_key()?)?;
+        Ok((results, Some(metadata)))
     }
 }
 
@@ -169,17 +162,19 @@ impl ExtendedwebsearchGuest for BraveSearchComponent {
     fn unwrapped_search_session(params: SearchParams) -> Result<Self::SearchSession, SearchError> {
         let api_key = Self::get_api_key()?;
         let client = BraveSearchApi::new(api_key.clone());
-        let request = crate::conversions::params_to_request(params.clone(), api_key, 0)?;
+        let request = crate::conversions::params_to_request(params.clone(), 0)?;
         let search = BraveSearch::new(client, request, params);
         Ok(BraveSearchSession::new(search))
     }
 
     fn session_to_state(session: &Self::SearchSession) -> Self::ReplayState {
-        let search = session.0.borrow();
+        let mut search = session.0.borrow_mut();
+        let (_, finished) = search.next_page().unwrap_or((vec![], true));
         BraveReplayState {
             api_key: search.client.api_key().clone(),
             current_offset: search.current_offset,
             metadata: search.metadata.clone(),
+            finished,
         }
     }
 
@@ -188,28 +183,14 @@ impl ExtendedwebsearchGuest for BraveSearchComponent {
         params: SearchParams,
     ) -> Result<Self::SearchSession, SearchError> {
         let client = BraveSearchApi::new(state.api_key.clone());
-        let request =
-            crate::conversions::params_to_request(params.clone(), state.api_key.clone(), 0)?;
+        let request = crate::conversions::params_to_request(params.clone(), 0)?;
         let mut search = BraveSearch::new(client, request, params);
         search.current_offset = state.current_offset;
         search.metadata = state.metadata.clone();
-        Ok(BraveSearchSession::new(search))
-    }
-}
-
-impl BraveSearchApi {
-    pub fn api_key(&self) -> &String {
-        &self.api_key
-    }
-}
-
-impl From<SearchParams> for BraveReplayState {
-    fn from(_params: SearchParams) -> Self {
-        BraveReplayState {
-            api_key: String::new(), // Not used in real replay, only for macro compatibility
-            current_offset: 0,
-            metadata: None,
+        if state.finished {
+            let _ = search.next_page();
         }
+        Ok(BraveSearchSession::new(search))
     }
 }
 

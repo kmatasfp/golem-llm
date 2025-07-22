@@ -79,30 +79,28 @@ impl GoogleSearchApi {
 
         parse_response(response)
     }
+
+    pub fn api_key(&self) -> &String {
+        &self.api_key
+    }
+
+    pub fn search_engine_id(&self) -> &String {
+        &self.search_engine_id
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SearchRequest {
     pub query: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_results: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub start: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub safe: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub lr: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub gl: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub date_restrict: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub site_search: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub site_search_filter: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub img_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub img_size: Option<String>,
 }
 
@@ -112,6 +110,8 @@ pub struct SearchResponse {
     pub response_time: f32,
     pub total_results: Option<u64>,
     pub results: Vec<SearchResult>,
+    pub next_page: Option<NextPage>,
+    pub previous_page: Option<PreviousPage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,6 +137,10 @@ struct GoogleApiResponse {
 struct GoogleSearchQueries {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<Vec<GoogleQueryInfo>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_page: Option<Vec<NextPage>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_page: Option<Vec<PreviousPage>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -158,6 +162,18 @@ struct GoogleSearchItem {
     pub title: String,
     pub link: String,
     pub snippet: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NextPage {
+    #[serde(rename = "startIndex")]
+    pub start_index: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreviousPage {
+    #[serde(rename = "startIndex")]
+    pub start_index: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -183,7 +199,8 @@ fn parse_response(response: Response) -> Result<SearchResponse, SearchError> {
         // Convert Google response
         let query = google_response
             .queries
-            .and_then(|q| q.request)
+            .as_ref()
+            .and_then(|q| q.request.as_ref())
             .and_then(|r| r.first().map(|qi| qi.search_terms.clone()))
             .unwrap_or_default();
 
@@ -196,6 +213,17 @@ fn parse_response(response: Response) -> Result<SearchResponse, SearchError> {
         let total_results = google_response
             .search_information
             .and_then(|info| info.total_results.parse::<u64>().ok());
+
+        let next_page = google_response
+            .queries
+            .as_ref()
+            .and_then(|q| q.next_page.as_ref())
+            .and_then(|np| np.first().cloned());
+
+        let previous_page = google_response
+            .queries
+            .and_then(|q| q.previous_page)
+            .and_then(|pp| pp.first().cloned());
 
         let results = google_response
             .items
@@ -214,6 +242,8 @@ fn parse_response(response: Response) -> Result<SearchResponse, SearchError> {
             response_time,
             total_results,
             results,
+            next_page,
+            previous_page,
         })
     } else {
         // Try to parse error response

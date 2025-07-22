@@ -43,15 +43,16 @@ impl BraveSearchApi {
 
         parse_response(response)
     }
+
+    pub fn api_key(&self) -> &String {
+        &self.api_key
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SearchRequest {
-    pub api_key: String,
     pub query: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub offset: Option<u32>,
 }
 

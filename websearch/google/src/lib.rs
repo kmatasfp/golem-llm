@@ -3,7 +3,7 @@ mod conversions;
 
 use std::cell::RefCell;
 
-use crate::client::{GoogleSearchApi, SearchRequest};
+use crate::client::{GoogleSearchApi, NextPage, SearchRequest};
 use crate::conversions::{params_to_request, response_to_results, validate_search_params};
 use golem_web_search::durability::Durablewebsearch;
 use golem_web_search::durability::ExtendedwebsearchGuest;
@@ -18,17 +18,17 @@ use golem_web_search::LOGGING_STATE;
 pub struct GoogleReplayState {
     pub api_key: String,
     pub search_engine_id: String,
-    pub current_page: u32,
+    pub next_page_token: Option<String>,
     pub metadata: Option<SearchMetadata>,
+    pub finished: bool,
 }
 
 struct GoogleSearch {
     client: GoogleSearchApi,
     request: SearchRequest,
     params: SearchParams,
-    finished: bool,
     metadata: Option<SearchMetadata>,
-    current_page: u32,
+    next_page: Option<NextPage>,
 }
 
 impl GoogleSearch {
@@ -37,45 +37,29 @@ impl GoogleSearch {
             client,
             request,
             params,
-            finished: false,
             metadata: None,
-            current_page: 0,
+            next_page: None,
         }
     }
 
-    fn next_page(&mut self) -> Result<Vec<SearchResult>, SearchError> {
-        if self.finished {
-            return Ok(vec![]);
-        }
-
+    fn next_page(&mut self) -> Result<(Vec<SearchResult>, bool), SearchError> {
         // Update request with current start index
         let mut request = self.request.clone();
-        let max_results = self.request.max_results.unwrap_or(10);
-        request.start = Some(self.current_page * max_results + 1); // Google API is 1-based
+        let current_start = if let Some(next_page) = &self.next_page {
+            request.start = Some(next_page.start_index);
+            next_page.start_index
+        } else {
+            1
+        };
 
         let response = self.client.search(request)?;
-        let (results, metadata) = response_to_results(response, &self.params, self.current_page);
+        let (results, metadata) =
+            response_to_results(response.clone(), &self.params, current_start);
 
-        // Check if more results are available
-        if let Some(ref meta) = metadata {
-            let has_more_results = results.len() == (max_results as usize);
-            let has_next_page = meta.next_page_token.is_some();
-            let total_results = meta.total_results.unwrap_or(0);
-            let has_more_by_total =
-                u64::from(self.current_page * max_results + max_results) < total_results;
-
-            self.finished = !has_more_results || !has_next_page || !has_more_by_total;
-
-            // Increment page for next request if not finished
-            if !self.finished {
-                self.current_page += 1;
-            }
-        } else {
-            self.finished = true;
-        }
-
-        self.metadata = metadata;
-        Ok(results)
+        let finished = response.next_page.is_none();
+        self.next_page = response.next_page;
+        self.metadata = Some(metadata);
+        Ok((results, finished))
     }
 
     fn get_metadata(&self) -> Option<SearchMetadata> {
@@ -95,7 +79,7 @@ impl GoogleSearchSession {
 impl GuestSearchSession for GoogleSearchSession {
     fn next_page(&self) -> Result<Vec<SearchResult>, SearchError> {
         let mut search = self.0.borrow_mut();
-        search.next_page()
+        search.next_page().map(|(results, _)| results)
     }
 
     fn get_metadata(&self) -> Option<SearchMetadata> {
@@ -135,7 +119,7 @@ impl GoogleCustomSearchComponent {
         let response = client.search(request)?;
         let (results, metadata) = response_to_results(response, &params, 1);
 
-        Ok((results, metadata))
+        Ok((results, Some(metadata)))
     }
 
     fn start_search_session(params: SearchParams) -> Result<GoogleSearchSession, SearchError> {
@@ -179,12 +163,14 @@ impl ExtendedwebsearchGuest for GoogleCustomSearchComponent {
     }
 
     fn session_to_state(session: &Self::SearchSession) -> Self::ReplayState {
-        let search = session.0.borrow();
+        let mut search = session.0.borrow_mut();
+        let (_, finished) = search.next_page().unwrap_or_else(|_| (vec![], true));
         GoogleReplayState {
             api_key: search.client.api_key().to_string(),
             search_engine_id: search.client.search_engine_id().to_string(),
-            current_page: search.current_page,
+            next_page_token: search.next_page.as_ref().map(|p| p.start_index.to_string()),
             metadata: search.metadata.clone(),
+            finished,
         }
     }
 
@@ -195,8 +181,15 @@ impl ExtendedwebsearchGuest for GoogleCustomSearchComponent {
         let client = GoogleSearchApi::new(state.api_key.clone(), state.search_engine_id.clone());
         let request = crate::conversions::params_to_request(params.clone(), 1)?;
         let mut search = GoogleSearch::new(client, request, params);
-        search.current_page = state.current_page;
+        search.next_page = state
+            .next_page_token
+            .as_ref()
+            .and_then(|t| t.parse().ok())
+            .map(|start_index| NextPage { start_index });
         search.metadata = state.metadata.clone();
+        if state.finished {
+            let _ = search.next_page();
+        }
 
         Ok(GoogleSearchSession::new(search))
     }
@@ -204,24 +197,3 @@ impl ExtendedwebsearchGuest for GoogleCustomSearchComponent {
 
 type DurableGoogleComponent = Durablewebsearch<GoogleCustomSearchComponent>;
 golem_web_search::export_websearch!(DurableGoogleComponent with_types_in golem_web_search);
-
-impl From<SearchParams> for GoogleReplayState {
-    fn from(_params: SearchParams) -> Self {
-        GoogleReplayState {
-            api_key: String::new(), // Not used in real replay, only for macro compatibility
-            search_engine_id: String::new(),
-            current_page: 0,
-            metadata: None,
-        }
-    }
-}
-
-impl GoogleSearchApi {
-    pub fn api_key(&self) -> &String {
-        &self.api_key
-    }
-
-    pub fn search_engine_id(&self) -> &String {
-        &self.search_engine_id
-    }
-}
