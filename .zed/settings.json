@@ -2,7 +2,11 @@
   "lsp": {
     "rust-analyzer": {
       "initialization_options": {
-        "linkedProjects": ["./test/Cargo.toml", "./Cargo.toml"],
+        "linkedProjects": [
+          "./test/Cargo.toml",
+          "./Cargo.toml",
+          "./test-stt/Cargo.toml"
+        ],
         "check": {
           "overrideCommand": [
             "cargo",
