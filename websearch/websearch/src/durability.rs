@@ -134,26 +134,9 @@ mod durable_impl {
                 let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
                     Impl::search_once(params.clone())
                 });
-
-                match result {
-                    Ok((results, metadata)) => {
-                        durability
-                            .persist(params.clone(), Ok((results.clone(), metadata.clone())))?;
-                        Ok((results, metadata))
-                    }
-                    Err(error) => {
-                        let _ = durability
-                            .persist::<_, (Vec<SearchResult>, Option<SearchMetadata>), SearchError>(
-                                params.clone(),
-                                Err(error.clone()),
-                            );
-                        Err(error)
-                    }
-                }
+                durability.persist(params, result)
             } else {
-                let result = durability
-                    .replay::<(Vec<SearchResult>, Option<SearchMetadata>), SearchError>()?;
-                Ok(result)
+                durability.replay()
             }
         }
     }
