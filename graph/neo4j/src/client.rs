@@ -2,6 +2,7 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use golem_graph::error::from_reqwest_error;
 use golem_graph::error::mapping::map_http_status;
 use golem_graph::golem::graph::errors::GraphError;
+use log::trace;
 use reqwest::{Client, Response};
 use serde_json::Value;
 
@@ -21,6 +22,7 @@ impl Neo4jApi {
         username: &str,
         password: &str,
     ) -> Self {
+        trace!("Initializing Neo4jApi for host: {host}, port: {port}, database: {database}");
         let base_url = format!("http://{host}:{port}");
         let auth = format!("{username}:{password}");
         let auth_header = format!("Basic {}", STANDARD.encode(auth.as_bytes()));
@@ -41,6 +43,7 @@ impl Neo4jApi {
     }
 
     pub(crate) fn begin_transaction(&self) -> Result<String, GraphError> {
+        trace!("Begin Neo4j transaction for database: {}", self.database);
         let url = format!("{}{}", self.base_url, self.tx_endpoint());
         let resp = self
             .client
@@ -56,6 +59,7 @@ impl Neo4jApi {
         tx_url: &str,
         statements: Value,
     ) -> Result<Value, GraphError> {
+        trace!("Execute in Neo4j transaction: {tx_url}");
         println!("[Neo4jApi] Cypher request: {statements}");
         let resp = self
             .client
@@ -71,6 +75,7 @@ impl Neo4jApi {
     }
 
     pub(crate) fn commit_transaction(&self, tx_url: &str) -> Result<(), GraphError> {
+        trace!("Commit Neo4j transaction: {tx_url}");
         let commit_url = format!("{tx_url}/commit");
         let resp = self
             .client
@@ -82,6 +87,7 @@ impl Neo4jApi {
     }
 
     pub(crate) fn rollback_transaction(&self, tx_url: &str) -> Result<(), GraphError> {
+        trace!("Rollback Neo4j transaction: {tx_url}");
         let resp = self
             .client
             .delete(tx_url)
@@ -92,6 +98,7 @@ impl Neo4jApi {
     }
 
     pub(crate) fn get_transaction_status(&self, tx_url: &str) -> Result<String, GraphError> {
+        trace!("Get Neo4j transaction status: {tx_url}");
         let resp = self
             .client
             .get(tx_url)

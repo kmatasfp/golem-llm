@@ -12,6 +12,7 @@ use golem_graph::durability::{DurableGraph, ExtendedGuest};
 use golem_graph::golem::graph::{
     connection::ConnectionConfig, errors::GraphError, transactions::Guest as TransactionGuest,
 };
+use golem_graph::LOGGING_STATE;
 use std::sync::Arc;
 
 pub struct GraphNeo4jComponent;
@@ -32,6 +33,7 @@ pub struct SchemaManager {
 impl ExtendedGuest for GraphNeo4jComponent {
     type Graph = Graph;
     fn connect_internal(config: &ConnectionConfig) -> Result<Graph, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let host = config
             .hosts
             .first()
@@ -61,6 +63,7 @@ impl Graph {
     }
 
     pub(crate) fn begin_transaction(&self) -> Result<Transaction, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx_url = self.api.begin_transaction()?;
         Ok(Transaction::new(self.api.clone(), tx_url))
     }
