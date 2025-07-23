@@ -7,6 +7,7 @@ use golem_graph::golem::graph::errors::GraphError;
 use golem_graph::golem::graph::schema::{
     ContainerInfo, ContainerType, EdgeTypeDefinition, IndexDefinition, IndexType,
 };
+use log::trace;
 use reqwest::{Client, Method, Response};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -19,6 +20,9 @@ pub struct ArangoDbApi {
 
 impl ArangoDbApi {
     pub fn new(host: &str, port: u16, username: &str, password: &str, database_name: &str) -> Self {
+        trace!(
+            "Initializing ArangoDbApi for host: {host}, port: {port}, database: {database_name}"
+        );
         let base_url = format!("http://{host}:{port}/_db/{database_name}");
         let auth_header = format!(
             "Basic {}",
@@ -117,6 +121,7 @@ impl ArangoDbApi {
 
     #[allow(dead_code)]
     pub fn begin_transaction(&self, read_only: bool) -> Result<String, GraphError> {
+        trace!("Begin transaction (read_only={read_only})");
         let existing_collections = self.list_collections().unwrap_or_default();
         let collection_names: Vec<String> = existing_collections
             .iter()
@@ -147,6 +152,9 @@ impl ArangoDbApi {
         read_only: bool,
         collections: Vec<String>,
     ) -> Result<String, GraphError> {
+        trace!(
+            "Begin transaction with collections (read_only={read_only}, collections={collections:?})"
+        );
         let collections_spec = if read_only {
             json!({ "read": collections })
         } else {
@@ -166,12 +174,14 @@ impl ArangoDbApi {
     }
 
     pub fn commit_transaction(&self, transaction_id: &str) -> Result<(), GraphError> {
+        trace!("Commit transaction: {transaction_id}");
         let endpoint = format!("/_api/transaction/{transaction_id}");
         let _: Value = self.execute(Method::PUT, &endpoint, None)?;
         Ok(())
     }
 
     pub fn rollback_transaction(&self, transaction_id: &str) -> Result<(), GraphError> {
+        trace!("Rollback transaction: {transaction_id}");
         let endpoint = format!("/_api/transaction/{transaction_id}");
         let _: Value = self.execute(Method::DELETE, &endpoint, None)?;
         Ok(())
@@ -182,6 +192,7 @@ impl ArangoDbApi {
         transaction_id: &str,
         query: Value,
     ) -> Result<Value, GraphError> {
+        trace!("Execute in transaction: {transaction_id}");
         let url = format!("{}/_api/cursor", self.base_url);
 
         let body_string = serde_json::to_string(&query)
@@ -202,6 +213,7 @@ impl ArangoDbApi {
     }
 
     pub fn ping(&self) -> Result<(), GraphError> {
+        trace!("Ping ArangoDB");
         let _: Value = self.execute(Method::GET, "/_api/version", None)?;
         Ok(())
     }
@@ -212,6 +224,7 @@ impl ArangoDbApi {
         name: &str,
         container_type: ContainerType,
     ) -> Result<(), GraphError> {
+        trace!("Create collection: {name}, type: {container_type:?}");
         let collection_type = match container_type {
             ContainerType::VertexContainer => 2,
             ContainerType::EdgeContainer => 3,
@@ -222,6 +235,7 @@ impl ArangoDbApi {
     }
 
     pub fn list_collections(&self) -> Result<Vec<ContainerInfo>, GraphError> {
+        trace!("List collections");
         let response: Value = self.execute(Method::GET, "/_api/collection", None)?;
 
         let collections_array = if let Some(result) = response.get("result") {
@@ -265,6 +279,9 @@ impl ArangoDbApi {
         index_type: IndexType,
         name: Option<String>,
     ) -> Result<(), GraphError> {
+        trace!(
+            "Create index on collection: {collection}, fields: {fields:?}, unique: {unique}, type: {index_type:?}, name: {name:?}"
+        );
         let type_str = match index_type {
             IndexType::Exact => "persistent",
             IndexType::Range => "persistent", // ArangoDB's persistent index supports range queries
@@ -289,6 +306,7 @@ impl ArangoDbApi {
     }
 
     pub fn drop_index(&self, name: &str) -> Result<(), GraphError> {
+        trace!("Drop index: {name}");
         // First, find the index by name to get its ID
         let collections = self.list_collections()?;
 
@@ -319,6 +337,7 @@ impl ArangoDbApi {
     }
 
     pub fn list_indexes(&self) -> Result<Vec<IndexDefinition>, GraphError> {
+        trace!("List indexes");
         // Get all collections first
         let collections = self.list_collections()?;
         let mut all_indexes = Vec::new();
@@ -399,6 +418,7 @@ impl ArangoDbApi {
     }
 
     pub fn get_index(&self, name: &str) -> Result<Option<IndexDefinition>, GraphError> {
+        trace!("Get index: {name}");
         let all_indexes = self.list_indexes()?;
 
         if let Some(index) = all_indexes.iter().find(|idx| idx.name == name) {
@@ -426,6 +446,7 @@ impl ArangoDbApi {
     }
 
     pub fn define_edge_type(&self, definition: EdgeTypeDefinition) -> Result<(), GraphError> {
+        trace!("Define edge type: {definition:?}");
         self.create_collection(&definition.collection, ContainerType::EdgeContainer)?;
         // Note: ArangoDB doesn't enforce from/to collection constraints like some other graph databases
         // The constraints in EdgeTypeDefinition are mainly for application-level validation
@@ -433,6 +454,7 @@ impl ArangoDbApi {
     }
 
     pub fn list_edge_types(&self) -> Result<Vec<EdgeTypeDefinition>, GraphError> {
+        trace!("List edge types");
         // In ArangoDB, we return edge collections as edge types
         // Since ArangoDB doesn't enforce from/to constraints at the DB level,
         // we return edge collections with empty from/to collections
@@ -450,12 +472,14 @@ impl ArangoDbApi {
     }
 
     pub fn get_transaction_status(&self, transaction_id: &str) -> Result<String, GraphError> {
+        trace!("Get transaction status: {transaction_id}");
         let endpoint = format!("/_api/transaction/{transaction_id}");
         let response: TransactionStatusResponse = self.execute(Method::GET, &endpoint, None)?;
         Ok(response.status)
     }
 
     pub fn get_database_statistics(&self) -> Result<DatabaseStatistics, GraphError> {
+        trace!("Get database statistics");
         let collections: ListCollectionsResponse =
             self.execute(Method::GET, "/_api/collection?excludeSystem=true", None)?;
 
@@ -483,6 +507,7 @@ impl ArangoDbApi {
 
     #[allow(dead_code)]
     pub fn execute_query(&self, query: Value) -> Result<Value, GraphError> {
+        trace!("Execute query");
         self.execute(Method::POST, "/_api/cursor", Some(&query))
     }
 
@@ -492,6 +517,7 @@ impl ArangoDbApi {
         name: &str,
         container_type: ContainerType,
     ) -> Result<(), GraphError> {
+        trace!("Ensure collection exists: {name}, type: {container_type:?}");
         match self.create_collection(name, container_type) {
             Ok(_) => Ok(()),
             Err(GraphError::InternalError(msg)) if msg.contains("duplicate name") => Ok(()),
@@ -500,6 +526,7 @@ impl ArangoDbApi {
     }
 
     pub fn begin_dynamic_transaction(&self, read_only: bool) -> Result<String, GraphError> {
+        trace!("Begin dynamic transaction (read_only={read_only})");
         let common_collections = vec![
             "Person".to_string(),
             "TempUser".to_string(),

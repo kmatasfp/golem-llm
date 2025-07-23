@@ -12,6 +12,7 @@ use golem_graph::golem::graph::{
     },
     types::{ElementId, Vertex},
 };
+use golem_graph::LOGGING_STATE;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
@@ -26,6 +27,7 @@ impl Transaction {
         to_vertex: ElementId,
         options: Option<PathOptions>,
     ) -> Result<Option<Path>, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let from_id = id_to_aql(&from_vertex);
         let to_id = id_to_aql(&to_vertex);
         let edge_collections = options.and_then(|o| o.edge_types).unwrap_or_default();
@@ -100,6 +102,7 @@ impl Transaction {
         options: Option<PathOptions>,
         limit: Option<u32>,
     ) -> Result<Vec<Path>, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         if let Some(opts) = &options {
             if opts.vertex_types.is_some()
                 || opts.vertex_filters.is_some()
@@ -152,6 +155,7 @@ impl Transaction {
         center: ElementId,
         options: NeighborhoodOptions,
     ) -> Result<Subgraph, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let center_id = id_to_aql(&center);
         let dir_str = match options.direction {
             Direction::Outgoing => "OUTBOUND",
@@ -221,6 +225,7 @@ impl Transaction {
         to_vertex: ElementId,
         options: Option<PathOptions>,
     ) -> Result<bool, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         Ok(!self
             .find_all_paths(from_vertex, to_vertex, options, Some(1))?
             .is_empty())
@@ -233,6 +238,7 @@ impl Transaction {
         direction: Direction,
         edge_types: Option<Vec<String>>,
     ) -> Result<Vec<Vertex>, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let start = id_to_aql(&source);
         let dir_str = match direction {
             Direction::Outgoing => "OUTBOUND",
@@ -279,6 +285,7 @@ impl TraversalGuest for GraphArangoDbComponent {
         to_vertex: ElementId,
         options: Option<PathOptions>,
     ) -> Result<Option<Path>, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx: &Transaction = transaction.get();
         tx.find_shortest_path(from_vertex, to_vertex, options)
     }
@@ -290,6 +297,7 @@ impl TraversalGuest for GraphArangoDbComponent {
         options: Option<PathOptions>,
         limit: Option<u32>,
     ) -> Result<Vec<Path>, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx: &Transaction = transaction.get();
         tx.find_all_paths(from_vertex, to_vertex, options, limit)
     }
@@ -299,6 +307,7 @@ impl TraversalGuest for GraphArangoDbComponent {
         center: ElementId,
         options: NeighborhoodOptions,
     ) -> Result<Subgraph, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx: &Transaction = transaction.get();
         tx.get_neighborhood(center, options)
     }
@@ -309,6 +318,7 @@ impl TraversalGuest for GraphArangoDbComponent {
         to_vertex: ElementId,
         options: Option<PathOptions>,
     ) -> Result<bool, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx: &Transaction = transaction.get();
         tx.path_exists(from_vertex, to_vertex, options)
     }
@@ -320,6 +330,7 @@ impl TraversalGuest for GraphArangoDbComponent {
         direction: Direction,
         edge_types: Option<Vec<String>>,
     ) -> Result<Vec<Vertex>, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx: &Transaction = transaction.get();
         tx.get_vertices_at_distance(source, distance, direction, edge_types)
     }

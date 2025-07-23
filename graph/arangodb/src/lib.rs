@@ -12,6 +12,7 @@ use golem_graph::durability::{DurableGraph, ExtendedGuest};
 use golem_graph::golem::graph::{
     connection::ConnectionConfig, errors::GraphError, transactions::Guest as TransactionGuest,
 };
+use golem_graph::LOGGING_STATE;
 use std::sync::Arc;
 
 pub struct GraphArangoDbComponent;
@@ -32,6 +33,7 @@ pub struct SchemaManager {
 impl ExtendedGuest for GraphArangoDbComponent {
     type Graph = Graph;
     fn connect_internal(config: &ConnectionConfig) -> Result<Graph, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let host: &String = config
             .hosts
             .first()

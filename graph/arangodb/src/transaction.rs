@@ -313,6 +313,7 @@ impl GuestTransaction for Transaction {
         to_vertex: ElementId,
         properties: PropertyMap,
     ) -> Result<Edge, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let props = conversions::to_arango_properties(properties)?;
         let from_id = helpers::element_id_to_string(&from_vertex);
         let to_id = helpers::element_id_to_string(&to_vertex);
@@ -344,6 +345,7 @@ impl GuestTransaction for Transaction {
     }
 
     fn get_edge(&self, id: ElementId) -> Result<Option<Edge>, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let key = helpers::element_id_to_key(&id)?;
         let collection = if let ElementId::StringValue(s) = &id {
             s.split('/').next().unwrap_or_default()
@@ -384,6 +386,7 @@ impl GuestTransaction for Transaction {
     }
 
     fn update_edge(&self, id: ElementId, properties: PropertyMap) -> Result<Edge, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let key = helpers::element_id_to_key(&id)?;
         let collection = helpers::collection_from_element_id(&id)?;
 
@@ -433,6 +436,7 @@ impl GuestTransaction for Transaction {
         id: ElementId,
         updates: PropertyMap,
     ) -> Result<Edge, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let key = helpers::element_id_to_key(&id)?;
         let collection = if let ElementId::StringValue(s) = &id {
             s.split('/').next().unwrap_or_default()
@@ -473,6 +477,7 @@ impl GuestTransaction for Transaction {
     }
 
     fn delete_edge(&self, id: ElementId) -> Result<(), GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let key = helpers::element_id_to_key(&id)?;
         let collection = if let ElementId::StringValue(s) = &id {
             s.split('/').next().unwrap_or_default()
@@ -507,6 +512,7 @@ impl GuestTransaction for Transaction {
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<Edge>, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let collection = edge_types.and_then(|mut et| et.pop()).ok_or_else(|| {
             GraphError::InvalidQuery("An edge_type must be provided for find_edges".to_string())
         })?;
@@ -569,6 +575,7 @@ impl GuestTransaction for Transaction {
         edge_types: Option<Vec<String>>,
         _limit: Option<u32>,
     ) -> Result<Vec<Vertex>, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let start_node = helpers::element_id_to_string(&vertex_id);
         let dir_str = match direction {
             Direction::Outgoing => "OUTBOUND",
@@ -619,6 +626,7 @@ impl GuestTransaction for Transaction {
         edge_types: Option<Vec<String>>,
         _limit: Option<u32>,
     ) -> Result<Vec<Edge>, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let start_node = helpers::element_id_to_string(&vertex_id);
         let dir_str = match direction {
             Direction::Outgoing => "OUTBOUND",
@@ -663,6 +671,7 @@ impl GuestTransaction for Transaction {
     }
 
     fn create_vertices(&self, vertices: Vec<VertexSpec>) -> Result<Vec<Vertex>, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut created_vertices = vec![];
         for vertex_spec in vertices {
             let vertex = self.create_vertex_with_labels(
@@ -676,6 +685,7 @@ impl GuestTransaction for Transaction {
     }
 
     fn create_edges(&self, edges: Vec<EdgeSpec>) -> Result<Vec<Edge>, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut created_edges = vec![];
         for edge_spec in edges {
             let edge = self.create_edge(
@@ -695,6 +705,7 @@ impl GuestTransaction for Transaction {
         vertex_type: String,
         properties: PropertyMap,
     ) -> Result<Vertex, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let props = conversions::to_arango_properties(properties)?;
         let search = if let Some(i) = id.clone() {
             let key = helpers::element_id_to_key(&i)?;
@@ -739,6 +750,7 @@ impl GuestTransaction for Transaction {
         to_vertex: ElementId,
         properties: PropertyMap,
     ) -> Result<Edge, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut props = conversions::to_arango_properties(properties)?;
         props.insert(
             "_from".to_string(),
@@ -785,6 +797,7 @@ impl GuestTransaction for Transaction {
     }
 
     fn is_active(&self) -> bool {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         self.api
             .get_transaction_status(&self.transaction_id)
             .map(|status| status == "running")
