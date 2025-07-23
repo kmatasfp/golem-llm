@@ -192,7 +192,7 @@ dependencies = ["build"]
 install_crate = "cargo-binstall"
 description = "Builds search test components with golem-cli"
 script = '''
-cargo-binstall golem-cli@1.2.2-dev.11 --locked --no-confirm
+cargo-binstall golem-cli@1.2.5 --locked --no-confirm
 cargo-binstall wac-cli --locked --no-confirm
 cd ../test
 
