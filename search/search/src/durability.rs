@@ -191,9 +191,6 @@ mod durable_impl {
     }
 
     #[derive(Debug, Clone, FromValueAndType, IntoValue)]
-    struct VoidResult;
-
-    #[derive(Debug, Clone, FromValueAndType, IntoValue)]
     struct IndexNamesResult {
         names: Vec<IndexName>,
     }
@@ -217,50 +214,38 @@ mod durable_impl {
         type SearchStream = DurableSearchStream<Impl>;
 
         fn create_index(name: IndexName, schema: Option<Schema>) -> Result<(), SearchError> {
-            let durability = Durability::<VoidResult, SearchError>::new(
+            let durability = Durability::<NoOutput, SearchError>::new(
                 "golem_search",
                 "create_index",
                 DurableFunctionType::WriteRemote,
             );
             if durability.is_live() {
                 let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                    Impl::create_index(name.clone(), schema.clone())
+                    Impl::create_index(name.clone(), schema.clone()).map(|()| NoOutput)
                 });
-                match result {
-                    Ok(()) => {
-                        let _ = durability
-                            .persist_infallible(CreateIndexInput { name, schema }, VoidResult);
-                        Ok(())
-                    }
-                    Err(e) => Err(e),
-                }
+                durability
+                    .persist(CreateIndexInput { name, schema }, result)
+                    .map(|_: NoOutput| ())
             } else {
-                let _: VoidResult = durability.replay_infallible();
-                Ok(())
+                durability.replay().map(|_: NoOutput| ())
             }
         }
 
         fn delete_index(name: IndexName) -> Result<(), SearchError> {
-            let durability = Durability::<VoidResult, SearchError>::new(
+            let durability = Durability::<NoOutput, SearchError>::new(
                 "golem_search",
                 "delete_index",
                 DurableFunctionType::WriteRemote,
             );
             if durability.is_live() {
                 let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                    Impl::delete_index(name.clone())
+                    Impl::delete_index(name.clone()).map(|()| NoOutput)
                 });
-                match result {
-                    Ok(()) => {
-                        let _ =
-                            durability.persist_infallible(DeleteIndexInput { name }, VoidResult);
-                        Ok(())
-                    }
-                    Err(e) => Err(e),
-                }
+                durability
+                    .persist(DeleteIndexInput { name }, result)
+                    .map(|_: NoOutput| ())
             } else {
-                let _: VoidResult = durability.replay_infallible();
-                Ok(())
+                durability.replay().map(|_: NoOutput| ())
             }
         }
 
@@ -272,119 +257,87 @@ mod durable_impl {
             );
             if durability.is_live() {
                 let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                    Impl::list_indexes()
+                    Impl::list_indexes().map(|names| IndexNamesResult { names })
                 });
-                match result {
-                    Ok(names) => {
-                        let _ = durability.persist_infallible(
-                            NoInput,
-                            IndexNamesResult {
-                                names: names.clone(),
-                            },
-                        );
-                        Ok(names)
-                    }
-                    Err(e) => Err(e),
-                }
+                durability
+                    .persist(NoInput, result)
+                    .map(|result| result.names)
             } else {
-                let wrapper: IndexNamesResult = durability.replay_infallible();
-                Ok(wrapper.names)
+                durability
+                    .replay()
+                    .map(|result: IndexNamesResult| result.names)
             }
         }
 
         fn upsert(index: IndexName, doc: Doc) -> Result<(), SearchError> {
-            let durability = Durability::<VoidResult, SearchError>::new(
+            let durability = Durability::<NoOutput, SearchError>::new(
                 "golem_search",
                 "upsert",
                 DurableFunctionType::WriteRemote,
             );
             if durability.is_live() {
                 let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                    Impl::upsert(index.clone(), doc.clone())
+                    Impl::upsert(index.clone(), doc.clone()).map(|()| NoOutput)
                 });
-                match result {
-                    Ok(()) => {
-                        let _ =
-                            durability.persist_infallible(UpsertInput { index, doc }, VoidResult);
-                        Ok(())
-                    }
-                    Err(e) => Err(e),
-                }
+                durability
+                    .persist(UpsertInput { index, doc }, result)
+                    .map(|_: NoOutput| ())
             } else {
-                let _: VoidResult = durability.replay_infallible();
-                Ok(())
+                durability.replay().map(|_: NoOutput| ())
             }
         }
 
         fn upsert_many(index: IndexName, docs: Vec<Doc>) -> Result<(), SearchError> {
-            let durability = Durability::<VoidResult, SearchError>::new(
+            let durability = Durability::<NoOutput, SearchError>::new(
                 "golem_search",
                 "upsert_many",
                 DurableFunctionType::WriteRemote,
             );
             if durability.is_live() {
                 let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                    Impl::upsert_many(index.clone(), docs.clone())
+                    Impl::upsert_many(index.clone(), docs.clone()).map(|_| NoOutput)
                 });
-                match result {
-                    Ok(()) => {
-                        let _ = durability
-                            .persist_infallible(UpsertManyInput { index, docs }, VoidResult);
-                        Ok(())
-                    }
-                    Err(e) => Err(e),
-                }
+                durability
+                    .persist(UpsertManyInput { index, docs }, result)
+                    .map(|_: NoOutput| ())
             } else {
-                let _: VoidResult = durability.replay_infallible();
-                Ok(())
+                durability.replay().map(|_: NoOutput| {})
             }
         }
 
         fn delete(index: IndexName, id: DocumentId) -> Result<(), SearchError> {
-            let durability = Durability::<VoidResult, SearchError>::new(
+            let durability = Durability::<NoOutput, SearchError>::new(
                 "golem_search",
                 "delete",
                 DurableFunctionType::WriteRemote,
             );
             if durability.is_live() {
                 let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                    Impl::delete(index.clone(), id.clone())
+                    Impl::delete(index.clone(), id.clone()).map(|()| NoOutput)
                 });
-                match result {
-                    Ok(()) => {
-                        let _ =
-                            durability.persist_infallible(DeleteInput { index, id }, VoidResult);
-                        Ok(())
-                    }
-                    Err(e) => Err(e),
-                }
+                durability
+                    .persist(DeleteInput { index, id }, result)
+                    .map(|_: NoOutput| ())
             } else {
-                let _: VoidResult = durability.replay_infallible();
-                Ok(())
+                durability.replay().map(|_: NoOutput| ())
             }
         }
 
         fn delete_many(index: IndexName, ids: Vec<DocumentId>) -> Result<(), SearchError> {
-            let durability = Durability::<VoidResult, SearchError>::new(
+            let durability = Durability::<NoOutput, SearchError>::new(
                 "golem_search",
                 "delete_many",
                 DurableFunctionType::WriteRemote,
             );
             if durability.is_live() {
                 let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                    Impl::delete_many(index.clone(), ids.clone())
+                    Impl::delete_many(index.clone(), ids.clone()).map(|_| NoOutput)
                 });
-                match result {
-                    Ok(()) => {
-                        let _ = durability
-                            .persist_infallible(DeleteManyInput { index, ids }, VoidResult);
-                        Ok(())
-                    }
-                    Err(e) => Err(e),
-                }
+                durability
+                    .persist(DeleteManyInput { index, ids }, result)
+                    .map(|_: NoOutput| ())
             } else {
-                let _: VoidResult = durability.replay_infallible();
-                Ok(())
+                durability.replay().map(|_: NoOutput| ())
             }
         }
 
@@ -396,21 +349,15 @@ mod durable_impl {
             );
             if durability.is_live() {
                 let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                    Impl::get(index.clone(), id.clone())
+                    Impl::get(index.clone(), id.clone()).map(|doc| OptionalDocResult { doc })
                 });
-                match result {
-                    Ok(doc) => {
-                        let _ = durability.persist_infallible(
-                            GetInput { index, id },
-                            OptionalDocResult { doc: doc.clone() },
-                        );
-                        Ok(doc)
-                    }
-                    Err(e) => Err(e),
-                }
+                durability
+                    .persist(GetInput { index, id }, result)
+                    .map(|result| result.doc)
             } else {
-                let wrapper: OptionalDocResult = durability.replay_infallible();
-                Ok(wrapper.doc)
+                durability
+                    .replay()
+                    .map(|result: OptionalDocResult| result.doc)
             }
         }
 
@@ -423,22 +370,15 @@ mod durable_impl {
             if durability.is_live() {
                 let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
                     Impl::search(index.clone(), query.clone())
+                        .map(|results| SearchResultsWrapper { results })
                 });
-                match result {
-                    Ok(results) => {
-                        let _ = durability.persist_infallible(
-                            SearchInput { index, query },
-                            SearchResultsWrapper {
-                                results: results.clone(),
-                            },
-                        );
-                        Ok(results)
-                    }
-                    Err(e) => Err(e),
-                }
+                durability
+                    .persist(SearchInput { index, query }, result)
+                    .map(|result| result.results)
             } else {
-                let wrapper: SearchResultsWrapper = durability.replay_infallible();
-                Ok(wrapper.results)
+                durability
+                    .replay()
+                    .map(|results: SearchResultsWrapper| results.results)
             }
         }
 
@@ -476,47 +416,33 @@ mod durable_impl {
             );
             if durability.is_live() {
                 let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                    Impl::get_schema(index.clone())
+                    Impl::get_schema(index.clone()).map(|schema| SchemaWrapper { schema })
                 });
-                match result {
-                    Ok(schema) => {
-                        let _ = durability.persist_infallible(
-                            GetSchemaInput { index },
-                            SchemaWrapper {
-                                schema: schema.clone(),
-                            },
-                        );
-                        Ok(schema)
-                    }
-                    Err(e) => Err(e),
-                }
+                durability
+                    .persist(GetSchemaInput { index }, result)
+                    .map(|schema| schema.schema)
             } else {
-                let wrapper: SchemaWrapper = durability.replay_infallible();
-                Ok(wrapper.schema)
+                durability
+                    .replay()
+                    .map(|schema: SchemaWrapper| schema.schema)
             }
         }
 
         fn update_schema(index: IndexName, schema: Schema) -> Result<(), SearchError> {
-            let durability = Durability::<VoidResult, SearchError>::new(
+            let durability = Durability::<NoOutput, SearchError>::new(
                 "golem_search",
                 "update_schema",
                 DurableFunctionType::WriteRemote,
             );
             if durability.is_live() {
                 let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                    Impl::update_schema(index.clone(), schema.clone())
+                    Impl::update_schema(index.clone(), schema.clone()).map(|()| NoOutput)
                 });
-                match result {
-                    Ok(()) => {
-                        let _ = durability
-                            .persist_infallible(UpdateSchemaInput { index, schema }, VoidResult);
-                        Ok(())
-                    }
-                    Err(e) => Err(e),
-                }
+                durability
+                    .persist(UpdateSchemaInput { index, schema }, result)
+                    .map(|_: NoOutput| ())
             } else {
-                let _: VoidResult = durability.replay_infallible();
-                Ok(())
+                durability.replay().map(|_: NoOutput| ())
             }
         }
     }

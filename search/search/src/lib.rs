@@ -8,6 +8,7 @@ wit_bindgen::generate!({
     generate_all,
     generate_unused_types: true,
     additional_derives: [
+        Clone,
         PartialEq,
         golem_rust::FromValueAndType,
         golem_rust::IntoValue
@@ -16,11 +17,17 @@ wit_bindgen::generate!({
 });
 
 pub use crate::exports::golem;
-
 pub use __export_search_library_impl as export_search;
 
+use crate::golem::search::core::SearchError;
 use std::cell::RefCell;
 use std::str::FromStr;
+
+impl<'a> From<&'a SearchError> for SearchError {
+    fn from(value: &'a SearchError) -> Self {
+        value.clone()
+    }
+}
 
 pub struct LoggingState {
     logging_initialized: bool,
