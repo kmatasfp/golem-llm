@@ -29,12 +29,12 @@ impl<'a> From<&'a SearchError> for SearchError {
     }
 }
 
-pub struct LoggingState {
+struct LoggingState {
     logging_initialized: bool,
 }
 
 impl LoggingState {
-    pub fn init(&mut self) {
+    fn init(&mut self) {
         if !self.logging_initialized {
             let _ = wasi_logger::Logger::install();
             let max_level: log::LevelFilter = log::LevelFilter::from_str(
@@ -48,8 +48,11 @@ impl LoggingState {
 }
 
 thread_local! {
-    /// This holds the state of our application.
-    pub static LOGGING_STATE: RefCell<LoggingState> = const { RefCell::new(LoggingState {
+    static LOGGING_STATE: RefCell<LoggingState> = const { RefCell::new(LoggingState {
         logging_initialized: false,
     }) };
+}
+
+pub fn init_logging() {
+    LOGGING_STATE.with_borrow_mut(|state| state.init());
 }

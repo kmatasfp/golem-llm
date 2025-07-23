@@ -38,43 +38,53 @@ mod passthrough_impl {
     use crate::golem::search::types::{
         Doc, DocumentId, IndexName, Schema, SearchError, SearchQuery, SearchResults,
     };
+    use crate::init_logging;
 
     impl<Impl: ExtendedGuest> Guest for DurableSearch<Impl> {
         type SearchStream = Impl::SearchStream;
 
         fn create_index(name: IndexName, schema: Option<Schema>) -> Result<(), SearchError> {
+            init_logging();
             Impl::create_index(name, schema)
         }
 
         fn delete_index(name: IndexName) -> Result<(), SearchError> {
+            init_logging();
             Impl::delete_index(name)
         }
 
         fn list_indexes() -> Result<Vec<IndexName>, SearchError> {
+            init_logging();
             Impl::list_indexes()
         }
 
         fn upsert(index: IndexName, doc: Doc) -> Result<(), SearchError> {
+            init_logging();
             Impl::upsert(index, doc)
         }
 
         fn upsert_many(index: IndexName, docs: Vec<Doc>) -> Result<(), SearchError> {
+            init_logging();
             Impl::upsert_many(index, docs)
         }
 
         fn delete(index: IndexName, id: DocumentId) -> Result<(), SearchError> {
+            init_logging();
             Impl::delete(index, id)
         }
 
         fn delete_many(index: IndexName, ids: Vec<DocumentId>) -> Result<(), SearchError> {
+            init_logging();
             Impl::delete_many(index, ids)
         }
 
         fn get(index: IndexName, id: DocumentId) -> Result<Option<Doc>, SearchError> {
+            init_logging();
             Impl::get(index, id)
         }
 
         fn search(index: IndexName, query: SearchQuery) -> Result<SearchResults, SearchError> {
+            init_logging();
             Impl::search(index, query)
         }
 
@@ -82,14 +92,17 @@ mod passthrough_impl {
             index: IndexName,
             query: SearchQuery,
         ) -> Result<SearchStream, SearchError> {
+            init_logging();
             Impl::stream_search(index, query)
         }
 
         fn get_schema(index: IndexName) -> Result<Schema, SearchError> {
+            init_logging();
             Impl::get_schema(index)
         }
 
         fn update_schema(index: IndexName, schema: Schema) -> Result<(), SearchError> {
+            init_logging();
             Impl::update_schema(index, schema)
         }
     }
@@ -102,6 +115,7 @@ mod durable_impl {
     use crate::golem::search::types::{
         Doc, DocumentId, IndexName, Schema, SearchError, SearchHit, SearchQuery, SearchResults,
     };
+    use crate::init_logging;
     use golem_rust::bindings::golem::durability::durability::{
         DurableFunctionType, LazyInitializedPollable,
     };
@@ -214,6 +228,8 @@ mod durable_impl {
         type SearchStream = DurableSearchStream<Impl>;
 
         fn create_index(name: IndexName, schema: Option<Schema>) -> Result<(), SearchError> {
+            init_logging();
+
             let durability = Durability::<NoOutput, SearchError>::new(
                 "golem_search",
                 "create_index",
@@ -232,6 +248,8 @@ mod durable_impl {
         }
 
         fn delete_index(name: IndexName) -> Result<(), SearchError> {
+            init_logging();
+
             let durability = Durability::<NoOutput, SearchError>::new(
                 "golem_search",
                 "delete_index",
@@ -250,6 +268,8 @@ mod durable_impl {
         }
 
         fn list_indexes() -> Result<Vec<IndexName>, SearchError> {
+            init_logging();
+
             let durability = Durability::<IndexNamesResult, SearchError>::new(
                 "golem_search",
                 "list_indexes",
@@ -270,6 +290,8 @@ mod durable_impl {
         }
 
         fn upsert(index: IndexName, doc: Doc) -> Result<(), SearchError> {
+            init_logging();
+
             let durability = Durability::<NoOutput, SearchError>::new(
                 "golem_search",
                 "upsert",
@@ -288,6 +310,8 @@ mod durable_impl {
         }
 
         fn upsert_many(index: IndexName, docs: Vec<Doc>) -> Result<(), SearchError> {
+            init_logging();
+
             let durability = Durability::<NoOutput, SearchError>::new(
                 "golem_search",
                 "upsert_many",
@@ -306,6 +330,8 @@ mod durable_impl {
         }
 
         fn delete(index: IndexName, id: DocumentId) -> Result<(), SearchError> {
+            init_logging();
+
             let durability = Durability::<NoOutput, SearchError>::new(
                 "golem_search",
                 "delete",
@@ -324,6 +350,8 @@ mod durable_impl {
         }
 
         fn delete_many(index: IndexName, ids: Vec<DocumentId>) -> Result<(), SearchError> {
+            init_logging();
+
             let durability = Durability::<NoOutput, SearchError>::new(
                 "golem_search",
                 "delete_many",
@@ -342,6 +370,8 @@ mod durable_impl {
         }
 
         fn get(index: IndexName, id: DocumentId) -> Result<Option<Doc>, SearchError> {
+            init_logging();
+
             let durability = Durability::<OptionalDocResult, SearchError>::new(
                 "golem_search",
                 "get",
@@ -362,6 +392,8 @@ mod durable_impl {
         }
 
         fn search(index: IndexName, query: SearchQuery) -> Result<SearchResults, SearchError> {
+            init_logging();
+
             let durability = Durability::<SearchResultsWrapper, SearchError>::new(
                 "golem_search",
                 "search",
@@ -386,6 +418,8 @@ mod durable_impl {
             index: IndexName,
             query: SearchQuery,
         ) -> Result<SearchStream, SearchError> {
+            init_logging();
+
             let durability = Durability::<NoOutput, UnusedError>::new(
                 "golem_search",
                 "stream_search",
@@ -409,6 +443,8 @@ mod durable_impl {
         }
 
         fn get_schema(index: IndexName) -> Result<Schema, SearchError> {
+            init_logging();
+
             let durability = Durability::<SchemaWrapper, SearchError>::new(
                 "golem_search",
                 "get_schema",
@@ -429,6 +465,8 @@ mod durable_impl {
         }
 
         fn update_schema(index: IndexName, schema: Schema) -> Result<(), SearchError> {
+            init_logging();
+
             let durability = Durability::<NoOutput, SearchError>::new(
                 "golem_search",
                 "update_schema",
