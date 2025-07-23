@@ -5,6 +5,7 @@ use golem_graph::golem::graph::{
     errors::GraphError,
     query::{Guest as QueryGuest, QueryExecutionResult, QueryParameters, QueryResult},
 };
+use golem_graph::LOGGING_STATE;
 use serde_json::{json, Map, Value};
 
 fn to_bindings(parameters: QueryParameters) -> Result<Map<String, Value>, GraphError> {
@@ -167,6 +168,7 @@ impl Transaction {
         parameters: Option<QueryParameters>,
         _options: Option<golem_graph::golem::graph::query::QueryOptions>,
     ) -> Result<QueryExecutionResult, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let params = parameters.unwrap_or_default();
         let bindings_map = to_bindings(params)?;
 
@@ -190,6 +192,7 @@ impl QueryGuest for GraphJanusGraphComponent {
         parameters: Option<QueryParameters>,
         options: Option<golem_graph::golem::graph::query::QueryOptions>,
     ) -> Result<QueryExecutionResult, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx: &Transaction = transaction.get();
         tx.execute_query(query, parameters, options)
     }

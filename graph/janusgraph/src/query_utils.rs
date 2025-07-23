@@ -2,6 +2,7 @@ use golem_graph::golem::graph::{
     errors::GraphError,
     types::{ComparisonOperator, FilterCondition, SortSpec},
 };
+use golem_graph::LOGGING_STATE;
 use serde_json::{Map, Value};
 
 /// Builds a Gremlin `has()` step chain from a WIT FilterCondition.
@@ -10,6 +11,7 @@ pub(crate) fn build_gremlin_filter_step(
     condition: &FilterCondition,
     binding_map: &mut Map<String, Value>,
 ) -> Result<String, GraphError> {
+    LOGGING_STATE.with_borrow_mut(|state| state.init());
     let key_binding = format!("fk_{}", binding_map.len());
     binding_map.insert(
         key_binding.clone(),

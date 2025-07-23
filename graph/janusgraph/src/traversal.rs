@@ -9,6 +9,7 @@ use golem_graph::golem::graph::{
     },
     types::{ElementId, Vertex},
 };
+use golem_graph::LOGGING_STATE;
 use serde_json::{json, Value};
 
 /// Convert our ElementId into a JSON binding for Gremlin
@@ -47,6 +48,7 @@ impl Transaction {
         to_vertex: ElementId,
         _options: Option<PathOptions>,
     ) -> Result<Option<Path>, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut bindings = serde_json::Map::new();
         bindings.insert("from_id".to_string(), id_to_json(from_vertex));
         bindings.insert("to_id".to_string(), id_to_json(to_vertex));
@@ -88,6 +90,7 @@ impl Transaction {
         options: Option<PathOptions>,
         limit: Option<u32>,
     ) -> Result<Vec<Path>, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         if let Some(opts) = &options {
             if opts.vertex_types.is_some()
                 || opts.vertex_filters.is_some()
@@ -136,6 +139,7 @@ impl Transaction {
         center: ElementId,
         options: NeighborhoodOptions,
     ) -> Result<Subgraph, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut bindings = serde_json::Map::new();
         bindings.insert("center_id".to_string(), id_to_json(center.clone()));
 
@@ -195,6 +199,7 @@ impl Transaction {
         to_vertex: ElementId,
         options: Option<PathOptions>,
     ) -> Result<bool, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         self.find_all_paths(from_vertex, to_vertex, options, Some(1))
             .map(|p| !p.is_empty())
     }
@@ -206,6 +211,7 @@ impl Transaction {
         direction: Direction,
         edge_types: Option<Vec<String>>,
     ) -> Result<Vec<Vertex>, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut bindings = serde_json::Map::new();
         bindings.insert("source_id".to_string(), id_to_json(source));
 
@@ -258,6 +264,7 @@ impl TraversalGuest for GraphJanusGraphComponent {
         to_vertex: ElementId,
         options: Option<PathOptions>,
     ) -> Result<Option<Path>, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx: &Transaction = transaction.get();
         tx.find_shortest_path(from_vertex, to_vertex, options)
     }
@@ -269,6 +276,7 @@ impl TraversalGuest for GraphJanusGraphComponent {
         options: Option<PathOptions>,
         limit: Option<u32>,
     ) -> Result<Vec<Path>, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx: &Transaction = transaction.get();
         tx.find_all_paths(from_vertex, to_vertex, options, limit)
     }
@@ -278,6 +286,7 @@ impl TraversalGuest for GraphJanusGraphComponent {
         center: ElementId,
         options: NeighborhoodOptions,
     ) -> Result<Subgraph, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx: &Transaction = transaction.get();
         tx.get_neighborhood(center, options)
     }
@@ -288,6 +297,7 @@ impl TraversalGuest for GraphJanusGraphComponent {
         to_vertex: ElementId,
         options: Option<PathOptions>,
     ) -> Result<bool, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx: &Transaction = transaction.get();
         tx.path_exists(from_vertex, to_vertex, options)
     }
@@ -299,6 +309,7 @@ impl TraversalGuest for GraphJanusGraphComponent {
         direction: Direction,
         edge_types: Option<Vec<String>>,
     ) -> Result<Vec<Vertex>, GraphError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx: &Transaction = transaction.get();
         tx.get_vertices_at_distance(source, distance, direction, edge_types)
     }

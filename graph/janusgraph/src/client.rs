@@ -1,6 +1,7 @@
 use golem_graph::error::from_reqwest_error;
 use golem_graph::error::mapping::map_http_status;
 use golem_graph::golem::graph::errors::GraphError;
+use log::trace;
 use reqwest::{Client, Response};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -19,6 +20,7 @@ impl JanusGraphApi {
         _username: Option<&str>,
         _password: Option<&str>,
     ) -> Result<Self, GraphError> {
+        trace!("Initializing JanusGraphApi for host: {host}, port: {port}");
         let endpoint = format!("http://{host}:{port}/gremlin");
         let client = Client::builder()
             .build()
@@ -38,6 +40,9 @@ impl JanusGraphApi {
         _password: Option<&str>,
         session_id: String,
     ) -> Result<Self, GraphError> {
+        trace!(
+            "Initializing JanusGraphApi with session for host: {host}, port: {port}, session_id: {session_id}"
+        );
         let endpoint = format!("http://{host}:{port}/gremlin");
         let client = Client::builder()
             .build()
@@ -50,12 +55,14 @@ impl JanusGraphApi {
     }
 
     pub fn commit(&self) -> Result<(), GraphError> {
+        trace!("Commit transaction");
         self.execute("g.tx().commit()", None)?;
         self.execute("g.tx().open()", None)?;
         Ok(())
     }
 
     pub fn execute(&self, gremlin: &str, bindings: Option<Value>) -> Result<Value, GraphError> {
+        trace!("Execute Gremlin query: {gremlin}");
         let bindings = bindings.unwrap_or_else(|| json!({}));
         let request_body = json!({
             "gremlin": gremlin,
@@ -105,6 +112,7 @@ impl JanusGraphApi {
     }
 
     fn _read(&self, gremlin: &str, bindings: Option<Value>) -> Result<Value, GraphError> {
+        trace!("Read Gremlin query: {gremlin}");
         let bindings = bindings.unwrap_or_else(|| json!({}));
         let request_body = json!({
             "gremlin": gremlin,
@@ -127,6 +135,7 @@ impl JanusGraphApi {
     }
 
     pub fn close_session(&self) -> Result<(), GraphError> {
+        trace!("Close session: {}", self.session_id);
         let request_body = json!({
             "session": self.session_id,
             "op": "close",
@@ -149,6 +158,7 @@ impl JanusGraphApi {
     }
 
     pub fn session_id(&self) -> &str {
+        trace!("Get session ID: {}", self.session_id);
         &self.session_id
     }
 
