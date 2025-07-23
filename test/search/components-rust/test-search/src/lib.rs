@@ -61,7 +61,7 @@ fn create_test_schema() -> Schema {
                 name: "author".to_string(),
                 field_type: FieldType::Text,
                 required: false,
-                facet: true, 
+                facet: true,
                 sort: false,
                 index: true,
             },
@@ -70,14 +70,14 @@ fn create_test_schema() -> Schema {
                 field_type: FieldType::Integer,
                 required: false,
                 facet: false,
-                sort: true, 
+                sort: true,
                 index: true,
             },
             SchemaField {
                 name: "genre".to_string(),
                 field_type: FieldType::Text,
                 required: false,
-                facet: true, 
+                facet: true,
                 sort: false,
                 index: true,
             },
@@ -100,7 +100,10 @@ impl Guest for Component {
         let index_name = format!("{}-test1", TEST_INDEX);
         let mut results = Vec::new();
 
-        if TEST_INDEX == "test-elasticsearch-index"||TEST_INDEX ==  "test-typesense-index" || TEST_INDEX == "test-opensearch-index" {
+        if TEST_INDEX == "test-elasticsearch-index"
+            || TEST_INDEX == "test-typesense-index"
+            || TEST_INDEX == "test-opensearch-index"
+        {
             // Elasticsearch/typesense/opensearch requires a different setup for the index
             println!("Setting   index: {}", index_name);
             match core::create_index(&index_name, Some(&create_test_schema())) {
@@ -116,7 +119,9 @@ impl Guest for Component {
         println!("Setting up index : {}", index_name);
         match core::update_schema(&index_name, &create_test_schema()) {
             Ok(_) => results.push("✓ Index schema configured successfully".to_string()),
-            Err(SearchError::Unsupported) => results.push("✓ Schema configuration not required (auto-detected)".to_string()),
+            Err(SearchError::Unsupported) => {
+                results.push("✓ Schema configuration not required (auto-detected)".to_string())
+            }
             Err(e) => {
                 // If schema setup fails, we'll try to proceed with document insertion anyway
                 results.push(format!("⚠  setup failed, proceeding anyway: {:?}", e));
@@ -138,9 +143,12 @@ impl Guest for Component {
         println!("Retrieving document with ID: doc1");
         let mut retrieval_success = false;
         for attempt in 1..=5 {
-            match core::get(&index_name, "doc1") {
+            match core::get(&index_name, &DocumentId::from("doc1")) {
                 Ok(Some(doc)) => {
-                    results.push(format!("✓ Document retrieved: {} (attempt {})", doc.id, attempt));
+                    results.push(format!(
+                        "✓ Document retrieved: {} (attempt {})",
+                        doc.id, attempt
+                    ));
                     retrieval_success = true;
                     break;
                 }
@@ -162,20 +170,24 @@ impl Guest for Component {
         // Test document deletion (only if we successfully retrieved it)
         if retrieval_success {
             println!("Deleting document with ID: doc1");
-            match core::delete(&index_name, "doc1") {
+            match core::delete(&index_name, &DocumentId::from("doc1")) {
                 Ok(_) => {
                     results.push("✓ Document deleted successfully".to_string());
-                    
+
                     // Verify deletion with retry logic
                     for attempt in 1..=5 {
-                        match core::get(&index_name, "doc1") {
+                        match core::get(&index_name, &DocumentId::from("doc1")) {
                             Ok(None) | Err(_) => {
-                                results.push(format!("✓ Document deletion verified (attempt {})", attempt));
+                                results.push(format!(
+                                    "✓ Document deletion verified (attempt {})",
+                                    attempt
+                                ));
                                 break;
                             }
                             Ok(Some(_)) => {
                                 if attempt == 5 {
-                                    results.push("⚠ Document still exists after deletion".to_string());
+                                    results
+                                        .push("⚠ Document still exists after deletion".to_string());
                                 } else {
                                     std::thread::sleep(std::time::Duration::from_millis(1000));
                                 }
@@ -207,10 +219,10 @@ impl Guest for Component {
         // Set up index schema first (for providers that support it)
         println!("Setting  index for search tests");
         match core::update_schema(&index_name, &create_test_schema()) {
-            Ok(_) => {},
+            Ok(_) => {}
             Err(SearchError::Unsupported) => {
                 println!("Schema setup not required (auto-detected on first document)");
-            },
+            }
             Err(_) => {
                 println!("Schema setup failed, proceeding with document insertion");
             }
@@ -241,7 +253,11 @@ impl Guest for Component {
         for attempt in 1..=10 {
             match core::search(&index_name, &query) {
                 Ok(search_results) if !search_results.hits.is_empty() => {
-                    results.push(format!("✓ Search returned {} hits (attempt {})", search_results.hits.len(), attempt));
+                    results.push(format!(
+                        "✓ Search returned {} hits (attempt {})",
+                        search_results.hits.len(),
+                        attempt
+                    ));
                     if let Some(first_hit) = search_results.hits.first() {
                         results.push(format!("  First hit ID: {}", first_hit.id));
                         if let Some(score) = first_hit.score {
@@ -255,7 +271,10 @@ impl Guest for Component {
                     if attempt == 10 {
                         results.push("⚠ Search returned no hits after 10 attempts".to_string());
                     } else {
-                        println!("Search returned no hits, retrying... (attempt {}/10)", attempt);
+                        println!(
+                            "Search returned no hits, retrying... (attempt {}/10)",
+                            attempt
+                        );
                         std::thread::sleep(std::time::Duration::from_millis(1000));
                     }
                 }
@@ -268,10 +287,13 @@ impl Guest for Component {
 
         // Test search with filters (with provider-specific syntax handling)
         println!("Testing filtered search for fiction genre");
-        
+
         // Try different filter syntaxes based on the provider
         let filter_attempts = vec![
-            ("Algolia/Elasticsearch/opensearch/typesense", "genre:fiction"),
+            (
+                "Algolia/Elasticsearch/opensearch/typesense",
+                "genre:fiction",
+            ),
             ("Meilisearch", "genre = \"fiction\""),
             ("Alternative", "genre=\"fiction\""),
         ];
@@ -292,7 +314,11 @@ impl Guest for Component {
 
             match core::search(&index_name, &filtered_query) {
                 Ok(search_results) => {
-                    results.push(format!("✓ Filtered search returned {} hits (syntax: {})", search_results.hits.len(), provider_hint));
+                    results.push(format!(
+                        "✓ Filtered search returned {} hits (syntax: {})",
+                        search_results.hits.len(),
+                        provider_hint
+                    ));
                     filter_success = true;
                     break;
                 }
@@ -306,8 +332,13 @@ impl Guest for Component {
                 }
                 Err(e) => {
                     // For other errors, log but continue trying
-                    if filter_attempts.iter().position(|(p, _)| p == provider_hint) == Some(filter_attempts.len() - 1) {
-                        results.push(format!("✗ Filtered search failed with all syntaxes: {:?}", e));
+                    if filter_attempts.iter().position(|(p, _)| p == provider_hint)
+                        == Some(filter_attempts.len() - 1)
+                    {
+                        results.push(format!(
+                            "✗ Filtered search failed with all syntaxes: {:?}",
+                            e
+                        ));
                     }
                 }
             }
@@ -330,7 +361,10 @@ impl Guest for Component {
 
             match core::search(&index_name, &fallback_query) {
                 Ok(search_results) => {
-                    results.push(format!("✓ Fallback text search for 'fiction' returned {} hits", search_results.hits.len()));
+                    results.push(format!(
+                        "✓ Fallback text search for 'fiction' returned {} hits",
+                        search_results.hits.len()
+                    ));
                 }
                 Err(e) => results.push(format!("✗ Even fallback search failed: {:?}", e)),
             }
@@ -346,7 +380,10 @@ impl Guest for Component {
         let index_name = format!("{}-test3", TEST_INDEX);
         let mut results = Vec::new();
 
-        if TEST_INDEX == "test-elasticsearch-index"||TEST_INDEX ==  "test-typesense-index" || TEST_INDEX == "test-opensearch-index" {
+        if TEST_INDEX == "test-elasticsearch-index"
+            || TEST_INDEX == "test-typesense-index"
+            || TEST_INDEX == "test-opensearch-index"
+        {
             println!("Setting   index: {}", index_name);
             match core::create_index(&index_name, Some(&create_test_schema())) {
                 Ok(_) => results.push("✓ Index created successfully".to_string()),
@@ -359,8 +396,8 @@ impl Guest for Component {
 
         // Setup schema first
         match core::update_schema(&index_name, &create_test_schema()) {
-            Ok(_) => {},
-            Err(SearchError::Unsupported) => {},
+            Ok(_) => {}
+            Err(SearchError::Unsupported) => {}
             Err(_) => {} // Continue anyway
         }
 
@@ -387,9 +424,13 @@ impl Guest for Component {
 
         match core::search(&index_name, &sorted_query) {
             Ok(search_results) => {
-                results.push(format!("✓ Sorted search returned {} hits", search_results.hits.len()));
+                results.push(format!(
+                    "✓ Sorted search returned {} hits",
+                    search_results.hits.len()
+                ));
                 if search_results.hits.len() >= 2 {
-                    results.push("  Verifying sort order by checking first two results".to_string());
+                    results
+                        .push("  Verifying sort order by checking first two results".to_string());
                 }
             }
             Err(e) => results.push(format!("✗ Sorted search failed: {:?}", e)),
@@ -411,7 +452,10 @@ impl Guest for Component {
 
         match core::search(&index_name, &paginated_query) {
             Ok(search_results) => {
-                results.push(format!("✓ Paginated search returned {} hits", search_results.hits.len()));
+                results.push(format!(
+                    "✓ Paginated search returned {} hits",
+                    search_results.hits.len()
+                ));
                 if let Some(total) = search_results.total {
                     results.push(format!("  Total documents: {}", total));
                 }
@@ -432,7 +476,10 @@ impl Guest for Component {
         let index_name = format!("{}-test4th", TEST_INDEX);
         let mut results = Vec::new();
 
-        if TEST_INDEX == "test-elasticsearch-index"||TEST_INDEX ==  "test-typesense-index" || TEST_INDEX == "test-opensearch-index" {
+        if TEST_INDEX == "test-elasticsearch-index"
+            || TEST_INDEX == "test-typesense-index"
+            || TEST_INDEX == "test-opensearch-index"
+        {
             println!("Setting   index: {}", index_name);
             match core::create_index(&index_name, Some(&create_test_schema())) {
                 Ok(_) => results.push("✓ Index created successfully".to_string()),
@@ -445,8 +492,8 @@ impl Guest for Component {
 
         // Setup schema for faceting support
         match core::update_schema(&index_name, &create_test_schema()) {
-            Ok(_) => {},
-            Err(SearchError::Unsupported) => {},
+            Ok(_) => {}
+            Err(SearchError::Unsupported) => {}
             Err(_) => {} // Continue anyway
         }
 
@@ -478,8 +525,11 @@ impl Guest for Component {
 
         match core::search(&index_name, &highlight_query) {
             Ok(search_results) => {
-                results.push(format!("✓ Highlighted search returned {} hits", search_results.hits.len()));
-                
+                results.push(format!(
+                    "✓ Highlighted search returned {} hits",
+                    search_results.hits.len()
+                ));
+
                 // Check for highlights
                 for hit in &search_results.hits {
                     if hit.highlights.is_some() {
@@ -513,7 +563,10 @@ impl Guest for Component {
         let index_name = format!("{}-test5", TEST_INDEX);
         let mut results = Vec::new();
 
-         if TEST_INDEX == "test-elasticsearch-index"||TEST_INDEX ==  "test-typesense-index" || TEST_INDEX == "test-opensearch-index" {
+        if TEST_INDEX == "test-elasticsearch-index"
+            || TEST_INDEX == "test-typesense-index"
+            || TEST_INDEX == "test-opensearch-index"
+        {
             println!("Setting   index: {}", index_name);
             match core::create_index(&index_name, Some(&create_test_schema())) {
                 Ok(_) => results.push("✓ Index created successfully".to_string()),
@@ -524,22 +577,27 @@ impl Guest for Component {
             println!("Setting up index: {}", index_name);
         }
 
-
         // Set up initial schema
         println!("Setting up index with predefined schema");
         let original_schema = create_test_schema();
         match core::update_schema(&index_name, &original_schema) {
             Ok(_) => results.push("✓ Index schema configured successfully".to_string()),
             Err(SearchError::Unsupported) => {
-                results.push("⚠ Schema configuration not supported, will test with document insertion".to_string());
+                results.push(
+                    "⚠ Schema configuration not supported, will test with document insertion"
+                        .to_string(),
+                );
                 // Insert a test document to auto-create the index
                 let test_docs = vec![create_test_documents().into_iter().next().unwrap()];
                 if let Err(e) = core::upsert_many(&index_name, &test_docs) {
                     return format!("Document insertion failed: {:?}", e);
                 }
-            },
+            }
             Err(e) => {
-                results.push(format!("⚠ Schema setup failed: {:?}, proceeding with document insertion", e));
+                results.push(format!(
+                    "⚠ Schema setup failed: {:?}, proceeding with document insertion",
+                    e
+                ));
 
                 let test_docs = vec![create_test_documents().into_iter().next().unwrap()];
                 if let Err(e) = core::upsert_many(&index_name, &test_docs) {
@@ -554,13 +612,14 @@ impl Guest for Component {
             Ok(retrieved_schema) => {
                 results.push("✓ Schema retrieved successfully".to_string());
                 results.push(format!("  Fields count: {}", retrieved_schema.fields.len()));
-                
+
                 if let Some(pk) = &retrieved_schema.primary_key {
                     results.push(format!("  Primary key: {}", pk));
                 }
 
                 // Validate some key fields exist
-                let field_names: Vec<&String> = retrieved_schema.fields.iter().map(|f| &f.name).collect();
+                let field_names: Vec<&String> =
+                    retrieved_schema.fields.iter().map(|f| &f.name).collect();
                 if field_names.contains(&&"title".to_string()) {
                     results.push("  ✓ Title field found".to_string());
                 }
@@ -585,7 +644,9 @@ impl Guest for Component {
 
         match core::update_schema(&index_name, &updated_schema) {
             Ok(_) => results.push("✓ Schema updated successfully".to_string()),
-            Err(SearchError::Unsupported) => results.push("  ⚠ Schema updates not supported by this provider".to_string()),
+            Err(SearchError::Unsupported) => {
+                results.push("  ⚠ Schema updates not supported by this provider".to_string())
+            }
             Err(e) => results.push(format!("✗ Schema update failed: {:?}", e)),
         }
         // Cleanup
@@ -598,7 +659,10 @@ impl Guest for Component {
         let index_name = format!("{}-test6", TEST_INDEX);
         let mut results = Vec::new();
 
-        if TEST_INDEX == "test-elasticsearch-index"||TEST_INDEX ==  "test-typesense-index" || TEST_INDEX == "test-opensearch-index" {
+        if TEST_INDEX == "test-elasticsearch-index"
+            || TEST_INDEX == "test-typesense-index"
+            || TEST_INDEX == "test-opensearch-index"
+        {
             println!("Setting   index: {}", index_name);
             match core::create_index(&index_name, Some(&create_test_schema())) {
                 Ok(_) => results.push("✓ Index created successfully".to_string()),
@@ -610,8 +674,8 @@ impl Guest for Component {
 
         // Setup schema for streaming test
         match core::update_schema(&index_name, &create_test_schema()) {
-            Ok(_) => {},
-            Err(SearchError::Unsupported) => {},
+            Ok(_) => {}
+            Err(SearchError::Unsupported) => {}
             Err(_) => {} // Continue anyway
         }
 
@@ -645,42 +709,49 @@ impl Guest for Component {
         match core::stream_search(&index_name, &stream_query) {
             Ok(stream) => {
                 results.push("✓ Search stream created successfully".to_string());
-                
+
                 let mut total_hits = 0;
                 let mut batch_count = 0;
-                
+
                 // Use a more conservative approach to streaming
-                for _ in 0..5 { // Limit to 5 iterations maximum
+                for _ in 0..5 {
+                    // Limit to 5 iterations maximum
                     let hits = stream.blocking_get_next();
                     if hits.is_empty() {
                         break;
                     }
-                    
+
                     batch_count += 1;
                     total_hits += hits.len();
                     results.push(format!("  Batch {}: {} hits", batch_count, hits.len()));
                 }
-                
-                results.push(format!("✓ Streamig complete: {} total hits in {} batches", total_hits, batch_count));
+
+                results.push(format!(
+                    "✓ Streamig complete: {} total hits in {} batches",
+                    total_hits, batch_count
+                ));
             }
             Err(SearchError::Unsupported) => {
                 results.push("⚠ Streaming search not support by this provider".to_string());
-                 if TEST_INDEX == "test-elasticsearch-index" {
-            // Elasticsearch requires a different setup for the index
-            println!("Setting  Elasticsearch index: {}", index_name);
-            match core::create_index(&index_name, Some(&create_test_schema())) {
-                Ok(_) => results.push("✓ Index created successfully".to_string()),
-                Err(e) => return format!("✗ Index creation failed: {:?}", e),
-            }
-        } else {
-            // For other providers, we can proceed with schema setup
-            println!("Setting up index: {}", index_name);
-        }
+                if TEST_INDEX == "test-elasticsearch-index" {
+                    // Elasticsearch requires a different setup for the index
+                    println!("Setting  Elasticsearch index: {}", index_name);
+                    match core::create_index(&index_name, Some(&create_test_schema())) {
+                        Ok(_) => results.push("✓ Index created successfully".to_string()),
+                        Err(e) => return format!("✗ Index creation failed: {:?}", e),
+                    }
+                } else {
+                    // For other providers, we can proceed with schema setup
+                    println!("Setting up index: {}", index_name);
+                }
 
                 // Fallback to regular search
                 match core::search(&index_name, &stream_query) {
                     Ok(search_results) => {
-                        results.push(format!("  Fallback: Regular search returned {} hits", search_results.hits.len()));
+                        results.push(format!(
+                            "  Fallback: Regular search returned {} hits",
+                            search_results.hits.len()
+                        ));
                     }
                     Err(e) => results.push(format!("  Fallback search also failed: {:?}", e)),
                 }
@@ -699,11 +770,14 @@ impl Guest for Component {
 
         // Test 1: Graceful fallback for unsupported operations
         results.push("=== Testing Unsupported Operations ===".to_string());
-        
-        let test_index = "test777-unsupported";
+
+        let test_index = IndexName::from("test777-unsupported");
         let schema = create_test_schema();
 
-         if TEST_INDEX == "test-elasticsearch-index"||TEST_INDEX ==  "test-typesense-index" || TEST_INDEX == "test-opensearch-index" {
+        if TEST_INDEX == "test-elasticsearch-index"
+            || TEST_INDEX == "test-typesense-index"
+            || TEST_INDEX == "test-opensearch-index"
+        {
             println!("Setting   index: {}", test_index);
             match core::create_index(&test_index, Some(&schema)) {
                 Ok(_) => results.push("✓ Index created successfully".to_string()),
@@ -714,11 +788,12 @@ impl Guest for Component {
             println!("Setting up index: {}", test_index);
         }
 
-
         // Test schema operations that might not be supported
-        match core::update_schema(test_index, &schema) {
+        match core::update_schema(&test_index, &schema) {
             Ok(()) => results.push("✓ Schema update supported and successful".to_string()),
-            Err(SearchError::Unsupported) => results.push("✓ Schema update gracefully reports as unsupported".to_string()),
+            Err(SearchError::Unsupported) => {
+                results.push("✓ Schema update gracefully reports as unsupported".to_string())
+            }
             Err(e) => results.push(format!("⚠ Schema update failed with: {:?}", e)),
         }
 
@@ -740,18 +815,26 @@ impl Guest for Component {
             config: None,
         };
 
-        match core::search(test_index, &advanced_query) {
+        match core::search(&test_index, &advanced_query) {
             Ok(_) => results.push("✓ Advanced search features supported".to_string()),
-            Err(SearchError::Unsupported) => results.push("✓ Advanced search gracefully reports as unsupported".to_string()),
-            Err(SearchError::IndexNotFound) => results.push("✓ Expected index not found (index doesn't exist yet)".to_string()),
+            Err(SearchError::Unsupported) => {
+                results.push("✓ Advanced search gracefully reports as unsupported".to_string())
+            }
+            Err(SearchError::IndexNotFound) => {
+                results.push("✓ Expected index not found (index doesn't exist yet)".to_string())
+            }
             Err(e) => results.push(format!("⚠ Advanced search failed: {:?}", e)),
         }
 
         // Test streaming search fallback
-        match core::stream_search(test_index, &advanced_query) {
+        match core::stream_search(&test_index, &advanced_query) {
             Ok(_) => results.push("✓ Streaming search supported".to_string()),
-            Err(SearchError::Unsupported) => results.push("✓ Streaming search gracefully reports as unsupported".to_string()),
-            Err(SearchError::IndexNotFound) => results.push("✓ Expected index not found for streaming".to_string()),
+            Err(SearchError::Unsupported) => {
+                results.push("✓ Streaming search gracefully reports as unsupported".to_string())
+            }
+            Err(SearchError::IndexNotFound) => {
+                results.push("✓ Expected index not found for streaming".to_string())
+            }
             Err(e) => results.push(format!("⚠ Streaming search failed: {:?}", e)),
         }
 
@@ -764,9 +847,11 @@ impl Guest for Component {
             content: r#"{"invalid": json, "malformed": true"#.to_string(), // Missing closing brace, invalid syntax
         };
 
-        match core::upsert(test_index, &invalid_doc) {
+        match core::upsert(&test_index, &invalid_doc) {
             Ok(()) => results.push("⚠ Invalid JSON was accepted (lenient validation)".to_string()),
-            Err(SearchError::InvalidQuery(msg)) => results.push(format!("✓ Invalid JSON rejected: {}", msg)),
+            Err(SearchError::InvalidQuery(msg)) => {
+                results.push(format!("✓ Invalid JSON rejected: {}", msg))
+            }
             Err(e) => results.push(format!("✓ Invalid input handled with error: {:?}", e)),
         }
 
@@ -776,45 +861,61 @@ impl Guest for Component {
             filters: vec!["invalid_filter_syntax:::".to_string()],
             sort: vec!["invalid_sort_field:invalid_direction".to_string()],
             facets: vec![],
-            page: Some(0), // Invalid page number
+            page: Some(0),     // Invalid page number
             per_page: Some(0), // Invalid page size
             offset: None,
             highlight: None,
             config: None,
         };
 
-        match core::search(test_index, &invalid_query) {
+        match core::search(&test_index, &invalid_query) {
             Ok(_) => results.push("⚠ Invalid query was accepted (lenient parsing)".to_string()),
-            Err(SearchError::InvalidQuery(msg)) => results.push(format!("✓ Invalid query rejected: {}", msg)),
-            Err(SearchError::IndexNotFound) => results.push("✓ Index not found (expected since we haven't created it)".to_string()),
+            Err(SearchError::InvalidQuery(msg)) => {
+                results.push(format!("✓ Invalid query rejected: {}", msg))
+            }
+            Err(SearchError::IndexNotFound) => {
+                results.push("✓ Index not found (expected since we haven't created it)".to_string())
+            }
             Err(e) => results.push(format!("✓ Invalid query handled: {:?}", e)),
         }
 
         // Test 3: Operations on non-existent resources
         results.push("\n=== Testing Non-Existent Resource Handling ===".to_string());
 
-        let nonexistent_index = "definitely-does-not-exist-12345";
+        let nonexistent_index = IndexName::from("definitely-does-not-exist-12345");
 
         // Test getting document from non-existent index
-        match core::get(nonexistent_index, "any-id") {
+        match core::get(&nonexistent_index, &DocumentId::from("any-id")) {
             Ok(None) => results.push("✓ Non-existent document properly returns None".to_string()),
-            Err(SearchError::IndexNotFound) => results.push("✓ Non-existent index properly reports IndexNotFound".to_string()),
+            Err(SearchError::IndexNotFound) => {
+                results.push("✓ Non-existent index properly reports IndexNotFound".to_string())
+            }
             Err(e) => results.push(format!("✓ Non-existent resource handled: {:?}", e)),
-            Ok(Some(_)) => results.push("⚠ Unexpected document found in non-existent index".to_string()),
+            Ok(Some(_)) => {
+                results.push("⚠ Unexpected document found in non-existent index".to_string())
+            }
         }
 
         // Test deleting non-existent document
-        match core::delete(nonexistent_index, "non-existent-doc") {
-            Ok(()) => results.push("✓ Deleting non-existent document succeeds (idempotent)".to_string()),
-            Err(SearchError::IndexNotFound) => results.push("✓ Non-existent index properly reports IndexNotFound".to_string()),
+        match core::delete(&nonexistent_index, &DocumentId::from("non-existent-doc")) {
+            Ok(()) => {
+                results.push("✓ Deleting non-existent document succeeds (idempotent)".to_string())
+            }
+            Err(SearchError::IndexNotFound) => {
+                results.push("✓ Non-existent index properly reports IndexNotFound".to_string())
+            }
             Err(e) => results.push(format!("✓ Delete non-existent handled: {:?}", e)),
         }
 
         // Test getting schema from non-existent index
-        match core::get_schema(nonexistent_index) {
+        match core::get_schema(&nonexistent_index) {
             Ok(_) => results.push("⚠ Schema retrieved from non-existent index".to_string()),
-            Err(SearchError::IndexNotFound) => results.push("✓ Schema request properly reports IndexNotFound".to_string()),
-            Err(SearchError::Unsupported) => results.push("✓ Schema operations not supported by provider".to_string()),
+            Err(SearchError::IndexNotFound) => {
+                results.push("✓ Schema request properly reports IndexNotFound".to_string())
+            }
+            Err(SearchError::Unsupported) => {
+                results.push("✓ Schema operations not supported by provider".to_string())
+            }
             Err(e) => results.push(format!("✓ Schema request handled: {:?}", e)),
         }
 
@@ -827,7 +928,7 @@ impl Guest for Component {
             content: "{}".to_string(),
         };
 
-        match core::upsert(test_index, &empty_doc) {
+        match core::upsert(&test_index, &empty_doc) {
             Ok(()) => results.push("✓ Empty document accepted".to_string()),
             Err(e) => results.push(format!("✓ Empty document  handled: {:?}", e)),
         }
@@ -838,9 +939,11 @@ impl Guest for Component {
             content: r#"{"test": "value"}"#.to_string(),
         };
 
-        match core::upsert(test_index, &long_id_doc) {
+        match core::upsert(&test_index, &long_id_doc) {
             Ok(()) => results.push("✓ Long document ID accepted".to_string()),
-            Err(SearchError::InvalidQuery(msg)) => results.push(format!("✓ Long ID rejected: {}", msg)),
+            Err(SearchError::InvalidQuery(msg)) => {
+                results.push(format!("✓ Long ID rejected: {}", msg))
+            }
             Err(e) => results.push(format!("✓ Long ID handled: {:?}", e)),
         }
 
@@ -857,9 +960,14 @@ impl Guest for Component {
             config: None,
         };
 
-        match core::search(test_index, &empty_query) {
-            Ok(results_obj) => results.push(format!("✓ Empty query executed, returned {} hits", results_obj.hits.len())),
-            Err(SearchError::IndexNotFound) => results.push("✓ Expected IndexNotFound for empty query".to_string()),
+        match core::search(&test_index, &empty_query) {
+            Ok(results_obj) => results.push(format!(
+                "✓ Empty query executed, returned {} hits",
+                results_obj.hits.len()
+            )),
+            Err(SearchError::IndexNotFound) => {
+                results.push("✓ Expected IndexNotFound for empty query".to_string())
+            }
             Err(e) => results.push(format!("✓ Empty query handled: {:?}", e)),
         }
 
@@ -869,8 +977,14 @@ impl Guest for Component {
         // Test that all operations consistently handle non-existent indexes
         let ops_results = vec![
             ("list_indexes", core::list_indexes().is_ok()),
-            ("create_index", core::create_index("test-create", Some(&schema.clone())).is_ok()),
-            ("delete_index", core::delete_index("non-existent").is_ok()),
+            (
+                "create_index",
+                core::create_index(&IndexName::from("test-create"), Some(&schema.clone())).is_ok(),
+            ),
+            (
+                "delete_index",
+                core::delete_index(&IndexName::from("non-existent")).is_ok(),
+            ),
         ];
 
         for (op_name, success) in ops_results {
@@ -885,28 +999,32 @@ impl Guest for Component {
         results.push("\n=== Testing System Resilience ===".to_string());
 
         // Test with rapid successive operations (stress test)
-        let stress_index = "stress-test-index";
+        let stress_index = &IndexName::from("stress-test-index");
         let mut stress_results = Vec::new();
-        
+
         for i in 0..5 {
             let doc = Doc {
                 id: format!("stress-doc-{}", i),
                 content: format!(r#"{{"value": {}, "test": "stress"}}"#, i),
             };
-            
-            match core::upsert(stress_index, &doc) {
+
+            match core::upsert(&stress_index, &doc) {
                 Ok(()) => stress_results.push(true),
                 Err(_) => stress_results.push(false),
             }
         }
 
         let success_count = stress_results.iter().filter(|&&x| x).count();
-        results.push(format!("✓ Stress test: {}/{} operations succeeded", success_count, stress_results.len()));
+        results.push(format!(
+            "✓ Stress test: {}/{} operations succeeded",
+            success_count,
+            stress_results.len()
+        ));
 
         // Final cleanup attempt
-        let _ = core::delete_index(test_index);
+        let _ = core::delete_index(&test_index);
         let _ = core::delete_index(stress_index);
-        let _ = core::delete_index("test-create");
+        let _ = core::delete_index(&IndexName::from("test-create"));
 
         results.push("\n=== Error Handling Test Complete ===".to_string());
         results.join("\n")

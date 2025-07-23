@@ -113,7 +113,7 @@ To use the LLM provider components in a WebAssembly project independent of Golem
 
 ## Examples
 
-Take the [test application](test/components-rust/test-llm/src/lib.rs) as an example of using `golem-llm` from Rust. The
+Take the [test application](test-llm/components-rust/test-llm/src/lib.rs) as an example of using `golem-llm` from Rust. The
 implemented test functions are demonstrating the following:
 
 | Function Name | Description                                                                                |
