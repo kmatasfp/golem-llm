@@ -205,22 +205,22 @@ mod durable_impl {
     }
 
     #[derive(Debug, Clone, FromValueAndType, IntoValue)]
-    struct IndexNamesResult {
+    struct ListIndexesOutput {
         names: Vec<IndexName>,
     }
 
     #[derive(Debug, Clone, FromValueAndType, IntoValue)]
-    struct OptionalDocResult {
+    struct GetDocOutput {
         doc: Option<Doc>,
     }
 
     #[derive(Debug, Clone, FromValueAndType, IntoValue)]
-    struct SearchResultsWrapper {
+    struct SearchOutput {
         results: SearchResults,
     }
 
     #[derive(Debug, Clone, FromValueAndType, IntoValue)]
-    struct SchemaWrapper {
+    struct GetSchemaOutput {
         schema: Schema,
     }
 
@@ -270,14 +270,14 @@ mod durable_impl {
         fn list_indexes() -> Result<Vec<IndexName>, SearchError> {
             init_logging();
 
-            let durability = Durability::<IndexNamesResult, SearchError>::new(
+            let durability = Durability::<ListIndexesOutput, SearchError>::new(
                 "golem_search",
                 "list_indexes",
                 DurableFunctionType::ReadRemote,
             );
             if durability.is_live() {
                 let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                    Impl::list_indexes().map(|names| IndexNamesResult { names })
+                    Impl::list_indexes().map(|names| ListIndexesOutput { names })
                 });
                 durability
                     .persist(NoInput, result)
@@ -285,7 +285,7 @@ mod durable_impl {
             } else {
                 durability
                     .replay()
-                    .map(|result: IndexNamesResult| result.names)
+                    .map(|result: ListIndexesOutput| result.names)
             }
         }
 
@@ -372,29 +372,27 @@ mod durable_impl {
         fn get(index: IndexName, id: DocumentId) -> Result<Option<Doc>, SearchError> {
             init_logging();
 
-            let durability = Durability::<OptionalDocResult, SearchError>::new(
+            let durability = Durability::<GetDocOutput, SearchError>::new(
                 "golem_search",
                 "get",
                 DurableFunctionType::ReadRemote,
             );
             if durability.is_live() {
                 let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                    Impl::get(index.clone(), id.clone()).map(|doc| OptionalDocResult { doc })
+                    Impl::get(index.clone(), id.clone()).map(|doc| GetDocOutput { doc })
                 });
                 durability
                     .persist(GetInput { index, id }, result)
                     .map(|result| result.doc)
             } else {
-                durability
-                    .replay()
-                    .map(|result: OptionalDocResult| result.doc)
+                durability.replay().map(|result: GetDocOutput| result.doc)
             }
         }
 
         fn search(index: IndexName, query: SearchQuery) -> Result<SearchResults, SearchError> {
             init_logging();
 
-            let durability = Durability::<SearchResultsWrapper, SearchError>::new(
+            let durability = Durability::<SearchOutput, SearchError>::new(
                 "golem_search",
                 "search",
                 DurableFunctionType::ReadRemote,
@@ -402,7 +400,7 @@ mod durable_impl {
             if durability.is_live() {
                 let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
                     Impl::search(index.clone(), query.clone())
-                        .map(|results| SearchResultsWrapper { results })
+                        .map(|results| SearchOutput { results })
                 });
                 durability
                     .persist(SearchInput { index, query }, result)
@@ -410,7 +408,7 @@ mod durable_impl {
             } else {
                 durability
                     .replay()
-                    .map(|results: SearchResultsWrapper| results.results)
+                    .map(|results: SearchOutput| results.results)
             }
         }
 
@@ -445,14 +443,14 @@ mod durable_impl {
         fn get_schema(index: IndexName) -> Result<Schema, SearchError> {
             init_logging();
 
-            let durability = Durability::<SchemaWrapper, SearchError>::new(
+            let durability = Durability::<GetSchemaOutput, SearchError>::new(
                 "golem_search",
                 "get_schema",
                 DurableFunctionType::ReadRemote,
             );
             if durability.is_live() {
                 let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
-                    Impl::get_schema(index.clone()).map(|schema| SchemaWrapper { schema })
+                    Impl::get_schema(index.clone()).map(|schema| GetSchemaOutput { schema })
                 });
                 durability
                     .persist(GetSchemaInput { index }, result)
@@ -460,7 +458,7 @@ mod durable_impl {
             } else {
                 durability
                     .replay()
-                    .map(|schema: SchemaWrapper| schema.schema)
+                    .map(|schema: GetSchemaOutput| schema.schema)
             }
         }
 
