@@ -82,12 +82,13 @@ dependencies = ["wit-update"]
 
 script_runner = "@duckscript"
 script = """
-modules = array stt whisper deepgram
+modules = array aws whisper deepgram
 
 for module in ${modules}
     rm -r ${module}/wit/deps
     mkdir ${module}/wit/deps/golem-stt
     cp wit/golem-stt.wit ${module}/wit/deps/golem-stt/golem-stt.wit
+    cp wit/deps/wasi:io ${module}/wit/deps
 
     echo "Copied WIT for module stt::${module}"
 end
@@ -95,7 +96,12 @@ end
 # Copy WIT files for integration tests
 rm -r ../test-stt/wit/deps/golem-stt
 mkdir ../test-stt/wit/deps/golem-stt
+mkdir ../test-stt/wit/deps/io
 cp wit/golem-stt.wit ../test-stt/wit/deps/golem-stt/golem-stt.wit
+cp wit/deps/wasi:io/error.wit ../test-stt/wit/deps/io/error.wit
+cp wit/deps/wasi:io/poll.wit ../test-stt/wit/deps/io/poll.wit
+cp wit/deps/wasi:io/streams.wit ../test-stt/wit/deps/io/streams.wit
+cp wit/deps/wasi:io/world.wit ../test-stt/wit/deps/io/world.wit
 
 echo "Copied WIT for module test"
 """

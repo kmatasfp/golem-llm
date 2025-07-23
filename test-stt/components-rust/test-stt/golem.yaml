@@ -37,6 +37,60 @@ components:
         linkedWasm: ../../golem-temp/components/test_whisper_stt_debug.wasm
         clean:
           - src/bindings.rs
+      aws-debug:
+        files:
+          - sourcePath: samples/jfk.mp3
+            targetPath: /samples/jfk.mp3
+            permissions: read-only
+          - sourcePath: samples/mm1.wav
+            targetPath: /samples/mm1.wav
+            permissions: read-only
+        build:
+          - command: cargo component build --no-default-features --features aws
+            sources:
+              - src
+              - wit-generated
+            targets:
+              - ../../target/wasm32-wasip1/debug/test_stt.wasm
+          - command: wac plug --plug ../../../target/wasm32-wasip1/debug/golem_stt_aws.wasm ../../target/wasm32-wasip1/debug/test_stt.wasm -o ../../target/wasm32-wasip1/debug/test_aws_stt_plugged.wasm
+            sources:
+              - ../../target/wasm32-wasip1/debug/test_stt.wasm
+              - ../../../target/wasm32-wasip1/debug/golem_stt_aws.wasm
+            targets:
+              - ../../target/wasm32-wasip1/debug/test_aws_stt_plugged.wasm
+        sourceWit: wit
+        generatedWit: wit-generated
+        componentWasm: ../../target/wasm32-wasip1/debug/test_aws_stt_plugged.wasm
+        linkedWasm: ../../golem-temp/components/test_aws_stt_debug.wasm
+        clean:
+          - src/bindings.rs
+      deepgram-debug:
+        files:
+          - sourcePath: samples/jfk.mp3
+            targetPath: /samples/jfk.mp3
+            permissions: read-only
+          - sourcePath: samples/mm1.wav
+            targetPath: /samples/mm1.wav
+            permissions: read-only
+        build:
+          - command: cargo component build --no-default-features --features deepgram
+            sources:
+              - src
+              - wit-generated
+            targets:
+              - ../../target/wasm32-wasip1/debug/test_stt.wasm
+          - command: wac plug --plug ../../../target/wasm32-wasip1/debug/golem_stt_deepgram.wasm ../../target/wasm32-wasip1/debug/test_stt.wasm -o ../../target/wasm32-wasip1/debug/test_deepgram_stt_plugged.wasm
+            sources:
+              - ../../target/wasm32-wasip1/debug/test_stt.wasm
+              - ../../../target/wasm32-wasip1/debug/golem_stt_deepgram.wasm
+            targets:
+              - ../../target/wasm32-wasip1/debug/test_deepgram_stt_plugged.wasm
+        sourceWit: wit
+        generatedWit: wit-generated
+        componentWasm: ../../target/wasm32-wasip1/debug/test_deepgram_stt_plugged.wasm
+        linkedWasm: ../../golem-temp/components/test_deepgram_stt_debug.wasm
+        clean:
+          - src/bindings.rs
 
     defaultProfile: whisper-debug
 # Example for adding dependencies for Worker to Worker communication:

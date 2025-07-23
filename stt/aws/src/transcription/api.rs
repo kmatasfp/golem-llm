@@ -232,7 +232,7 @@ impl<S3: S3Service, TC: TranscribeService>
                         .await?;
                 }
 
-                Some(request_id.to_string()) // vocabulary name is the request_id
+                Some(request_id.clone()) // vocabulary name is the request_id
             } else {
                 None
             }
@@ -243,15 +243,16 @@ impl<S3: S3Service, TC: TranscribeService>
         let res = self
             .transcribe_client
             .start_transcription_job(
-                request_id.to_string(),
-                format!("s3://{}/{object_key}", &self.bucket_name),
-                request.audio_config,
-                request.transcription_config,
-                vocabulary_name,
+                request_id.clone().as_ref(),
+                &format!("s3://{}/{object_key}", &self.bucket_name),
+                &request.audio_config,
+                request.transcription_config.as_ref(),
+                vocabulary_name.as_deref(),
             )
             .await?;
 
         if res.transcription_job.transcription_job_status == "FAILED" {
+            trace!("tracription job {} failed", request_id.to_string());
             return Err(Error::APIBadRequest {
                 request_id: request_id.to_string(),
                 provider_error: format!(
@@ -263,6 +264,7 @@ impl<S3: S3Service, TC: TranscribeService>
             });
         }
 
+        trace!("waiting for {} to complete", request_id.to_string());
         let completed_transcription_job = if res.transcription_job.transcription_job_status
             == "IN_PROGRESS"
         {
@@ -274,6 +276,10 @@ impl<S3: S3Service, TC: TranscribeService>
             res.transcription_job
         };
 
+        trace!(
+            "retrieveing transcription job {} result",
+            request_id.to_string()
+        );
         if let Some(transcript) = completed_transcription_job.transcript {
             if let Some(transcript_uri) = transcript.transcript_file_uri {
                 let transcribe_output = self
@@ -281,9 +287,13 @@ impl<S3: S3Service, TC: TranscribeService>
                     .download_transcript_json(request_id.as_ref(), &transcript_uri)
                     .await?;
 
-                self.transcribe_client
-                    .delete_vocabulary(&request_id)
-                    .await?;
+                if let Some(ref config) = request.transcription_config {
+                    if !config.vocabulary.is_empty() {
+                        self.transcribe_client
+                            .delete_vocabulary(&request_id)
+                            .await?;
+                    }
+                }
 
                 self.s3_client
                     .delete_object(&request_id, &self.bucket_name, &object_key)
@@ -389,6 +399,8 @@ mod tests {
         },
         request::{AudioConfig, AudioFormat, TranscriptionConfig},
     };
+
+    use futures_concurrency::future::Join;
 
     use super::*;
 
@@ -854,27 +866,27 @@ mod tests {
 
         async fn start_transcription_job(
             &self,
-            transcription_job_name: String,
-            media_file_uri: String,
-            audio_config: AudioConfig,
-            transcription_config: Option<TranscriptionConfig>,
-            vocabulary_name: Option<String>,
+            transcription_job_name: &str,
+            media_file_uri: &str,
+            audio_config: &AudioConfig,
+            transcription_config: Option<&TranscriptionConfig>,
+            vocabulary_name: Option<&str>,
         ) -> Result<StartTranscriptionJobResponse, Error> {
             self.captured_start_transcription
                 .borrow_mut()
                 .push(StartTranscriptionOperation {
-                    job_name: transcription_job_name.clone(),
-                    media_uri: media_file_uri.clone(),
+                    job_name: transcription_job_name.to_string(),
+                    media_uri: media_file_uri.to_string(),
                     audio_config: audio_config.clone(),
-                    transcription_config: transcription_config.clone(),
-                    vocabulary_name: vocabulary_name.clone(),
+                    transcription_config: transcription_config.cloned(),
+                    vocabulary_name: vocabulary_name.map(|s| s.to_string()),
                 });
 
             self.start_transcription_responses
                 .borrow_mut()
                 .pop_front()
                 .unwrap_or(Err((
-                    transcription_job_name.clone(),
+                    transcription_job_name.to_string(),
                     golem_stt::http::Error::Generic("unexpected error".to_string()),
                 )
                     .into()))
@@ -1584,6 +1596,124 @@ mod tests {
 
         if let Err(Error::APINotFound { provider_error, .. }) = result {
             assert!(provider_error.contains("Transcript file not found"));
+        } else {
+            panic!("Expected APINotFound error");
+        }
+    }
+    #[wstd::test]
+    async fn test_transcribe_audio_concurrent_execution() {
+        // Create two separate API instances to avoid shared mock state
+        let api1 = create_mock_transcribe_api();
+        let api2 = create_mock_transcribe_api();
+
+        // Setup success case for api1
+        api1.s3_client.expect_put_object_response(Ok(()));
+        api1.transcribe_client
+            .expect_start_transcription_response(Ok(StartTranscriptionJobResponse {
+                transcription_job: TranscriptionJob {
+                    transcription_job_name: "success-request".to_string(),
+                    transcription_job_status: "COMPLETED".to_string(),
+                    language_code: Some("en-US".to_string()),
+                    media: None,
+                    media_format: None,
+                    media_sample_rate_hertz: None,
+                    creation_time: None,
+                    completion_time: None,
+                    start_time: None,
+                    failure_reason: None,
+                    settings: None,
+                    transcript: Some(Transcript {
+                        transcript_file_uri: Some("https://example.com/success.json".to_string()),
+                        redacted_transcript_file_uri: None,
+                    }),
+                    tags: None,
+                },
+            }));
+        api1.transcribe_client
+            .expect_download_transcript_response(Ok(TranscribeOutput {
+                job_name: "success-request".to_string(),
+                account_id: "123456789".to_string(),
+                results: TranscribeResults {
+                    transcripts: vec![TranscriptText {
+                        transcript: "Successful transcription".to_string(),
+                    }],
+                    speaker_labels: None,
+                    channel_labels: None,
+                    items: vec![],
+                    audio_segments: vec![],
+                },
+                status: "COMPLETED".to_string(),
+            }));
+
+        api1.transcribe_client
+            .expect_delete_vocabulary_response(Ok(()));
+
+        // Setup failure case for api2
+        api2.s3_client.expect_put_object_response(Ok(()));
+        api2.transcribe_client
+            .expect_start_transcription_response(Err(Error::APINotFound {
+                request_id: "failure-request".to_string(),
+                provider_error: "Transcription failed".to_string(),
+            }));
+
+        // Create requests
+        let success_request = TranscriptionRequest {
+            request_id: "success-request".to_string(),
+            audio: b"success audio".to_vec(),
+            audio_config: AudioConfig {
+                format: AudioFormat::wav,
+                channels: Some(1),
+            },
+            transcription_config: Some(TranscriptionConfig {
+                language: Some("en-US".to_string()),
+                model: None,
+                enable_speaker_diarization: false,
+                vocabulary: vec![],
+            }),
+        };
+
+        let failure_request = TranscriptionRequest {
+            request_id: "failure-request".to_string(),
+            audio: b"failure audio".to_vec(),
+            audio_config: AudioConfig {
+                format: AudioFormat::wav,
+                channels: Some(1),
+            },
+            transcription_config: Some(TranscriptionConfig {
+                language: Some("en-US".to_string()),
+                model: None,
+                enable_speaker_diarization: false,
+                vocabulary: vec![],
+            }),
+        };
+
+        // Run concurrent transcriptions using Join with separate API instances
+        let futures = vec![
+            api1.transcribe_audio(success_request),
+            api2.transcribe_audio(failure_request),
+        ];
+
+        let results = futures.join().await;
+
+        // Verify we get the expected mixed results
+        assert_eq!(results.len(), 2);
+
+        let successes: Vec<_> = results.iter().filter(|r| r.is_ok()).collect();
+        let failures: Vec<_> = results.iter().filter(|r| r.is_err()).collect();
+
+        assert_eq!(successes.len(), 1, "Expected exactly one success");
+        assert_eq!(failures.len(), 1, "Expected exactly one failure");
+
+        // Verify success content
+        let success_result = successes[0].as_ref().unwrap();
+        assert_eq!(
+            success_result.aws_transcription.results.transcripts[0].transcript,
+            "Successful transcription"
+        );
+
+        // Verify failure content
+        if let Err(Error::APINotFound { provider_error, .. }) = failures[0] {
+            assert!(provider_error.contains("Transcription failed"));
         } else {
             panic!("Expected APINotFound error");
         }

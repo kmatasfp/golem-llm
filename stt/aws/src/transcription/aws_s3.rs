@@ -47,9 +47,13 @@ impl<HC: HttpClient> S3Service for S3Client<HC> {
         let timestamp = Utc::now();
         let uri = format!("https://{}.s3.amazonaws.com/{}", bucket, object_name);
 
+        let content_length = content.len().to_string();
+
         let request = Request::builder()
             .method("PUT")
             .uri(&uri)
+            .header("Content-Type", "application/octet-stream")
+            .header("Content-Length", &content_length)
             .body(content)
             .map_err(|e| {
                 Error::Http(request_id.to_string(), golem_stt::http::Error::HttpError(e))
@@ -276,6 +280,7 @@ mod tests {
 
         assert!(request.headers().contains_key("x-amz-date"));
         assert!(request.headers().contains_key("x-amz-content-sha256"));
+        assert!(request.headers().contains_key("content-length"));
         assert!(request.headers().contains_key("authorization"));
 
         let auth_header = request

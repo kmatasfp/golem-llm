@@ -2,6 +2,7 @@ use chrono::Utc;
 use golem_stt::runtime::AsyncRuntime;
 
 use http::Request;
+use log::trace;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -371,11 +372,11 @@ pub trait TranscribeService {
 
     async fn start_transcription_job(
         &self,
-        transcription_job_name: String,
-        media_file_uri: String,
-        audio_config: AudioConfig,
-        transcription_config: Option<TranscriptionConfig>,
-        vocabulary_name: Option<String>,
+        transcription_job_name: &str,
+        media_file_uri: &str,
+        audio_config: &AudioConfig,
+        transcription_config: Option<&TranscriptionConfig>,
+        vocabulary_name: Option<&str>,
     ) -> Result<StartTranscriptionJobResponse, golem_stt::error::Error>;
 
     async fn get_transcription_job(
@@ -800,11 +801,11 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
 
     async fn start_transcription_job(
         &self,
-        transcription_job_name: String,
-        media_file_uri: String,
-        audio_config: AudioConfig,
-        transcription_config: Option<TranscriptionConfig>,
-        vocabulary_name: Option<String>,
+        transcription_job_name: &str,
+        media_file_uri: &str,
+        audio_config: &AudioConfig,
+        transcription_config: Option<&TranscriptionConfig>,
+        vocabulary_name: Option<&str>,
     ) -> Result<StartTranscriptionJobResponse, golem_stt::error::Error> {
         let timestamp = Utc::now();
         let uri = format!(
@@ -813,18 +814,15 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
         );
 
         let language_code = transcription_config
-            .as_ref()
             .and_then(|config| config.language.as_ref().map(|lang| lang.to_string()));
         let use_identify_language = language_code.is_none();
         let enable_channel_identification = audio_config.channels.filter(|ch| *ch > 1).is_some();
         let enable_speaker_diarization = transcription_config
-            .as_ref()
             .map(|config| config.enable_speaker_diarization)
             .unwrap_or(false);
 
         let model_settings = if !use_identify_language {
             transcription_config
-                .as_ref()
                 .and_then(|config| config.model.as_deref())
                 .map(|model| ModelSettings {
                     language_model_name: model.to_string(),
@@ -858,7 +856,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
                 vocabulary_filter_method: None,
                 vocabulary_filter_name: None,
                 vocabulary_name: if !use_identify_language {
-                    vocabulary_name
+                    vocabulary_name.map(|s| s.to_string())
                 } else {
                     None
                 },
@@ -881,7 +879,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
             language_id_settings: None,
             language_options: None,
             media: Media {
-                media_file_uri,
+                media_file_uri: media_file_uri.to_string(),
                 redacted_media_file_uri: None,
             },
             media_format: Some(audio_config.format.to_string()),
@@ -894,12 +892,12 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
             subtitles: None,
             tags: None,
             toxicity_detection: None,
-            transcription_job_name: transcription_job_name.clone(),
+            transcription_job_name: transcription_job_name.to_string(),
         };
 
         let json_body = serde_json::to_string(&request_body).map_err(|e| {
             (
-                transcription_job_name.clone(),
+                transcription_job_name.to_string(),
                 golem_stt::http::Error::Generic(format!("Failed to serialize request: {}", e)),
             )
         })?;
@@ -915,7 +913,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
             .body(json_body.into_bytes())
             .map_err(|e| {
                 (
-                    transcription_job_name.clone(),
+                    transcription_job_name.to_string(),
                     golem_stt::http::Error::HttpError(e),
                 )
             })?;
@@ -925,7 +923,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
             .sign_request(request, timestamp)
             .map_err(|err| {
                 (
-                    transcription_job_name.clone(),
+                    transcription_job_name.to_string(),
                     golem_stt::http::Error::Generic(format!("Failed to sign request: {}", err)),
                 )
             })?;
@@ -934,13 +932,13 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
             .http_client
             .execute(signed_request)
             .await
-            .map_err(|err| (transcription_job_name.clone(), err))?;
+            .map_err(|err| (transcription_job_name.to_string(), err))?;
 
         if response.status().is_success() {
             let transcription_response: StartTranscriptionJobResponse =
                 serde_json::from_slice(response.body()).map_err(|e| {
                     (
-                        transcription_job_name.clone(),
+                        transcription_job_name.to_string(),
                         golem_stt::http::Error::Generic(format!(
                             "Failed to deserialize response: {}",
                             e
@@ -954,7 +952,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
                 .unwrap_or_else(|_| "Unknown error".to_string());
 
             let status = response.status();
-            let request_id = transcription_job_name.clone();
+            let request_id = transcription_job_name.to_string();
 
             match status.as_u16() {
                 400 => Err(golem_stt::error::Error::APIBadRequest {
@@ -1135,9 +1133,11 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
 
             match res.transcription_job.transcription_job_status.as_str() {
                 "COMPLETED" => {
+                    trace!("transcription job {} completed", transcription_job_name);
                     return Ok(res);
                 }
                 "FAILED" => {
+                    trace!("tracription job {} failed", transcription_job_name);
                     return Err(golem_stt::error::Error::APIBadRequest {
                         request_id: transcription_job_name.to_string(),
                         provider_error: format!(
@@ -1150,6 +1150,10 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
                     });
                 }
                 "IN_PROGRESS" | "QUEUED" => {
+                    trace!(
+                        "transcription job {} waiting for completion",
+                        transcription_job_name
+                    );
                     // Continue polling with exponential backoff
                     retry_delay = std::cmp::min(
                         Duration::from_millis((retry_delay.as_millis() as f64 * 1.5) as u64),
@@ -1538,9 +1542,9 @@ mod tests {
 
         let _result = transcribe_client
             .start_transcription_job(
-                "test-job-basic".to_string(),
-                "s3://bucket/audio.wav".to_string(),
-                audio_config,
+                "test-job-basic",
+                "s3://bucket/audio.wav",
+                &audio_config,
                 None, // No transcription config
                 None, // No vocabulary
             )
@@ -1633,10 +1637,10 @@ mod tests {
 
         let _result = transcribe_client
             .start_transcription_job(
-                "test-job-lang".to_string(),
-                "s3://bucket/audio.mp3".to_string(),
-                audio_config,
-                Some(transcription_config),
+                "test-job-lang",
+                "s3://bucket/audio.mp3",
+                &audio_config,
+                Some(&transcription_config),
                 None,
             )
             .await
@@ -1727,11 +1731,11 @@ mod tests {
 
         let _result = transcribe_client
             .start_transcription_job(
-                "test-job-advanced".to_string(),
-                "s3://bucket/audio.flac".to_string(),
-                audio_config,
-                Some(transcription_config),
-                Some("custom-medical-vocab-123".to_string()), // Vocabulary name provided
+                "test-job-advanced",
+                "s3://bucket/audio.flac",
+                &audio_config,
+                Some(&transcription_config),
+                Some("custom-medical-vocab-123"), // Vocabulary name provided
             )
             .await
             .unwrap();
@@ -1832,10 +1836,10 @@ mod tests {
 
         let _result = transcribe_client
             .start_transcription_job(
-                "test-job-speakers".to_string(),
-                "s3://bucket/meeting.ogg".to_string(),
-                audio_config,
-                Some(transcription_config),
+                "test-job-speakers",
+                "s3://bucket/meeting.ogg",
+                &audio_config,
+                Some(&transcription_config),
                 None,
             )
             .await
@@ -1935,11 +1939,11 @@ mod tests {
 
         let _result = transcribe_client
             .start_transcription_job(
-                "test-job-channels".to_string(),
-                "s3://bucket/call-recording.wav".to_string(),
-                audio_config,
-                Some(transcription_config),
-                Some("telephony-vocab".to_string()),
+                "test-job-channels",
+                "s3://bucket/call-recording.wav",
+                &audio_config,
+                Some(&transcription_config),
+                Some("telephony-vocab"),
             )
             .await
             .unwrap();
@@ -2041,11 +2045,11 @@ mod tests {
 
         let _result = transcribe_client
             .start_transcription_job(
-                "test-job-identify".to_string(),
-                "s3://bucket/unknown-language.mp3".to_string(),
-                audio_config,
-                Some(transcription_config),
-                Some("some-vocab".to_string()), // This should be ignored
+                "test-job-identify",
+                "s3://bucket/unknown-language.mp3",
+                &audio_config,
+                Some(&transcription_config),
+                Some("some-vocab"), // This should be ignored
             )
             .await
             .unwrap();

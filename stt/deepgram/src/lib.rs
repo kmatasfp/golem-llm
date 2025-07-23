@@ -1,6 +1,7 @@
 use golem_stt::error::Error;
 use golem_stt::http::WstdHttpClient;
 use golem_stt::transcription::SttProviderClient;
+use golem_stt::LOGGING_STATE;
 use transcription::{
     AudioConfig, AudioFormat, Keyword, PreRecordedAudioApi, TranscriptionConfig,
     TranscriptionRequest, TranscriptionResponse,
@@ -34,6 +35,8 @@ struct Component;
 
 impl WitLanguageGuest for Component {
     fn list_languages() -> Result<Vec<WitLanguageInfo>, WitSttError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
+
         let supported_languages = transcription::get_supported_languages();
         Ok(supported_languages
             .iter()
@@ -48,6 +51,8 @@ impl WitLanguageGuest for Component {
 
 impl TranscriptionGuest for Component {
     fn transcribe(req: WitTranscriptionRequest) -> Result<WitTranscriptionResult, WitSttError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
+
         let api_key = std::env::var("DEEPGRAM_API_TOKEN").map_err(|err| {
             Error::EnvVariablesNotSet(format!("Failed to load DEEPGRAM_API_TOKEN: {}", err))
         })?;
@@ -64,6 +69,8 @@ impl TranscriptionGuest for Component {
     fn transcribe_many(
         wit_requests: Vec<WitTranscriptionRequest>,
     ) -> Result<WitMultiTranscriptionResult, WitSttError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
+
         let api_key = std::env::var("DEEPGRAM_API_TOKEN").map_err(|err| {
             Error::EnvVariablesNotSet(format!("Failed to load DEEPGRAM_API_TOKEN: {}", err))
         })?;

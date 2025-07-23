@@ -52,3 +52,4 @@ path = "wit"
 
 [package.metadata.component.target.dependencies]
 "golem:stt" = { path = "wit/deps/golem-stt" }
+"wasi:io" = { path = "wit/deps/wasi:io" }

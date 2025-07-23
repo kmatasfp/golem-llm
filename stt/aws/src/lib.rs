@@ -15,6 +15,8 @@ use golem_stt::golem::stt::types::{
     TranscriptionMetadata as WitTranscriptionMetadata, WordSegment as WitWordSegment,
 };
 use golem_stt::transcription::SttProviderClient;
+use golem_stt::LOGGING_STATE;
+use log::trace;
 use transcription::api::{TranscribeApi, TranscriptionResponse};
 use transcription::request::{AudioConfig, AudioFormat, TranscriptionConfig, TranscriptionRequest};
 
@@ -29,6 +31,8 @@ struct Component;
 
 impl LanguageGuest for Component {
     fn list_languages() -> Result<Vec<LanguageInfo>, WitSttError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
+
         let supported_languages = transcription::api::get_supported_languages();
         Ok(supported_languages
             .iter()
@@ -43,6 +47,8 @@ impl LanguageGuest for Component {
 
 impl TranscriptionGuest for Component {
     fn transcribe(req: WitTranscriptionRequest) -> Result<WitTranscriptionResult, WitSttError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
+
         let region = std::env::var("AWS_REGION").map_err(|err| {
             Error::EnvVariablesNotSet(format!("Failed to load AWS_REGION: {}", err))
         })?;
@@ -71,6 +77,8 @@ impl TranscriptionGuest for Component {
     fn transcribe_many(
         wit_requests: Vec<WitTranscriptionRequest>,
     ) -> Result<WitMultiTranscriptionResult, WitSttError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
+
         let region = std::env::var("AWS_REGION").map_err(|err| {
             Error::EnvVariablesNotSet(format!("Failed to load AWS_REGION: {}", err))
         })?;
@@ -116,7 +124,9 @@ impl TranscriptionGuest for Component {
                     .map(|request| api_client.transcribe_audio(request))
                     .collect::<Vec<_>>();
 
+                trace!("waiting for transcription jobs to complete");
                 let results = futures.join().await;
+                trace!("transcription job completed");
 
                 for res in results {
                     match res {

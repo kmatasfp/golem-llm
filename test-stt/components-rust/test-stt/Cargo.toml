@@ -10,12 +10,14 @@ required-features = []
 
 [features]
 default = ["whisper"]
+aws = []
+deepgram = []
 whisper = []
 
 [dependencies]
 # To use common shared libs, use the following:
 # common-lib = { path = "../../common-rust/common-lib" }
-
+log = "0.4.27"
 golem-rust = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

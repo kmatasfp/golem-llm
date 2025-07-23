@@ -1,6 +1,7 @@
 use futures_concurrency::future::Join;
 use golem_stt::http::WstdHttpClient;
 use golem_stt::transcription::SttProviderClient;
+use golem_stt::LOGGING_STATE;
 use itertools::Itertools;
 
 use golem_stt::error::Error;
@@ -31,6 +32,8 @@ struct Component;
 
 impl LanguageGuest for Component {
     fn list_languages() -> Result<Vec<LanguageInfo>, WitSttError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
+
         let supported_languages = transcription::get_supported_languages();
         Ok(supported_languages
             .iter()
@@ -45,6 +48,8 @@ impl LanguageGuest for Component {
 
 impl TranscriptionGuest for Component {
     fn transcribe(req: WitTranscriptionRequest) -> Result<WitTranscriptionResult, WitSttError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
+
         let api_key = std::env::var("OPENAI_API_KEY").map_err(|err| {
             Error::EnvVariablesNotSet(format!("Failed to load OPENAI_API_KEY: {}", err))
         })?;
@@ -61,6 +66,8 @@ impl TranscriptionGuest for Component {
     fn transcribe_many(
         wit_requests: Vec<WitTranscriptionRequest>,
     ) -> Result<WitMultiTranscriptionResult, WitSttError> {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
+
         let api_key = std::env::var("OPENAI_API_KEY").map_err(|err| {
             Error::EnvVariablesNotSet(format!("Failed to load OPENAI_API_KEY: {}", err))
         })?;
