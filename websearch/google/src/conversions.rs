@@ -4,7 +4,7 @@ use golem_web_search::golem::web_search::web_search::{
     SearchError, SearchMetadata, SearchParams, SearchResult,
 };
 
-pub fn params_to_request(params: SearchParams, start: u32) -> Result<SearchRequest, SearchError> {
+pub fn params_to_request(params: &SearchParams, start: u32) -> Result<SearchRequest, SearchError> {
     // Validate query
     if params.query.trim().is_empty() {
         return Err(SearchError::InvalidQuery);
@@ -52,9 +52,9 @@ pub fn params_to_request(params: SearchParams, start: u32) -> Result<SearchReque
 }
 
 pub fn response_to_results(
-    response: SearchResponse,
+    response: &SearchResponse,
     original_params: &SearchParams,
-    current_start: u32,
+    current_page: u32,
 ) -> (Vec<SearchResult>, SearchMetadata) {
     let mut results = Vec::new();
 
@@ -63,7 +63,7 @@ pub fn response_to_results(
         results.push(web_result_to_search_result(item, index));
     }
 
-    let metadata = create_search_metadata(&response, original_params, current_start);
+    let metadata = create_search_metadata(response, original_params, current_page);
     (results, metadata)
 }
 
@@ -115,7 +115,7 @@ fn extract_domain(url: &str) -> Option<String> {
 fn create_search_metadata(
     response: &SearchResponse,
     params: &SearchParams,
-    current_start: u32,
+    current_page: u32,
 ) -> SearchMetadata {
     // Create next page token if more results are available
     let next_page_token = response
@@ -141,7 +141,7 @@ fn create_search_metadata(
         region: params.region.clone(),
         next_page_token,
         rate_limits: None,
-        current_page: current_start,
+        current_page,
     }
 }
 

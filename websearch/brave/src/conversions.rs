@@ -3,7 +3,7 @@ use golem_web_search::golem::web_search::web_search::{
     SearchError, SearchMetadata, SearchParams, SearchResult,
 };
 
-pub fn params_to_request(params: SearchParams, offset: u32) -> Result<SearchRequest, SearchError> {
+pub fn params_to_request(params: &SearchParams, offset: u32) -> Result<SearchRequest, SearchError> {
     // Validate query
     if params.query.trim().is_empty() {
         return Err(SearchError::InvalidQuery);
@@ -25,7 +25,7 @@ pub fn params_to_request(params: SearchParams, offset: u32) -> Result<SearchRequ
 }
 
 pub fn response_to_results(
-    response: SearchResponse,
+    response: &SearchResponse,
     original_params: &SearchParams,
     current_offset: u32,
 ) -> (Vec<SearchResult>, SearchMetadata) {
@@ -38,7 +38,7 @@ pub fn response_to_results(
         }
     }
 
-    let metadata = create_search_metadata(&response, original_params, current_offset);
+    let metadata = create_search_metadata(response, original_params, current_offset);
     (results, metadata)
 }
 
@@ -92,18 +92,9 @@ fn create_search_metadata(
     params: &SearchParams,
     current_offset: u32,
 ) -> SearchMetadata {
-    // Check if we got the full count requested
-    let has_more_results = if let Some(web_results) = &response.web {
-        let requested_count = params.max_results.unwrap_or(10);
-        web_results.results.len() == (requested_count as usize)
-    } else {
-        false
-    };
-
     // Create next page token if more results are available
-    let next_page_token = if has_more_results {
-        let next_offset = current_offset + params.max_results.unwrap_or(10);
-        Some(next_offset.to_string())
+    let next_page_token = if response.query.more_results_available {
+        Some((current_offset + 1).to_string())
     } else {
         None
     };

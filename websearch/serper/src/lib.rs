@@ -3,7 +3,7 @@ mod conversions;
 
 use std::cell::RefCell;
 
-use crate::client::{SearchRequest, SerperSearchApi};
+use crate::client::SerperSearchApi;
 use crate::conversions::{params_to_request, response_to_results, validate_search_params};
 use golem_web_search::durability::Durablewebsearch;
 use golem_web_search::durability::ExtendedwebsearchGuest;
@@ -18,63 +18,49 @@ use golem_web_search::LOGGING_STATE;
 pub struct SerperReplayState {
     pub api_key: String,
     pub current_page: u32,
-    pub metadata: SearchMetadata,
+    pub metadata: Option<SearchMetadata>,
     pub finished: bool,
 }
 
 struct SerperSearch {
     client: SerperSearchApi,
-    request: SearchRequest,
     params: SearchParams,
-    metadata: SearchMetadata,
+    metadata: Option<SearchMetadata>,
     current_page: u32, // 1-based
+    finished: bool,
 }
 
 impl SerperSearch {
-    fn new(client: SerperSearchApi, request: SearchRequest, params: SearchParams) -> Self {
+    fn new(client: SerperSearchApi, params: SearchParams) -> Self {
         Self {
             client,
-            request,
-            params: params.clone(),
-            metadata: SearchMetadata {
-                query: params.query,
-                total_results: None,
-                search_time_ms: None,
-                safe_search: None,
-                language: None,
-                region: None,
-                next_page_token: None,
-                rate_limits: None,
-                current_page: 1,
-            },
+            params,
+            metadata: None,
             current_page: 1, // 1-based
+            finished: false,
         }
     }
-    fn next_page(&mut self) -> Result<(Vec<SearchResult>, bool), SearchError> {
+
+    fn next_page(&mut self) -> Result<Vec<SearchResult>, SearchError> {
+        if self.finished {
+            return Ok(Vec::new());
+        }
+
         let request =
             crate::conversions::params_to_request(self.params.clone(), self.current_page)?;
+        let num_results = request.num.unwrap_or(10);
         let response = self.client.search(request)?;
         let (results, metadata) = response_to_results(response, &self.params, self.current_page);
 
-        // Determine if more results are available
-        let num_results = self.request.num.unwrap_or(10);
-        let finished = results.len() < (num_results as usize);
+        self.finished = results.len() < (num_results as usize);
+        self.current_page += 1;
+        self.metadata = Some(metadata);
 
-        // Update metadata for this page
-        self.metadata = metadata;
-        self.metadata.current_page = self.current_page;
-
-        if !finished {
-            self.current_page += 1;
-            self.metadata.next_page_token = Some(self.current_page.to_string());
-        } else {
-            self.metadata.next_page_token = None;
-        }
-
-        Ok((results, finished))
+        Ok(results)
     }
+
     fn get_metadata(&self) -> Option<SearchMetadata> {
-        Some(self.metadata.clone())
+        self.metadata.clone()
     }
 }
 
@@ -90,8 +76,7 @@ impl SerperSearchSession {
 impl GuestSearchSession for SerperSearchSession {
     fn next_page(&self) -> Result<Vec<SearchResult>, SearchError> {
         let mut search = self.0.borrow_mut();
-        let (results, _) = search.next_page()?;
-        Ok(results)
+        search.next_page()
     }
 
     fn get_metadata(&self) -> Option<SearchMetadata> {
@@ -134,9 +119,7 @@ impl SerperSearchComponent {
         validate_search_params(&params)?;
 
         let client = Self::create_client()?;
-        let request = params_to_request(params.clone(), 1)?;
-
-        let search = SerperSearch::new(client, request, params);
+        let search = SerperSearch::new(client, params);
         Ok(SerperSearchSession::new(search))
     }
 }
@@ -166,19 +149,17 @@ impl ExtendedwebsearchGuest for SerperSearchComponent {
 
     fn unwrapped_search_session(params: SearchParams) -> Result<Self::SearchSession, SearchError> {
         let client = Self::create_client()?;
-        let request = crate::conversions::params_to_request(params.clone(), 1)?;
-        let search = SerperSearch::new(client, request, params);
+        let search = SerperSearch::new(client, params);
         Ok(SerperSearchSession::new(search))
     }
 
     fn session_to_state(session: &Self::SearchSession) -> Self::ReplayState {
-        let mut search = session.0.borrow_mut();
-        let (_, finished) = search.next_page().unwrap_or((vec![], true));
+        let search = session.0.borrow_mut();
         SerperReplayState {
             api_key: search.client.api_key().to_string(),
             current_page: search.current_page,
             metadata: search.metadata.clone(),
-            finished,
+            finished: search.finished,
         }
     }
 
@@ -187,13 +168,10 @@ impl ExtendedwebsearchGuest for SerperSearchComponent {
         params: SearchParams,
     ) -> Result<Self::SearchSession, SearchError> {
         let client = SerperSearchApi::new(state.api_key.clone());
-        let request = crate::conversions::params_to_request(params.clone(), state.current_page)?;
-        let mut search = SerperSearch::new(client, request, params);
+        let mut search = SerperSearch::new(client, params);
         search.current_page = state.current_page;
         search.metadata = state.metadata.clone();
-        if state.finished {
-            let _ = search.next_page();
-        }
+        search.finished = state.finished;
         Ok(SerperSearchSession::new(search))
     }
 }

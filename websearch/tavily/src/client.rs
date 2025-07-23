@@ -21,13 +21,13 @@ impl TavilySearchApi {
         Self { client, api_key }
     }
 
-    pub fn search(&self, mut request: SearchRequest) -> Result<SearchResponse, SearchError> {
+    pub fn search(&self, request: SearchRequest) -> Result<SearchResponse, SearchError> {
         trace!("Sending request to Tavily Search API: {request:?}");
-        request.api_key = self.api_key.clone();
         let response = self
             .client
             .request(Method::POST, BASE_URL)
             .header("Content-Type", "application/json")
+            .bearer_auth(&self.api_key)
             .json(&request)
             .send()
             .map_err(|err| from_reqwest_error("Request failed", err))?;
@@ -42,7 +42,6 @@ impl TavilySearchApi {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchRequest {
-    pub api_key: String,
     pub query: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search_depth: Option<String>,

@@ -1,9 +1,7 @@
 mod client;
 mod conversions;
 
-use std::cell::RefCell;
-
-use crate::client::{GoogleSearchApi, NextPage, SearchRequest};
+use crate::client::GoogleSearchApi;
 use crate::conversions::{params_to_request, response_to_results, validate_search_params};
 use golem_web_search::durability::Durablewebsearch;
 use golem_web_search::durability::ExtendedwebsearchGuest;
@@ -11,55 +9,59 @@ use golem_web_search::golem::web_search::web_search::{
     Guest, GuestSearchSession, SearchError, SearchMetadata, SearchParams, SearchResult,
     SearchSession,
 };
-
 use golem_web_search::LOGGING_STATE;
+use std::cell::RefCell;
+
+/// Start index for google search api pagination (which is 1-index based)
+const INITIAL_START_INDEX: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, golem_rust::FromValueAndType, golem_rust::IntoValue)]
 pub struct GoogleReplayState {
     pub api_key: String,
     pub search_engine_id: String,
-    pub next_page_token: Option<String>,
+    pub current_page: u32,
+    pub next_page_start_index: Option<u32>,
     pub metadata: Option<SearchMetadata>,
     pub finished: bool,
 }
 
 struct GoogleSearch {
     client: GoogleSearchApi,
-    request: SearchRequest,
     params: SearchParams,
     metadata: Option<SearchMetadata>,
-    next_page: Option<NextPage>,
+    current_page: u32,
+    next_page_start_index: Option<u32>,
+    finished: bool,
 }
 
 impl GoogleSearch {
-    fn new(client: GoogleSearchApi, request: SearchRequest, params: SearchParams) -> Self {
+    fn new(client: GoogleSearchApi, params: SearchParams) -> Self {
         Self {
             client,
-            request,
             params,
             metadata: None,
-            next_page: None,
+            current_page: 0,
+            next_page_start_index: None,
+            finished: false,
         }
     }
 
-    fn next_page(&mut self) -> Result<(Vec<SearchResult>, bool), SearchError> {
-        // Update request with current start index
-        let mut request = self.request.clone();
-        let current_start = if let Some(next_page) = &self.next_page {
-            request.start = Some(next_page.start_index);
-            next_page.start_index
-        } else {
-            1
-        };
+    fn next_page(&mut self) -> Result<Vec<SearchResult>, SearchError> {
+        if self.finished {
+            return Ok(Vec::new());
+        }
 
+        let current_start = self.next_page_start_index.unwrap_or(INITIAL_START_INDEX);
+        let request = crate::conversions::params_to_request(&self.params, current_start)?;
         let response = self.client.search(request)?;
-        let (results, metadata) =
-            response_to_results(response.clone(), &self.params, current_start);
 
-        let finished = response.next_page.is_none();
-        self.next_page = response.next_page;
+        let (results, metadata) = response_to_results(&response, &self.params, self.current_page);
+
+        self.finished = response.next_page.is_none();
+        self.current_page += 1;
+        self.next_page_start_index = response.next_page.map(|np| np.start_index);
         self.metadata = Some(metadata);
-        Ok((results, finished))
+        Ok(results)
     }
 
     fn get_metadata(&self) -> Option<SearchMetadata> {
@@ -79,7 +81,7 @@ impl GoogleSearchSession {
 impl GuestSearchSession for GoogleSearchSession {
     fn next_page(&self) -> Result<Vec<SearchResult>, SearchError> {
         let mut search = self.0.borrow_mut();
-        search.next_page().map(|(results, _)| results)
+        search.next_page()
     }
 
     fn get_metadata(&self) -> Option<SearchMetadata> {
@@ -114,10 +116,10 @@ impl GoogleCustomSearchComponent {
         validate_search_params(&params)?;
 
         let client = Self::create_client()?;
-        let request = params_to_request(params.clone(), 1)?;
+        let request = params_to_request(&params, INITIAL_START_INDEX)?;
 
         let response = client.search(request)?;
-        let (results, metadata) = response_to_results(response, &params, 1);
+        let (results, metadata) = response_to_results(&response, &params, 0);
 
         Ok((results, Some(metadata)))
     }
@@ -126,9 +128,7 @@ impl GoogleCustomSearchComponent {
         validate_search_params(&params)?;
 
         let client = Self::create_client()?;
-        let request = params_to_request(params.clone(), 1)?;
-
-        let search = GoogleSearch::new(client, request, params);
+        let search = GoogleSearch::new(client, params);
         Ok(GoogleSearchSession::new(search))
     }
 }
@@ -157,20 +157,19 @@ impl ExtendedwebsearchGuest for GoogleCustomSearchComponent {
 
     fn unwrapped_search_session(params: SearchParams) -> Result<Self::SearchSession, SearchError> {
         let client = Self::create_client()?;
-        let request = crate::conversions::params_to_request(params.clone(), 1)?;
-        let search = GoogleSearch::new(client, request, params);
+        let search = GoogleSearch::new(client, params);
         Ok(GoogleSearchSession::new(search))
     }
 
     fn session_to_state(session: &Self::SearchSession) -> Self::ReplayState {
-        let mut search = session.0.borrow_mut();
-        let (_, finished) = search.next_page().unwrap_or_else(|_| (vec![], true));
+        let search = session.0.borrow_mut();
         GoogleReplayState {
             api_key: search.client.api_key().to_string(),
             search_engine_id: search.client.search_engine_id().to_string(),
-            next_page_token: search.next_page.as_ref().map(|p| p.start_index.to_string()),
+            current_page: search.current_page,
+            next_page_start_index: search.next_page_start_index,
             metadata: search.metadata.clone(),
-            finished,
+            finished: search.finished,
         }
     }
 
@@ -179,17 +178,11 @@ impl ExtendedwebsearchGuest for GoogleCustomSearchComponent {
         params: SearchParams,
     ) -> Result<Self::SearchSession, SearchError> {
         let client = GoogleSearchApi::new(state.api_key.clone(), state.search_engine_id.clone());
-        let request = crate::conversions::params_to_request(params.clone(), 1)?;
-        let mut search = GoogleSearch::new(client, request, params);
-        search.next_page = state
-            .next_page_token
-            .as_ref()
-            .and_then(|t| t.parse().ok())
-            .map(|start_index| NextPage { start_index });
+        let mut search = GoogleSearch::new(client, params);
+        search.current_page = state.current_page;
+        search.next_page_start_index = state.next_page_start_index;
         search.metadata = state.metadata.clone();
-        if state.finished {
-            let _ = search.next_page();
-        }
+        search.finished = state.finished;
 
         Ok(GoogleSearchSession::new(search))
     }

@@ -3,7 +3,7 @@ mod conversions;
 
 use std::cell::RefCell;
 
-use crate::client::{BraveSearchApi, SearchRequest};
+use crate::client::BraveSearchApi;
 use crate::conversions::{params_to_request, response_to_results, validate_search_params};
 use golem_web_search::durability::Durablewebsearch;
 use golem_web_search::durability::ExtendedwebsearchGuest;
@@ -25,42 +25,39 @@ pub struct BraveReplayState {
 
 struct BraveSearch {
     client: BraveSearchApi,
-    request: SearchRequest,
     params: SearchParams,
     metadata: Option<SearchMetadata>,
     current_offset: u32,
+    finished: bool,
 }
 
 impl BraveSearch {
-    fn new(client: BraveSearchApi, request: SearchRequest, params: SearchParams) -> Self {
+    fn new(client: BraveSearchApi, params: SearchParams) -> Self {
         Self {
             client,
-            request,
             params,
             metadata: None,
             current_offset: 0,
+            finished: false,
         }
     }
 
-    fn next_page(&mut self) -> Result<(Vec<SearchResult>, bool), SearchError> {
+    fn next_page(&mut self) -> Result<Vec<SearchResult>, SearchError> {
+        if self.finished {
+            return Ok(Vec::new());
+        }
+
         // Update request with current offset
-        let mut request = self.request.clone();
-        request.offset = Some(self.current_offset);
+        let request = crate::conversions::params_to_request(&self.params, self.current_offset)?;
 
         let response = self.client.search(request)?;
-        let (results, metadata) = response_to_results(response, &self.params, self.current_offset);
+        let (results, metadata) = response_to_results(&response, &self.params, self.current_offset);
 
-        // Always increment current_offset after a page fetch
+        self.finished = !response.query.more_results_available;
         self.current_offset += 1;
-
-        // Check if more results are available
-        let count = self.request.count.unwrap_or(10);
-        let has_more_results = results.len() == (count as usize);
-        let has_next_page = metadata.next_page_token.is_some();
-        let finished = !has_more_results || !has_next_page;
-
         self.metadata = Some(metadata);
-        Ok((results, finished))
+
+        Ok(results)
     }
 
     fn get_metadata(&self) -> Option<SearchMetadata> {
@@ -80,8 +77,7 @@ impl BraveSearchSession {
 impl GuestSearchSession for BraveSearchSession {
     fn next_page(&self) -> Result<Vec<SearchResult>, SearchError> {
         let mut search = self.0.borrow_mut();
-        let (results, _) = search.next_page()?;
-        Ok(results)
+        search.next_page()
     }
 
     fn get_metadata(&self) -> Option<SearchMetadata> {
@@ -108,29 +104,23 @@ impl BraveSearchComponent {
 
     fn execute_search(
         params: SearchParams,
-        _api_key: String,
     ) -> Result<(Vec<SearchResult>, SearchMetadata), SearchError> {
         validate_search_params(&params)?;
 
         let client = Self::create_client()?;
-        let request = params_to_request(params.clone(), 0)?;
+        let request = params_to_request(&params, 0)?;
 
         let response = client.search(request)?;
-        let (results, metadata) = response_to_results(response, &params, 0);
+        let (results, metadata) = response_to_results(&response, &params, 0);
 
         Ok((results, metadata))
     }
 
-    fn start_search_session(
-        params: SearchParams,
-        _api_key: String,
-    ) -> Result<BraveSearchSession, SearchError> {
+    fn start_search_session(params: SearchParams) -> Result<BraveSearchSession, SearchError> {
         validate_search_params(&params)?;
 
         let client = Self::create_client()?;
-        let request = params_to_request(params.clone(), 0)?;
-
-        let search = BraveSearch::new(client, request, params);
+        let search = BraveSearch::new(client, params);
         Ok(BraveSearchSession::new(search))
     }
 }
@@ -140,17 +130,14 @@ impl Guest for BraveSearchComponent {
 
     fn start_search(params: SearchParams) -> Result<SearchSession, SearchError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
-        match Self::start_search_session(params, Self::get_api_key()?) {
-            Ok(session) => Ok(SearchSession::new(session)),
-            Err(err) => Err(err),
-        }
+        Self::start_search_session(params).map(SearchSession::new)
     }
 
     fn search_once(
         params: SearchParams,
     ) -> Result<(Vec<SearchResult>, Option<SearchMetadata>), SearchError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
-        let (results, metadata) = Self::execute_search(params, Self::get_api_key()?)?;
+        let (results, metadata) = Self::execute_search(params)?;
         Ok((results, Some(metadata)))
     }
 }
@@ -162,19 +149,17 @@ impl ExtendedwebsearchGuest for BraveSearchComponent {
     fn unwrapped_search_session(params: SearchParams) -> Result<Self::SearchSession, SearchError> {
         let api_key = Self::get_api_key()?;
         let client = BraveSearchApi::new(api_key.clone());
-        let request = crate::conversions::params_to_request(params.clone(), 0)?;
-        let search = BraveSearch::new(client, request, params);
+        let search = BraveSearch::new(client, params);
         Ok(BraveSearchSession::new(search))
     }
 
     fn session_to_state(session: &Self::SearchSession) -> Self::ReplayState {
-        let mut search = session.0.borrow_mut();
-        let (_, finished) = search.next_page().unwrap_or((vec![], true));
+        let search = session.0.borrow();
         BraveReplayState {
             api_key: search.client.api_key().clone(),
             current_offset: search.current_offset,
             metadata: search.metadata.clone(),
-            finished,
+            finished: search.finished,
         }
     }
 
@@ -183,13 +168,10 @@ impl ExtendedwebsearchGuest for BraveSearchComponent {
         params: SearchParams,
     ) -> Result<Self::SearchSession, SearchError> {
         let client = BraveSearchApi::new(state.api_key.clone());
-        let request = crate::conversions::params_to_request(params.clone(), 0)?;
-        let mut search = BraveSearch::new(client, request, params);
+        let mut search = BraveSearch::new(client, params);
         search.current_offset = state.current_offset;
         search.metadata = state.metadata.clone();
-        if state.finished {
-            let _ = search.next_page();
-        }
+        search.finished = state.finished;
         Ok(BraveSearchSession::new(search))
     }
 }

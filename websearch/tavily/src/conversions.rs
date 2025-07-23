@@ -4,18 +4,14 @@ use golem_web_search::golem::web_search::web_search::{
     SearchError, SearchMetadata, SearchParams, SearchResult,
 };
 
-pub fn params_to_request(
-    params: SearchParams,
-    api_key: String,
-    _page: u32,
-) -> Result<SearchRequest, SearchError> {
+pub fn params_to_request(params: &SearchParams) -> Result<SearchRequest, SearchError> {
     // Validate query
     if params.query.trim().is_empty() {
         return Err(SearchError::InvalidQuery);
     }
 
     // Determine search depth based on parameters
-    let search_depth = determine_search_depth(&params);
+    let search_depth = determine_search_depth(params);
 
     // Convert time range to days
     let days = params.time_range.map(|range| match range {
@@ -36,7 +32,6 @@ pub fn params_to_request(
     // Note: Tavily's SearchRequest doesn't have pagination fields (page/start/offset)
     // This is a limitation of the current API structure
     Ok(SearchRequest {
-        api_key,
         query,
         search_depth: Some(search_depth),
         include_images: params.include_images,
@@ -63,7 +58,6 @@ fn determine_search_depth(params: &SearchParams) -> String {
 pub fn response_to_results(
     response: SearchResponse,
     original_params: &SearchParams,
-    current_page: u32,
 ) -> (Vec<SearchResult>, SearchMetadata) {
     let mut results = Vec::new();
 
@@ -96,7 +90,7 @@ pub fn response_to_results(
         results.insert(0, answer_result);
     }
 
-    let metadata = create_search_metadata(&response, original_params, current_page);
+    let metadata = create_search_metadata(&response, original_params);
     (results, metadata)
 }
 
@@ -170,19 +164,8 @@ fn extract_domain(url: &str) -> Option<String> {
     }
 }
 
-fn create_search_metadata(
-    response: &SearchResponse,
-    params: &SearchParams,
-    current_page: u32,
-) -> SearchMetadata {
+fn create_search_metadata(response: &SearchResponse, params: &SearchParams) -> SearchMetadata {
     let total_results = Some(response.results.len() as u64);
-    let next_page_token = if (response.results.len() as u32)
-        > (current_page + 1) * params.max_results.unwrap_or(10)
-    {
-        Some((current_page + 1).to_string())
-    } else {
-        None
-    };
 
     SearchMetadata {
         query: params.query.clone(),
@@ -191,9 +174,9 @@ fn create_search_metadata(
         safe_search: params.safe_search,
         language: params.language.clone(),
         region: params.region.clone(),
-        next_page_token,
+        next_page_token: None,
         rate_limits: None,
-        current_page,
+        current_page: 0,
     }
 }
 
