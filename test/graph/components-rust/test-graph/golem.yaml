@@ -22,10 +22,10 @@ components:
               - ../../common-rust
             targets:
               - ../../target/wasm32-wasip1/debug/test_graph.wasm
-          - command: wac plug --plug ../../../target/wasm32-wasip1/debug/golem_graph_neo4j.wasm ../../target/wasm32-wasip1/debug/test_graph.wasm -o ../../target/wasm32-wasip1/debug/test_neo4j_plugged.wasm
+          - command: wac plug --plug ../../../../target/wasm32-wasip1/debug/golem_graph_neo4j.wasm ../../target/wasm32-wasip1/debug/test_graph.wasm -o ../../target/wasm32-wasip1/debug/test_neo4j_plugged.wasm
             sources:
               - ../../target/wasm32-wasip1/debug/test_graph.wasm
-              - ../../../target/wasm32-wasip1/debug/golem_graph_neo4j.wasm
+              - ../../../../target/wasm32-wasip1/debug/golem_graph_neo4j.wasm
             targets:
               - ../../target/wasm32-wasip1/debug/test_neo4j_plugged.wasm
         sourceWit: wit
@@ -48,10 +48,10 @@ components:
               - ../../common-rust
             targets:
               - ../../target/wasm32-wasip1/debug/test_graph.wasm
-          - command: wac plug --plug ../../../target/wasm32-wasip1/debug/golem_graph_arangodb.wasm ../../target/wasm32-wasip1/debug/test_graph.wasm -o ../../target/wasm32-wasip1/debug/test_arangodb_plugged.wasm
+          - command: wac plug --plug ../../../../target/wasm32-wasip1/debug/golem_graph_arangodb.wasm ../../target/wasm32-wasip1/debug/test_graph.wasm -o ../../target/wasm32-wasip1/debug/test_arangodb_plugged.wasm
             sources:
               - ../../target/wasm32-wasip1/debug/test_graph.wasm
-              - ../../../target/wasm32-wasip1/debug/golem_graph_arangodb.wasm
+              - ../../../../target/wasm32-wasip1/debug/golem_graph_arangodb.wasm
             targets:
               - ../../target/wasm32-wasip1/debug/test_arangodb_plugged.wasm
         sourceWit: wit
@@ -74,10 +74,10 @@ components:
               - ../../common-rust
             targets:
               - ../../target/wasm32-wasip1/debug/test_graph.wasm
-          - command: wac plug --plug ../../../target/wasm32-wasip1/debug/golem_graph_janusgraph.wasm ../../target/wasm32-wasip1/debug/test_graph.wasm -o ../../target/wasm32-wasip1/debug/test_janusgraph_plugged.wasm
+          - command: wac plug --plug ../../../../target/wasm32-wasip1/debug/golem_graph_janusgraph.wasm ../../target/wasm32-wasip1/debug/test_graph.wasm -o ../../target/wasm32-wasip1/debug/test_janusgraph_plugged.wasm
             sources:
               - ../../target/wasm32-wasip1/debug/test_graph.wasm
-              - ../../../target/wasm32-wasip1/debug/golem_graph_janusgraph.wasm
+              - ../../../../target/wasm32-wasip1/debug/golem_graph_janusgraph.wasm
             targets:
               - ../../target/wasm32-wasip1/debug/test_janusgraph_plugged.wasm
         sourceWit: wit
@@ -101,10 +101,10 @@ components:
               - ../../common-rust
             targets:
               - ../../target/wasm32-wasip1/release/test_graph.wasm
-          - command: wac plug --plug ../../../target/wasm32-wasip1/release/golem_graph_neo4j.wasm ../../target/wasm32-wasip1/release/test_graph.wasm -o ../../target/wasm32-wasip1/release/test_neo4j_plugged.wasm
+          - command: wac plug --plug ../../../../target/wasm32-wasip1/release/golem_graph_neo4j.wasm ../../target/wasm32-wasip1/release/test_graph.wasm -o ../../target/wasm32-wasip1/release/test_neo4j_plugged.wasm
             sources:
               - ../../target/wasm32-wasip1/release/test_graph.wasm
-              - ../../../target/wasm32-wasip1/release/golem_graph_neo4j.wasm
+              - ../../../../target/wasm32-wasip1/release/golem_graph_neo4j.wasm
             targets:
               - ../../target/wasm32-wasip1/release/test_neo4j_plugged.wasm
         sourceWit: wit
@@ -127,10 +127,10 @@ components:
               - ../../common-rust
             targets:
               - ../../target/wasm32-wasip1/release/test_graph.wasm
-          - command: wac plug --plug ../../../target/wasm32-wasip1/release/golem_graph_arangodb.wasm ../../target/wasm32-wasip1/release/test_graph.wasm -o ../../target/wasm32-wasip1/release/test_arangodb_plugged.wasm
+          - command: wac plug --plug ../../../../target/wasm32-wasip1/release/golem_graph_arangodb.wasm ../../target/wasm32-wasip1/release/test_graph.wasm -o ../../target/wasm32-wasip1/release/test_arangodb_plugged.wasm
             sources:
               - ../../target/wasm32-wasip1/release/test_graph.wasm
-              - ../../../target/wasm32-wasip1/release/golem_graph_arangodb.wasm
+              - ../../../../target/wasm32-wasip1/release/golem_graph_arangodb.wasm
             targets:
               - ../../target/wasm32-wasip1/release/test_arangodb_plugged.wasm
         sourceWit: wit
@@ -153,10 +153,10 @@ components:
               - ../../common-rust
             targets:
               - ../../target/wasm32-wasip1/release/test_graph.wasm
-          - command: wac plug --plug ../../../target/wasm32-wasip1/release/golem_graph_janusgraph.wasm ../../target/wasm32-wasip1/release/test_graph.wasm -o ../../target/wasm32-wasip1/release/test_janusgraph_plugged.wasm
+          - command: wac plug --plug ../../../../target/wasm32-wasip1/release/golem_graph_janusgraph.wasm ../../target/wasm32-wasip1/release/test_graph.wasm -o ../../target/wasm32-wasip1/release/test_janusgraph_plugged.wasm
             sources:
               - ../../target/wasm32-wasip1/release/test_graph.wasm
-              - ../../../target/wasm32-wasip1/release/golem_graph_janusgraph.wasm
+              - ../../../../target/wasm32-wasip1/release/golem_graph_janusgraph.wasm
             targets:
               - ../../target/wasm32-wasip1/release/test_janusgraph_plugged.wasm
         sourceWit: wit
