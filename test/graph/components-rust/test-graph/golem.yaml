@@ -14,13 +14,6 @@ components:
           - sourcePath: ../../data/cat.png
             targetPath: /data/cat.png
             permissions: read-only
-        # Uncomment and set the environment variables for local Neo4j debug   
-        # env:
-        #   NEO4J_HOST: localhost
-        #   NEO4J_USER: neo4j
-        #   NEO4J_PASSWORD: password
-        #   NEO4J_PORT: "7474"
-        #   NEO4J_DATABASE: neo4j
         build:
           - command: cargo component build --no-default-features --features neo4j
             sources:
@@ -47,13 +40,6 @@ components:
           - sourcePath: ../../data/cat.png
             targetPath: /data/cat.png
             permissions: read-only
-        # Uncomment and set the environment variables for local ArangoDB debug
-        env:
-          ARANGODB_HOST: localhost
-          ARANGODB_USER: root
-          ARANGODB_PASSWORD: test
-          ARANGODB_PORT: "8529"
-          ARANGODB_DATABASE: _system
         build:
           - command: cargo component build --no-default-features --features arangodb
             sources:
@@ -80,12 +66,6 @@ components:
           - sourcePath: ../../data/cat.png
             targetPath: /data/cat.png
             permissions: read-only
-        # Uncomment and set the environment variables for local JanusGraph debug
-        # env:
-        #   JANUSGRAPH_HOST: localhost
-        #   JANUSGRAPH_PORT: "8182"
-        #   JANUSGRAPH_USER: ""
-        #   JANUSGRAPH_PASSWORD: ""
         build:
           - command: cargo component build --no-default-features --features janusgraph
             sources:
