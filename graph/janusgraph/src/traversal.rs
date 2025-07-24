@@ -10,8 +10,8 @@ use golem_graph::golem::graph::{
     types::{ElementId, Vertex},
 };
 use golem_graph::LOGGING_STATE;
-use serde_json::{json, Value};
 use log::trace;
+use serde_json::{json, Value};
 
 /// Convert our ElementId into a JSON binding for Gremlin
 fn id_to_json(id: ElementId) -> Value {

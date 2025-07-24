@@ -10,8 +10,8 @@ use golem_graph::golem::graph::{
     },
 };
 use golem_graph::LOGGING_STATE;
-use serde_json::{json, Value};
 use log::trace;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 

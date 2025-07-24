@@ -4,9 +4,9 @@ use golem_graph::golem::graph::{
     errors::GraphError,
     types::{Edge, ElementId, Path, PropertyMap, Vertex},
 };
+use log::trace;
 use serde_json::{json, Value};
 use std::env;
-use log::trace;
 
 pub(crate) fn config_from_env() -> Result<ConnectionConfig, GraphError> {
     // todo dotenvy::dotenv().ok();
@@ -348,7 +348,6 @@ pub(crate) fn parse_path_from_gremlin(value: &Value) -> Result<Path, GraphError>
                     if let Some(objects) = path_value.get("objects") {
                         if let Some(objects_value) = objects.get("@value") {
                             if let Some(objects_array) = objects_value.as_array() {
-
                                 let mut vertices = Vec::new();
                                 let mut edges = Vec::new();
 
@@ -394,7 +393,6 @@ pub(crate) fn parse_path_from_gremlin(value: &Value) -> Result<Path, GraphError>
                                         }
                                     }
                                 }
-
 
                                 return Ok(Path {
                                     vertices,

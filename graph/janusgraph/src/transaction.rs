@@ -8,8 +8,8 @@ use golem_graph::golem::graph::{
     types::{Direction, Edge, ElementId, FilterCondition, PropertyMap, SortSpec, Vertex},
 };
 use golem_graph::LOGGING_STATE;
-use serde_json::{json, Value};
 use log::trace;
+use serde_json::{json, Value};
 
 /// Given a GraphSON Map element, turn it into a serde_json::Value::Object
 fn graphson_map_to_object(data: &Value) -> Result<Value, GraphError> {
