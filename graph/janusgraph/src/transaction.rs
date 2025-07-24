@@ -9,6 +9,7 @@ use golem_graph::golem::graph::{
 };
 use golem_graph::LOGGING_STATE;
 use serde_json::{json, Value};
+use log::trace;
 
 /// Given a GraphSON Map element, turn it into a serde_json::Value::Object
 fn graphson_map_to_object(data: &Value) -> Result<Value, GraphError> {
@@ -97,7 +98,6 @@ impl GuestTransaction for Transaction {
         gremlin.push_str(".elementMap()");
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
-        eprintln!("[JanusGraphApi] Raw vertex creation response: {response:?}");
         let element = first_list_item(&response["result"]["data"])?;
         let obj = graphson_map_to_object(element)?;
 
@@ -286,8 +286,6 @@ impl GuestTransaction for Transaction {
         }
         .ok_or_else(|| GraphError::ElementNotFound(id_clone.clone()))?;
 
-        println!("[DEBUG update_vertex] raw row = {row:#}");
-
         let mut flat = serde_json::Map::new();
         if row.get("@type") == Some(&json!("g:Map")) {
             let vals = row.get("@value").and_then(Value::as_array).unwrap(); // we know it's an array
@@ -336,7 +334,7 @@ impl GuestTransaction for Transaction {
         }
         vertex_json.insert("properties".to_string(), Value::Object(props));
 
-        println!(
+        trace!(
             "[DEBUG update_vertex] parser input = {:#}",
             Value::Object(vertex_json.clone())
         );
@@ -430,7 +428,7 @@ impl GuestTransaction for Transaction {
         gremlin.push_str(".elementMap()");
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
-        println!("[DEBUG][find_vertices] Raw Gremlin response: {response:?}");
+        trace!("[DEBUG][find_vertices] Raw Gremlin response: {response:?}");
 
         // Handle GraphSON g:List structure
         let data = &response["result"]["data"];
@@ -449,7 +447,7 @@ impl GuestTransaction for Transaction {
             .map(|item| {
                 let result = helpers::parse_vertex_from_gremlin(item);
                 if let Err(ref e) = result {
-                    println!("[DEBUG][find_vertices] Parse error for item {item:?}: {e:?}");
+                    trace!("[DEBUG][find_vertices] Parse error for item {item:?}: {e:?}");
                 }
                 result
             })
@@ -492,7 +490,7 @@ impl GuestTransaction for Transaction {
             gremlin.push_str(&format!(".property({kb}, {vb})"));
             bindings.insert(kb.clone(), json!(k));
             bindings.insert(vb.clone(), conversions::to_json_value(v)?);
-            println!("[LOG create_edge] bound {} -> {:?}", kb, bindings[&kb]);
+            trace!("[LOG create_edge] bound {} -> {:?}", kb, bindings[&kb]);
         }
 
         gremlin.push_str(".elementMap()");
@@ -507,7 +505,6 @@ impl GuestTransaction for Transaction {
         } else if let Some(inner) = data.get("@value").and_then(Value::as_array) {
             inner.first().cloned()
         } else {
-            println!("[ERROR create_edge] no data row");
             None
         }
         .ok_or_else(|| GraphError::ElementNotFound(from_clone.clone()))?;
@@ -535,7 +532,6 @@ impl GuestTransaction for Transaction {
         } else if let Some(obj) = row.as_object() {
             flat = obj.clone();
         } else {
-            println!("[ERROR create_edge] unexpected row format: {row:#?}");
             return Err(GraphError::InternalError("Unexpected row format".into()));
         }
 
@@ -597,7 +593,6 @@ impl GuestTransaction for Transaction {
         } else {
             return Ok(None);
         };
-        println!("[LOG get_edge] unwrapped row = {row:#?}");
 
         let mut flat = serde_json::Map::new();
         if row.get("@type") == Some(&json!("g:Map")) {
@@ -847,11 +842,9 @@ impl GuestTransaction for Transaction {
                 };
 
                 flat.insert(key.clone(), val.clone());
-                println!("[LOG update_edge] flat[{key}] = {val:#?}");
             }
         } else if let Some(obj) = row.as_object() {
             flat = obj.clone();
-            println!("[LOG update_edge] row is plain object");
         } else {
             return Err(GraphError::InternalError(
                 "Unexpected Gremlin row format".into(),

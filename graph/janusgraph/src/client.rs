@@ -73,11 +73,11 @@ impl JanusGraphApi {
 
         });
 
-        eprintln!("[JanusGraphApi] DEBUG - Full request details:");
-        eprintln!("[JanusGraphApi] Endpoint: {}", self.endpoint);
-        eprintln!("[JanusGraphApi] Session ID: {}", self.session_id);
-        eprintln!("[JanusGraphApi] Gremlin Query: {gremlin}");
-        eprintln!(
+        trace!("[JanusGraphApi] DEBUG - Full request details:");
+        trace!("[JanusGraphApi] Endpoint: {}", self.endpoint);
+        trace!("[JanusGraphApi] Session ID: {}", self.session_id);
+        trace!("[JanusGraphApi] Gremlin Query: {gremlin}");
+        trace!(
             "[JanusGraphApi] Request Body: {}",
             serde_json::to_string_pretty(&request_body)
                 .unwrap_or_else(|_| "Failed to serialize".to_string())
@@ -87,7 +87,7 @@ impl JanusGraphApi {
             GraphError::InternalError(format!("Failed to serialize request body: {e}"))
         })?;
 
-        eprintln!(
+        trace!(
             "[JanusGraphApi] Sending POST request to: {} with body length: {}",
             self.endpoint,
             body_string.len()
@@ -100,11 +100,11 @@ impl JanusGraphApi {
             .body(body_string)
             .send()
             .map_err(|e| {
-                eprintln!("[JanusGraphApi] ERROR - Request failed: {e}");
+                log::error!("[JanusGraphApi] ERROR - Request failed: {e}");
                 from_reqwest_error("JanusGraph request failed", e)
             })?;
 
-        eprintln!(
+        log::info!(
             "[JanusGraphApi] Got response with status: {}",
             response.status()
         );

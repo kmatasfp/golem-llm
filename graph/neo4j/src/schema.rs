@@ -11,6 +11,7 @@ use golem_graph::golem::graph::{
 };
 use golem_graph::LOGGING_STATE;
 use serde_json::{json, Value};
+use log::trace;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -49,7 +50,7 @@ impl GuestSchemaManager for SchemaManager {
                         if msg.contains("Enterprise Edition")
                             || msg.contains("ConstraintCreationFailed")
                         {
-                            println!("[WARN] Skipping property existence constraint: requires Neo4j Enterprise Edition. Error: {msg}");
+                            trace!("[WARN] Skipping property existence constraint: requires Neo4j Enterprise Edition. Error: {msg}");
                             tx.commit()?;
                         } else {
                             return Err(e);

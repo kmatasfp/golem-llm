@@ -60,7 +60,7 @@ impl Neo4jApi {
         statements: Value,
     ) -> Result<Value, GraphError> {
         trace!("Execute in Neo4j transaction: {tx_url}");
-        println!("[Neo4jApi] Cypher request: {statements}");
+        trace!("[Neo4jApi] Cypher request: {statements}");
         let resp = self
             .client
             .post(tx_url)
@@ -70,7 +70,7 @@ impl Neo4jApi {
             .send()
             .map_err(|e| from_reqwest_error("Neo4j execute in transaction failed", e))?;
         let json = Self::ensure_success_and_json(resp)?;
-        println!("[Neo4jApi] Cypher response: {json}");
+        trace!("[Neo4jApi] Cypher response: {json}");
         Ok(json)
     }
 

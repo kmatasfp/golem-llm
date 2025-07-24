@@ -6,6 +6,7 @@ use golem_graph::golem::graph::{
 };
 use serde_json::{json, Value};
 use std::env;
+use log::trace;
 
 pub(crate) fn config_from_env() -> Result<ConnectionConfig, GraphError> {
     // todo dotenvy::dotenv().ok();
@@ -338,7 +339,7 @@ pub(crate) fn parse_edge_from_gremlin(value: &Value) -> Result<Edge, GraphError>
 }
 
 pub(crate) fn parse_path_from_gremlin(value: &Value) -> Result<Path, GraphError> {
-    println!("[DEBUG][parse_path_from_gremlin] Input value: {value:?}");
+    trace!("[DEBUG][parse_path_from_gremlin] Input value: {value:?}");
 
     if let Some(obj) = value.as_object() {
         if let Some(path_type) = obj.get("@type") {
@@ -347,7 +348,6 @@ pub(crate) fn parse_path_from_gremlin(value: &Value) -> Result<Path, GraphError>
                     if let Some(objects) = path_value.get("objects") {
                         if let Some(objects_value) = objects.get("@value") {
                             if let Some(objects_array) = objects_value.as_array() {
-                                println!("[DEBUG][parse_path_from_gremlin] Parsing GraphSON g:Path with {} objects", objects_array.len());
 
                                 let mut vertices = Vec::new();
                                 let mut edges = Vec::new();
@@ -395,11 +395,6 @@ pub(crate) fn parse_path_from_gremlin(value: &Value) -> Result<Path, GraphError>
                                     }
                                 }
 
-                                println!(
-                                    "[DEBUG][parse_path_from_gremlin] Found {} vertices, {} edges",
-                                    vertices.len(),
-                                    edges.len()
-                                );
 
                                 return Ok(Path {
                                     vertices,

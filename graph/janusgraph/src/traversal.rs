@@ -11,6 +11,7 @@ use golem_graph::golem::graph::{
 };
 use golem_graph::LOGGING_STATE;
 use serde_json::{json, Value};
+use log::trace;
 
 /// Convert our ElementId into a JSON binding for Gremlin
 fn id_to_json(id: ElementId) -> Value {
@@ -74,10 +75,10 @@ impl Transaction {
             if let Some(val) = arr.first() {
                 return Ok(Some(parse_path_from_gremlin(val)?));
             } else {
-                println!("[DEBUG][find_shortest_path] Data array is empty");
+                trace!("[DEBUG][find_shortest_path] Data array is empty");
             }
         } else {
-            println!("[DEBUG][find_shortest_path] No data array in response");
+            trace!("[DEBUG][find_shortest_path] No data array in response");
         }
 
         Ok(None)
