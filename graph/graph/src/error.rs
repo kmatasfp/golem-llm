@@ -356,59 +356,6 @@ pub fn from_reqwest_error(details: impl AsRef<str>, err: reqwest::Error) -> Grap
     }
 }
 
-/// Map ArangoDB-specific error code to GraphError
-pub fn from_arangodb_error_code(error_code: i64, message: &str) -> GraphError {
-    match error_code {
-        // Document/Element errors (1200-1299)
-        1202 => GraphError::InternalError(format!("Document not found: {message}")),
-        1210 => GraphError::ConstraintViolation(format!("Unique constraint violated: {message}")),
-        1213 => GraphError::SchemaViolation(format!("Collection not found: {message}")),
-        1218 => GraphError::SchemaViolation(format!("Document handle bad: {message}")),
-        1221 => GraphError::InvalidPropertyType(format!("Illegal document key: {message}")),
-        1229 => GraphError::ConstraintViolation(format!("Document key missing: {message}")),
-
-        // Query errors (1500-1599)
-        1501 => GraphError::InvalidQuery(format!("Query parse error: {message}")),
-        1502 => GraphError::InvalidQuery(format!("Query empty: {message}")),
-        1504 => GraphError::InvalidQuery(format!("Query number out of range: {message}")),
-        1521 => GraphError::InvalidQuery(format!("AQL function not found: {message}")),
-        1522 => {
-            GraphError::InvalidQuery(format!("AQL function argument number mismatch: {message}"))
-        }
-        1540 => GraphError::InvalidPropertyType(format!("Invalid bind parameter type: {message}")),
-        1541 => GraphError::InvalidQuery(format!("No bind parameter value: {message}")),
-        1562 => GraphError::InvalidQuery(format!("Variable already declared: {message}")),
-        1563 => GraphError::InvalidQuery(format!("Variable not declared: {message}")),
-        1579 => GraphError::Timeout,
-
-        // Transaction errors (1650-1699)
-        1651 => GraphError::TransactionFailed(format!("Transaction already started: {message}")),
-        1652 => GraphError::TransactionFailed(format!("Transaction not started: {message}")),
-        1653 => GraphError::TransactionFailed(format!(
-            "Transaction already committed/aborted: {message}"
-        )),
-        1655 => GraphError::TransactionTimeout,
-        1656 => GraphError::DeadlockDetected,
-        1658 => GraphError::TransactionConflict,
-
-        // Schema/Collection errors
-        1207 => GraphError::SchemaViolation(format!("Collection must be unloaded: {message}")),
-        1228 => GraphError::SchemaViolation(format!("Document revision bad: {message}")),
-
-        // Resource errors
-        32 => GraphError::ResourceExhausted(format!("Out of memory: {message}")),
-        1104 => GraphError::ResourceExhausted(format!("Collection full: {message}")),
-
-        // Cluster/replication errors
-        1447 => GraphError::ServiceUnavailable(format!("Cluster backend unavailable: {message}")),
-        1448 => GraphError::TransactionConflict,
-        1449 => GraphError::ServiceUnavailable(format!("Cluster coordinator error: {message}")),
-
-        // Default fallback
-        _ => GraphError::InternalError(format!("ArangoDB error [{error_code}]: {message}")),
-    }
-}
-
 /// Enhance error with element ID information when available
 pub fn enhance_error_with_element_id(
     error: GraphError,
