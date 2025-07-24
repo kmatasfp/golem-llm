@@ -350,13 +350,19 @@ impl Neo4jApi {
     ) -> GraphError {
         match status {
             // Authentication and Authorization
-            401 => GraphError::AuthenticationFailed(format!("Neo4j authentication failed: {message}")),
-            403 => GraphError::AuthorizationFailed(format!("Neo4j authorization failed: {message}")),
+            401 => {
+                GraphError::AuthenticationFailed(format!("Neo4j authentication failed: {message}"))
+            }
+            403 => {
+                GraphError::AuthorizationFailed(format!("Neo4j authorization failed: {message}"))
+            }
 
             // Client errors specific to Neo4j context
             400 => {
                 // Neo4j typically provides specific error codes, but if we don't have them:
-                if message.to_lowercase().contains("cypher") || message.to_lowercase().contains("query") {
+                if message.to_lowercase().contains("cypher")
+                    || message.to_lowercase().contains("query")
+                {
                     GraphError::InvalidQuery(format!("Neo4j bad request - Cypher error: {message}"))
                 } else if message.to_lowercase().contains("transaction") {
                     GraphError::TransactionFailed(format!("Neo4j transaction error: {message}"))

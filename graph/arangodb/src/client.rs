@@ -689,7 +689,9 @@ fn map_arangodb_http_status(
 ) -> GraphError {
     match status {
         // Authentication and Authorization
-        401 => GraphError::AuthenticationFailed(format!("ArangoDB authentication failed: {message}")),
+        401 => {
+            GraphError::AuthenticationFailed(format!("ArangoDB authentication failed: {message}"))
+        }
         403 => GraphError::AuthorizationFailed(format!("ArangoDB authorization failed: {message}")),
 
         // Client errors specific to ArangoDB context

@@ -180,7 +180,11 @@ impl JanusGraphApi {
                 .and_then(|v| v.as_str())
                 .unwrap_or("Unknown error");
 
-            Err(Self::map_janusgraph_error(status_code, error_msg, &error_body))
+            Err(Self::map_janusgraph_error(
+                status_code,
+                error_msg,
+                &error_body,
+            ))
         }
     }
 
@@ -189,7 +193,6 @@ impl JanusGraphApi {
         message: &str,
         error_body: &serde_json::Value,
     ) -> GraphError {
-
         if let Some(status) = error_body.get("status") {
             if let Some(status_obj) = status.as_object() {
                 if let Some(code) = status_obj.get("code").and_then(|c| c.as_u64()) {
@@ -200,10 +203,10 @@ impl JanusGraphApi {
 
         let msg_lower = message.to_lowercase();
 
-        if msg_lower.contains("groovy") || msg_lower.contains("gremlin") {
-            if msg_lower.contains("syntax") || msg_lower.contains("compilation") {
-                return GraphError::InvalidQuery(format!("Gremlin syntax error: {message}"));
-            }
+        if (msg_lower.contains("groovy") || msg_lower.contains("gremlin"))
+            && (msg_lower.contains("syntax") || msg_lower.contains("compilation"))
+        {
+            return GraphError::InvalidQuery(format!("Gremlin syntax error: {message}"));
         }
 
         if msg_lower.contains("vertex") && msg_lower.contains("not found") {
@@ -215,7 +218,9 @@ impl JanusGraphApi {
         }
 
         if msg_lower.contains("property") && msg_lower.contains("not found") {
-            return GraphError::SchemaViolation(format!("JanusGraph property not found: {message}"));
+            return GraphError::SchemaViolation(format!(
+                "JanusGraph property not found: {message}"
+            ));
         }
 
         if msg_lower.contains("timeout") || msg_lower.contains("timed out") {
@@ -223,7 +228,9 @@ impl JanusGraphApi {
         }
 
         if msg_lower.contains("transaction") {
-            return GraphError::TransactionFailed(format!("JanusGraph transaction error: {message}"));
+            return GraphError::TransactionFailed(format!(
+                "JanusGraph transaction error: {message}"
+            ));
         }
 
         Self::map_janusgraph_http_status(status_code, message, error_body)
@@ -237,20 +244,30 @@ impl JanusGraphApi {
     ) -> GraphError {
         match code {
             // Gremlin server status codes
-            200 => GraphError::InternalError(format!("Unexpected success in error context: {message}")),
+            200 => {
+                GraphError::InternalError(format!("Unexpected success in error context: {message}"))
+            }
             204 => GraphError::InternalError(format!("No content: {message}")),
             206 => GraphError::InternalError(format!("Partial content: {message}")),
-            401 => GraphError::AuthenticationFailed(format!("Gremlin authentication failed: {message}")),
-            403 => GraphError::AuthorizationFailed(format!("Gremlin authorization failed: {message}")),
-            407 => GraphError::AuthenticationFailed(format!("Gremlin authentication challenge: {message}")),
+            401 => GraphError::AuthenticationFailed(format!(
+                "Gremlin authentication failed: {message}"
+            )),
+            403 => {
+                GraphError::AuthorizationFailed(format!("Gremlin authorization failed: {message}"))
+            }
+            407 => GraphError::AuthenticationFailed(format!(
+                "Gremlin authentication challenge: {message}"
+            )),
             498 => GraphError::InvalidQuery(format!("Gremlin malformed request: {message}")),
-            499 => GraphError::InvalidQuery(format!("Gremlin invalid request arguments: {message}")),
+            499 => {
+                GraphError::InvalidQuery(format!("Gremlin invalid request arguments: {message}"))
+            }
             500 => GraphError::InternalError(format!("Gremlin server error: {message}")),
             597 => GraphError::InvalidQuery(format!("Gremlin script evaluation error: {message}")),
             598 => GraphError::Timeout,
             599 => GraphError::InternalError(format!("Gremlin serialization error: {message}")),
 
-            _ => GraphError::InternalError(format!("Gremlin error [{}]: {}", code, message)),
+            _ => GraphError::InternalError(format!("Gremlin error [{code}]: {message}")),
         }
     }
 
@@ -261,19 +278,31 @@ impl JanusGraphApi {
     ) -> GraphError {
         match status {
             // Authentication and Authorization
-            401 => GraphError::AuthenticationFailed(format!("JanusGraph authentication failed: {message}")),
-            403 => GraphError::AuthorizationFailed(format!("JanusGraph authorization failed: {message}")),
+            401 => GraphError::AuthenticationFailed(format!(
+                "JanusGraph authentication failed: {message}"
+            )),
+            403 => GraphError::AuthorizationFailed(format!(
+                "JanusGraph authorization failed: {message}"
+            )),
 
             // Client errors
             400 => GraphError::InvalidQuery(format!("JanusGraph bad request: {message}")),
-            404 => GraphError::ServiceUnavailable(format!("JanusGraph endpoint not found: {message}")),
+            404 => {
+                GraphError::ServiceUnavailable(format!("JanusGraph endpoint not found: {message}"))
+            }
             409 => GraphError::TransactionConflict,
-            429 => GraphError::ResourceExhausted(format!("JanusGraph rate limit exceeded: {message}")),
+            429 => {
+                GraphError::ResourceExhausted(format!("JanusGraph rate limit exceeded: {message}"))
+            }
 
             // Server errors
-            500 => GraphError::InternalError(format!("JanusGraph internal server error: {message}")),
+            500 => {
+                GraphError::InternalError(format!("JanusGraph internal server error: {message}"))
+            }
             502 => GraphError::ServiceUnavailable(format!("JanusGraph bad gateway: {message}")),
-            503 => GraphError::ServiceUnavailable(format!("JanusGraph service unavailable: {message}")),
+            503 => {
+                GraphError::ServiceUnavailable(format!("JanusGraph service unavailable: {message}"))
+            }
             504 => GraphError::Timeout,
 
             // Default fallback with debug info
