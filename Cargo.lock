@@ -772,8 +772,6 @@ version = "0.0.0"
 dependencies = [
  "golem-rust",
  "log",
- "mime",
- "nom",
  "regex",
  "reqwest",
  "serde_json",
@@ -806,7 +804,6 @@ dependencies = [
  "golem-rust",
  "log",
  "reqwest",
- "serde",
  "serde_json",
  "uuid",
  "wit-bindgen-rt 0.40.0",

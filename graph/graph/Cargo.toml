@@ -15,8 +15,6 @@ crate-type = ["rlib"]
 golem-rust = { workspace = true }
 log = { workspace = true }
 serde_json = { workspace = true }
-mime = "0.3.17"
-nom = { version = "7.1", default-features = false }
 reqwest = { workspace = true }
 thiserror = "2.0.12"
 wasi-logger = "0.1.2"

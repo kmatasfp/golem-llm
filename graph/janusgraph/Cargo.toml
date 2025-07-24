@@ -20,7 +20,6 @@ golem-graph = {workspace = true }
 
 golem-rust = { workspace = true }
 log = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
 wit-bindgen-rt = { workspace = true }
 base64 = { workspace = true }
