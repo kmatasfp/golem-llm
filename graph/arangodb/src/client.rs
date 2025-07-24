@@ -1,5 +1,4 @@
 use base64::{engine::general_purpose, Engine as _};
-use golem_graph::error::mapping::map_http_status;
 use golem_graph::error::{enhance_error_with_element_id, from_reqwest_error};
 use golem_graph::golem::graph::errors::GraphError;
 use golem_graph::golem::graph::schema::{
@@ -103,11 +102,11 @@ impl ArangoDbApi {
 
             let error_num = error_body.get("errorNum").and_then(|v| v.as_i64());
 
-            // Use centralized error mapping
             let mut error = if let Some(code) = error_num {
                 from_arangodb_error_code(code, error_msg)
             } else {
-                map_http_status(status_code, error_msg, &error_body)
+                // Fallback for cases without ArangoDB error codes - use basic HTTP status mapping
+                map_arangodb_http_status(status_code, error_msg, &error_body)
             };
 
             // Post-process to extract element IDs when possible
@@ -679,5 +678,61 @@ pub fn from_arangodb_error_code(error_code: i64, message: &str) -> GraphError {
 
         // Default fallback
         _ => GraphError::InternalError(format!("ArangoDB error [{error_code}]: {message}")),
+    }
+}
+
+/// ArangoDB-specific HTTP status code mapping (used when no ArangoDB error code is available)
+fn map_arangodb_http_status(
+    status: u16,
+    message: &str,
+    error_body: &serde_json::Value,
+) -> GraphError {
+    match status {
+        // Authentication and Authorization
+        401 => GraphError::AuthenticationFailed(format!("ArangoDB authentication failed: {message}")),
+        403 => GraphError::AuthorizationFailed(format!("ArangoDB authorization failed: {message}")),
+
+        // Client errors specific to ArangoDB context
+        400 => {
+            // ArangoDB typically provides specific error codes, but if we don't have them:
+            if message.to_lowercase().contains("aql") || message.to_lowercase().contains("query") {
+                GraphError::InvalidQuery(format!("ArangoDB bad request - query error: {message}"))
+            } else if message.to_lowercase().contains("collection") {
+                GraphError::SchemaViolation(format!("ArangoDB collection error: {message}"))
+            } else {
+                GraphError::InternalError(format!("ArangoDB bad request: {message}"))
+            }
+        }
+        404 => {
+            if message.to_lowercase().contains("collection") {
+                GraphError::SchemaViolation(format!("ArangoDB collection not found: {message}"))
+            } else if message.to_lowercase().contains("document") {
+                GraphError::InternalError(format!("ArangoDB document not found: {message}"))
+            } else {
+                GraphError::InternalError(format!("ArangoDB resource not found: {message}"))
+            }
+        }
+        409 => GraphError::TransactionConflict,
+        412 => GraphError::ConstraintViolation(format!("ArangoDB precondition failed: {message}")),
+        422 => GraphError::SchemaViolation(format!("ArangoDB unprocessable entity: {message}")),
+        429 => GraphError::ResourceExhausted(format!("ArangoDB rate limit exceeded: {message}")),
+
+        // Server errors
+        500 => GraphError::InternalError(format!("ArangoDB internal server error: {message}")),
+        502 => GraphError::ServiceUnavailable(format!("ArangoDB bad gateway: {message}")),
+        503 => GraphError::ServiceUnavailable(format!("ArangoDB service unavailable: {message}")),
+        504 => GraphError::Timeout,
+        507 => GraphError::ResourceExhausted(format!("ArangoDB insufficient storage: {message}")),
+
+        // Default fallback with debug info
+        _ => {
+            let debug_info = format!(
+                "ArangoDB HTTP error [{}]: {} | Error body sample: {}",
+                status,
+                message,
+                error_body.to_string().chars().take(200).collect::<String>()
+            );
+            GraphError::InternalError(debug_info)
+        }
     }
 }

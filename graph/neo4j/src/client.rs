@@ -1,6 +1,5 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use golem_graph::error::from_reqwest_error;
-use golem_graph::error::mapping::map_http_status;
 use golem_graph::golem::graph::errors::GraphError;
 use log::trace;
 use reqwest::{Client, Response};
@@ -223,7 +222,8 @@ impl Neo4jApi {
             enhanced
         };
 
-        map_http_status(status_code, message, &enhanced_error_body)
+        // Fallback to Neo4j-specific HTTP status mapping
+        Self::map_neo4j_http_status(status_code, message, &enhanced_error_body)
     }
 
     /// Map Neo4j-specific error codes to GraphError
@@ -338,6 +338,62 @@ impl Neo4jApi {
                         .take(300)
                         .collect::<String>()
                 ))
+            }
+        }
+    }
+
+    /// Neo4j-specific HTTP status code mapping (used when no Neo4j error code is available)
+    fn map_neo4j_http_status(
+        status: u16,
+        message: &str,
+        error_body: &serde_json::Value,
+    ) -> GraphError {
+        match status {
+            // Authentication and Authorization
+            401 => GraphError::AuthenticationFailed(format!("Neo4j authentication failed: {message}")),
+            403 => GraphError::AuthorizationFailed(format!("Neo4j authorization failed: {message}")),
+
+            // Client errors specific to Neo4j context
+            400 => {
+                // Neo4j typically provides specific error codes, but if we don't have them:
+                if message.to_lowercase().contains("cypher") || message.to_lowercase().contains("query") {
+                    GraphError::InvalidQuery(format!("Neo4j bad request - Cypher error: {message}"))
+                } else if message.to_lowercase().contains("transaction") {
+                    GraphError::TransactionFailed(format!("Neo4j transaction error: {message}"))
+                } else {
+                    GraphError::InternalError(format!("Neo4j bad request: {message}"))
+                }
+            }
+            404 => {
+                if message.to_lowercase().contains("transaction") {
+                    GraphError::TransactionFailed(format!("Neo4j transaction not found: {message}"))
+                } else if message.to_lowercase().contains("database") {
+                    GraphError::ServiceUnavailable(format!("Neo4j database not found: {message}"))
+                } else {
+                    GraphError::InternalError(format!("Neo4j resource not found: {message}"))
+                }
+            }
+            409 => GraphError::TransactionConflict,
+            412 => GraphError::ConstraintViolation(format!("Neo4j precondition failed: {message}")),
+            422 => GraphError::InvalidQuery(format!("Neo4j unprocessable entity: {message}")),
+            429 => GraphError::ResourceExhausted(format!("Neo4j rate limit exceeded: {message}")),
+
+            // Server errors
+            500 => GraphError::InternalError(format!("Neo4j internal server error: {message}")),
+            502 => GraphError::ServiceUnavailable(format!("Neo4j bad gateway: {message}")),
+            503 => GraphError::ServiceUnavailable(format!("Neo4j service unavailable: {message}")),
+            504 => GraphError::Timeout,
+            507 => GraphError::ResourceExhausted(format!("Neo4j insufficient storage: {message}")),
+
+            // Default fallback with debug info
+            _ => {
+                let debug_info = format!(
+                    "Neo4j HTTP error [{}]: {} | Error body sample: {}",
+                    status,
+                    message,
+                    error_body.to_string().chars().take(200).collect::<String>()
+                );
+                GraphError::InternalError(debug_info)
             }
         }
     }
