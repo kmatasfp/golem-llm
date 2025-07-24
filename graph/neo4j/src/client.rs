@@ -109,7 +109,24 @@ impl Neo4jApi {
         if resp.status().is_success() {
             Ok("running".to_string())
         } else {
-            Ok("closed".to_string())
+            let status_code = resp.status().as_u16();
+            let text = resp
+                .text()
+                .map_err(|e| from_reqwest_error("Failed to read Neo4j response body", e))?;
+            let error_body: Value = serde_json::from_str(&text)
+                .unwrap_or_else(|_| serde_json::json!({"message": text, "raw_body": text}));
+
+            let error_msg = error_body
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown Neo4j error");
+
+            // For 404 status, transaction is likely closed/expired
+            if status_code == 404 {
+                Ok("closed".to_string())
+            } else {
+                Err(Self::map_neo4j_error(status_code, error_msg, &error_body))
+            }
         }
     }
 
@@ -124,14 +141,14 @@ impl Neo4jApi {
                 .text()
                 .map_err(|e| from_reqwest_error("Failed to read Neo4j response body", e))?;
             let error_body: Value = serde_json::from_str(&text)
-                .unwrap_or_else(|_| serde_json::json!({"message": text}));
+                .unwrap_or_else(|_| serde_json::json!({"message": text, "raw_body": text}));
 
             let error_msg = error_body
                 .get("message")
                 .and_then(|v| v.as_str())
                 .unwrap_or("Unknown Neo4j error");
 
-            Err(map_http_status(status_code, error_msg, &error_body))
+            Err(Self::map_neo4j_error(status_code, error_msg, &error_body))
         }
     }
 
@@ -146,14 +163,14 @@ impl Neo4jApi {
                 .text()
                 .map_err(|e| from_reqwest_error("Failed to read Neo4j response body", e))?;
             let error_body: Value = serde_json::from_str(&text)
-                .unwrap_or_else(|_| serde_json::json!({"message": text}));
+                .unwrap_or_else(|_| serde_json::json!({"message": text, "raw_body": text}));
 
             let error_msg = error_body
                 .get("message")
                 .and_then(|v| v.as_str())
                 .unwrap_or("Unknown Neo4j error");
 
-            Err(map_http_status(status_code, error_msg, &error_body))
+            Err(Self::map_neo4j_error(status_code, error_msg, &error_body))
         }
     }
 
@@ -171,14 +188,158 @@ impl Neo4jApi {
                 .text()
                 .map_err(|e| from_reqwest_error("Failed to read Neo4j response body", e))?;
             let error_body: Value = serde_json::from_str(&text)
-                .unwrap_or_else(|_| serde_json::json!({"message": text}));
+                .unwrap_or_else(|_| serde_json::json!({"message": text, "raw_body": text}));
 
             let error_msg = error_body
                 .get("message")
                 .and_then(|v| v.as_str())
                 .unwrap_or("Unknown Neo4j error");
 
-            Err(map_http_status(status_code, error_msg, &error_body))
+            Err(Self::map_neo4j_error(status_code, error_msg, &error_body))
+        }
+    }
+
+    fn map_neo4j_error(status_code: u16, message: &str, error_body: &Value) -> GraphError {
+        if let Some(errors) = error_body.get("errors").and_then(|e| e.as_array()) {
+            if let Some(first_error) = errors.first() {
+                if let Some(neo4j_code) = first_error.get("code").and_then(|c| c.as_str()) {
+                    if let Some(neo4j_message) = first_error.get("message").and_then(|m| m.as_str())
+                    {
+                        return Self::from_neo4j_error_code(neo4j_code, neo4j_message, error_body);
+                    }
+                }
+            }
+        }
+
+        // Fallback to generic HTTP status mapping with enhanced error info
+        let enhanced_error_body = if error_body.get("raw_body").is_some() {
+            error_body.clone()
+        } else {
+            let mut enhanced = error_body.clone();
+            enhanced["debug_info"] = serde_json::json!({
+                "original_message": message,
+                "status_code": status_code,
+                "error_body_sample": error_body.to_string().chars().take(200).collect::<String>()
+            });
+            enhanced
+        };
+
+        map_http_status(status_code, message, &enhanced_error_body)
+    }
+
+    /// Map Neo4j-specific error codes to GraphError
+    fn from_neo4j_error_code(code: &str, message: &str, error_body: &Value) -> GraphError {
+        match code {
+            // Client errors - Authentication and Authorization
+            "Neo.ClientError.Security.Unauthorized" => {
+                GraphError::AuthenticationFailed(format!("Neo4j authentication failed: {message}"))
+            }
+            "Neo.ClientError.Security.Forbidden" => {
+                GraphError::AuthorizationFailed(format!("Neo4j authorization failed: {message}"))
+            }
+            "Neo.ClientError.Security.AuthenticationRateLimit" => GraphError::ResourceExhausted(
+                format!("Authentication rate limit exceeded: {message}"),
+            ),
+
+            // Client errors - Request issues
+            "Neo.ClientError.Request.Invalid" => {
+                GraphError::InvalidQuery(format!("Invalid Neo4j request: {message}"))
+            }
+            "Neo.ClientError.Request.InvalidFormat" => {
+                GraphError::InvalidQuery(format!("Invalid request format: {message}"))
+            }
+            "Neo.ClientError.Statement.SyntaxError" => {
+                GraphError::InvalidQuery(format!("Cypher syntax error: {message}"))
+            }
+            "Neo.ClientError.Statement.SemanticError" => {
+                GraphError::InvalidQuery(format!("Cypher semantic error: {message}"))
+            }
+            "Neo.ClientError.Statement.ParameterMissing" => {
+                GraphError::InvalidQuery(format!("Missing parameter: {message}"))
+            }
+            "Neo.ClientError.Statement.TypeError" => {
+                GraphError::InvalidPropertyType(format!("Type error: {message}"))
+            }
+
+            // Client errors - Schema and constraints
+            "Neo.ClientError.Schema.ConstraintValidationFailed" => {
+                GraphError::ConstraintViolation(format!("Constraint validation failed: {message}"))
+            }
+            "Neo.ClientError.Schema.ConstraintViolation" => {
+                GraphError::ConstraintViolation(format!("Constraint violation: {message}"))
+            }
+            "Neo.ClientError.Schema.IndexNotFound" => {
+                GraphError::SchemaViolation(format!("Index not found: {message}"))
+            }
+            "Neo.ClientError.Schema.LabelNotFound" => {
+                GraphError::SchemaViolation(format!("Label not found: {message}"))
+            }
+            "Neo.ClientError.Schema.PropertyKeyNotFound" => {
+                GraphError::SchemaViolation(format!("Property key not found: {message}"))
+            }
+
+            // Client errors - Transaction issues
+            "Neo.ClientError.Transaction.InvalidType" => {
+                GraphError::TransactionFailed(format!("Invalid transaction type: {message}"))
+            }
+            "Neo.ClientError.Transaction.ForbiddenDueToTransactionType" => {
+                GraphError::TransactionFailed(format!(
+                    "Operation forbidden in transaction: {message}"
+                ))
+            }
+            "Neo.ClientError.Transaction.MarkedAsFailed" => {
+                GraphError::TransactionFailed(format!("Transaction marked as failed: {message}"))
+            }
+
+            // Transient errors - Database issues
+            "Neo.TransientError.Database.DatabaseUnavailable" => {
+                GraphError::ServiceUnavailable(format!("Database unavailable: {message}"))
+            }
+            "Neo.TransientError.General.DatabaseUnavailable" => {
+                GraphError::ServiceUnavailable(format!("General database unavailable: {message}"))
+            }
+
+            // Transient errors - Transaction issues
+            "Neo.TransientError.Transaction.DeadlockDetected" => GraphError::DeadlockDetected,
+            "Neo.TransientError.Transaction.LockClientStopped" => GraphError::TransactionConflict,
+            "Neo.TransientError.Transaction.Terminated" => {
+                GraphError::TransactionFailed(format!("Transaction terminated: {message}"))
+            }
+            "Neo.TransientError.Transaction.LockWaitTimeout" => GraphError::TransactionTimeout,
+
+            // Database errors - General
+            "Neo.DatabaseError.General.UnknownError" => {
+                GraphError::InternalError(format!("Neo4j unknown error: {message}"))
+            }
+            "Neo.DatabaseError.Statement.ExecutionFailed" => {
+                GraphError::InternalError(format!("Statement execution failed: {message}"))
+            }
+
+            // Database errors - Transaction
+            "Neo.DatabaseError.Transaction.TransactionLogError" => {
+                GraphError::TransactionFailed(format!("Transaction log error: {message}"))
+            }
+            "Neo.DatabaseError.Transaction.TransactionValidationFailed" => {
+                GraphError::TransactionFailed(format!("Transaction validation failed: {message}"))
+            }
+
+            // Default fallback with enhanced debugging info
+            _ => {
+                let enhanced_message = format!("Neo4j error [{code}]: {message}");
+                let mut debug_error_body = error_body.clone();
+                debug_error_body["neo4j_error_code"] = serde_json::Value::String(code.to_string());
+                debug_error_body["neo4j_message"] = serde_json::Value::String(message.to_string());
+
+                GraphError::InternalError(format!(
+                    "{} | Debug info: {}",
+                    enhanced_message,
+                    debug_error_body
+                        .to_string()
+                        .chars()
+                        .take(300)
+                        .collect::<String>()
+                ))
+            }
         }
     }
 }
