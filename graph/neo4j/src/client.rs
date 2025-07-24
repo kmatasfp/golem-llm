@@ -211,7 +211,6 @@ impl Neo4jApi {
             }
         }
 
-        // Fallback to generic HTTP status mapping with enhanced error info
         let enhanced_error_body = if error_body.get("raw_body").is_some() {
             error_body.clone()
         } else {
