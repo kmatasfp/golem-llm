@@ -19,10 +19,10 @@ domains = array llm websearch search
 # if there is no domain passed run for every domain
 if is_empty ${1}
     for domain in ${domains}
-        exec cargo make --cwd ${domain} build
+        exec --fail-on-error cargo make --cwd ${domain} build
     end
 else
-    exec cargo make --cwd ${1} build
+    exec --fail-on-error cargo make --cwd ${1} build
 end
 '''
 
@@ -35,10 +35,10 @@ domains = array llm websearch search
 # if there is no domain passed run for every domain
 if is_empty ${1}
     for domain in ${domains}
-        exec cargo make --cwd ${domain} release-build
+        exec --fail-on-error cargo make --cwd ${domain} release-build
     end
 else
-    exec cargo make --cwd ${1} release-build
+    exec --fail-on-error cargo make --cwd ${1} release-build
 end
 '''
 
@@ -53,10 +53,10 @@ domains = array llm websearch search
 # if there is no domain passed run for every domain
 if is_empty ${1}
     for domain in ${domains}
-        exec cargo make --cwd ${domain} build-portable
+        exec --fail-on-error cargo make --cwd ${domain} build-portable
     end
 else
-    exec cargo make --cwd ${1} build-portable
+    exec --fail-on-error cargo make --cwd ${1} build-portable
 end
 '''
 
@@ -71,10 +71,10 @@ domains = array llm websearch search
 # if there is no domain passed run for every domain
 if is_empty ${1}
     for domain in ${domains}
-        exec cargo make --cwd ${domain} release-build-portable
+        exec --fail-on-error cargo make --cwd ${domain} release-build-portable
     end
 else
-    exec cargo make --cwd ${1} release-build-portable
+    exec --fail-on-error cargo make --cwd ${1} release-build-portable
 end
 '''
 
@@ -88,10 +88,10 @@ domains = array llm websearch search
 # if there is no domain passed run for every domain
 if is_empty ${1}
     for domain in ${domains}
-        exec cargo make --cwd ${domain} wit
+        exec --fail-on-error cargo make --cwd ${domain} wit
     end
 else
-    exec cargo make --cwd ${1} wit
+    exec --fail-on-error cargo make --cwd ${1} wit
 end
 '''
 
@@ -106,10 +106,10 @@ domains = array llm websearch search
 # if there is no domain passed run for every domain
 if is_empty ${1}
     for domain in ${domains}
-        exec cargo make --cwd ${domain} build-test-components
+        exec --fail-on-error cargo make --cwd ${domain} build-test-components
     end
 else
-    exec cargo make --cwd ${1} build-test-components
+    exec --fail-on-error cargo make --cwd ${1} build-test-components
 end
 '''
 
