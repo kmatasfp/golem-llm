@@ -4,55 +4,6 @@ use crate::golem::graph::types::ElementId;
 /// Enhanced error mapping utilities for database providers
 pub mod mapping {
     use super::*;
-    use std::collections::HashMap;
-
-    /// Database-agnostic error mapper that can be specialized by providers
-    pub struct ErrorMapper {
-        pub database_type: String,
-        error_code_mappings: HashMap<i64, fn(&str) -> GraphError>,
-    }
-
-    impl ErrorMapper {
-        /// Create a new error mapper for a specific database type
-        pub fn new(database_type: String) -> Self {
-            Self {
-                database_type,
-                error_code_mappings: HashMap::new(),
-            }
-        }
-
-        /// Register a database-specific error code mapping
-        pub fn register_error_code(&mut self, error_code: i64, mapper: fn(&str) -> GraphError) {
-            self.error_code_mappings.insert(error_code, mapper);
-        }
-
-        /// Map a database error to GraphError using registered mappings
-        pub fn map_database_error(
-            &self,
-            error_code: i64,
-            message: &str,
-            error_body: &serde_json::Value,
-        ) -> GraphError {
-            if let Some(mapper) = self.error_code_mappings.get(&error_code) {
-                mapper(message)
-            } else {
-                self.map_generic_error(error_code, message, error_body)
-            }
-        }
-
-        /// Generic error mapping fallback
-        fn map_generic_error(
-            &self,
-            error_code: i64,
-            message: &str,
-            _error_body: &serde_json::Value,
-        ) -> GraphError {
-            GraphError::InternalError(format!(
-                "{} error [{}]: {}",
-                self.database_type, error_code, message
-            ))
-        }
-    }
 
     /// HTTP status code to GraphError mapping
     pub fn map_http_status(
