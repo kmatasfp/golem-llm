@@ -68,11 +68,13 @@ mod passthrough_impl {
     use crate::golem::llm::llm::{
         ChatEvent, ChatStream, Config, Guest, Message, ToolCall, ToolResult,
     };
+    use crate::init_logging;
 
     impl<Impl: ExtendedGuest> Guest for DurableLLM<Impl> {
         type ChatStream = Impl::ChatStream;
 
         fn send(messages: Vec<Message>, config: Config) -> ChatEvent {
+            init_logging();
             Impl::send(messages, config)
         }
 
@@ -81,10 +83,12 @@ mod passthrough_impl {
             tool_results: Vec<(ToolCall, ToolResult)>,
             config: Config,
         ) -> ChatEvent {
+            init_logging();
             Impl::continue_(messages, tool_results, config)
         }
 
         fn stream(messages: Vec<Message>, config: Config) -> ChatStream {
+            init_logging();
             Impl::stream(messages, config)
         }
     }
