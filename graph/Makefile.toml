@@ -123,16 +123,16 @@ for module in ${modules}
 end
 
 # Copy WIT files for integration tests for graph
-rm -r ../test-graph/wit
-mkdir ../test-graph/wit/deps/golem-graph
-mkdir ../test-graph/wit/deps/io
-cp wit/golem-graph.wit ../test-graph/wit/deps/golem-graph/golem-graph.wit
-cp wit/deps/wasi:io/error.wit ../test-graph/wit/deps/io/error.wit
-cp wit/deps/wasi:io/poll.wit ../test-graph/wit/deps/io/poll.wit
-cp wit/deps/wasi:io/streams.wit ../test-graph/wit/deps/io/streams.wit
-cp wit/deps/wasi:io/world.wit ../test-graph/wit/deps/io/world.wit
+rm -r ../test/graph/wit
+mkdir ../test/graph/wit/deps/golem-graph
+mkdir ../test/graph/wit/deps/io
+cp wit/golem-graph.wit ../test/graph/wit/deps/golem-graph/golem-graph.wit
+cp wit/deps/wasi:io/error.wit ../test/graph/wit/deps/io/error.wit
+cp wit/deps/wasi:io/poll.wit ../test/graph/wit/deps/io/poll.wit
+cp wit/deps/wasi:io/streams.wit ../test/graph/wit/deps/io/streams.wit
+cp wit/deps/wasi:io/world.wit ../test/graph/wit/deps/io/world.wit
 
-echo "Copied WIT for module test-graph"
+echo "Copied WIT for module test/graph"
 """
 
 [tasks.build-test-components]
@@ -140,9 +140,9 @@ dependencies = ["build"]
 install_crate = "cargo-binstall"
 description = "Builds graph test components with golem-cli"
 script = '''
-cargo-binstall golem-cli@1.2.2-dev.11 --locked --no-confirm
+cargo-binstall golem-cli@1.2.5 --locked --no-confirm
 cargo-binstall wac-cli --locked --no-confirm
-cd ../test-graph
+cd ../test/graph
 
 golem-cli --version
 golem-cli app clean
