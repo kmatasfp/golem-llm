@@ -2,6 +2,7 @@ use crate::{helpers, GraphArangoDbComponent, SchemaManager};
 use golem_graph::{
     durability::ExtendedGuest,
     golem::graph::{
+        connection::ConnectionConfig,
         errors::GraphError,
         schema::{
             ContainerInfo, ContainerType, EdgeLabelSchema, EdgeTypeDefinition,
@@ -15,12 +16,15 @@ use std::sync::Arc;
 impl SchemaGuest for GraphArangoDbComponent {
     type SchemaManager = SchemaManager;
 
-    fn get_schema_manager() -> Result<golem_graph::golem::graph::schema::SchemaManager, GraphError>
-    {
-        let config: golem_graph::golem::graph::connection::ConnectionConfig =
-            helpers::config_from_env()?;
+    fn get_schema_manager(
+        config: Option<ConnectionConfig>,
+    ) -> Result<golem_graph::golem::graph::schema::SchemaManager, GraphError> {
+        let final_config = match config {
+            Some(provided_config) => provided_config,
+            None => helpers::config_from_env()?,
+        };
 
-        let graph = GraphArangoDbComponent::connect_internal(&config)?;
+        let graph = GraphArangoDbComponent::connect_internal(&final_config)?;
 
         let manager = SchemaManager {
             graph: Arc::new(graph),

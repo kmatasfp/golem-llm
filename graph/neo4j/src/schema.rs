@@ -2,6 +2,7 @@ use crate::helpers::{config_from_env, map_neo4j_type_to_wit};
 use crate::{GraphNeo4jComponent, SchemaManager};
 use golem_graph::durability::ExtendedGuest;
 use golem_graph::golem::graph::{
+    connection::ConnectionConfig,
     errors::GraphError,
     schema::{
         EdgeLabelSchema, EdgeTypeDefinition, Guest as SchemaGuest, GuestSchemaManager,
@@ -17,9 +18,14 @@ use std::sync::Arc;
 impl SchemaGuest for GraphNeo4jComponent {
     type SchemaManager = SchemaManager;
 
-    fn get_schema_manager() -> Result<SchemaManagerResource, GraphError> {
-        let config = config_from_env()?;
-        let graph = GraphNeo4jComponent::connect_internal(&config)?;
+    fn get_schema_manager(
+        config: Option<ConnectionConfig>,
+    ) -> Result<SchemaManagerResource, GraphError> {
+        let final_config = match config {
+            Some(provided_config) => provided_config,
+            None => config_from_env()?,
+        };
+        let graph = GraphNeo4jComponent::connect_internal(&final_config)?;
         let manager = SchemaManager {
             graph: Arc::new(graph),
         };

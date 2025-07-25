@@ -1,6 +1,7 @@
 use crate::{helpers, GraphJanusGraphComponent, SchemaManager};
 use golem_graph::durability::ExtendedGuest;
 use golem_graph::golem::graph::{
+    connection::ConnectionConfig,
     errors::GraphError,
     schema::{
         ContainerInfo, EdgeLabelSchema, EdgeTypeDefinition, Guest as SchemaGuest,
@@ -14,9 +15,14 @@ use std::sync::Arc;
 impl SchemaGuest for GraphJanusGraphComponent {
     type SchemaManager = SchemaManager;
 
-    fn get_schema_manager() -> Result<SchemaManagerResource, GraphError> {
-        let config = helpers::config_from_env()?;
-        let graph = crate::GraphJanusGraphComponent::connect_internal(&config)?;
+    fn get_schema_manager(
+        config: Option<ConnectionConfig>,
+    ) -> Result<SchemaManagerResource, GraphError> {
+        let final_config = match config {
+            Some(provided_config) => provided_config,
+            None => helpers::config_from_env()?,
+        };
+        let graph = crate::GraphJanusGraphComponent::connect_internal(&final_config)?;
         let manager = SchemaManager {
             graph: Arc::new(graph),
         };

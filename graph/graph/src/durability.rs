@@ -60,9 +60,11 @@ mod passthrough_impl {
     {
         type SchemaManager = Impl::SchemaManager;
 
-        fn get_schema_manager() -> Result<SchemaManager, GraphError> {
+        fn get_schema_manager(
+            config: Option<ConnectionConfig>,
+        ) -> Result<SchemaManager, GraphError> {
             init_logging();
-            Impl::get_schema_manager()
+            Impl::get_schema_manager(config)
         }
     }
 
@@ -203,9 +205,11 @@ mod durable_impl {
     {
         type SchemaManager = Impl::SchemaManager;
 
-        fn get_schema_manager() -> Result<SchemaManager, GraphError> {
+        fn get_schema_manager(
+            config: Option<ConnectionConfig>,
+        ) -> Result<SchemaManager, GraphError> {
             init_logging();
-            Impl::get_schema_manager()
+            Impl::get_schema_manager(config)
         }
     }
 
