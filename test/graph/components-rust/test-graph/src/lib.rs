@@ -272,7 +272,7 @@ impl Guest for Component {
             Err(error) => return format!("Edge creation failed: {:?}", error),
         };
 
-        // Retrieve adjacent vertices - with JanusGraph fallback approach
+        // Retrieve adjacent vertices
         let adjacent_vertices = match transaction.get_adjacent_vertices(
             &vertex1.id.clone(),
             Direction::Outgoing,
@@ -285,45 +285,10 @@ impl Guest for Component {
                 vertices
             },
             Err(error) => {
-                println!("WARNING: get_adjacent_vertices failed: {:?}", error);
-                
-                // JanusGraph has known issues with get_adjacent_vertices, use get_connected_edges fallback
-                if PROVIDER == "janusgraph" {
-                    println!("INFO: Falling back to JanusGraph connected edges approach");
-                    results.push("JanusGraph fallback: get_adjacent_vertices failed, using get_connected_edges".to_string());
-                    match transaction.get_connected_edges(
-                        &vertex1.id.clone(),
-                        Direction::Outgoing,
-                        Some(&["KNOWS".to_string()]),
-                        Some(10),
-                    ) {
-                        Ok(edges) => {
-                            let mut vertices = Vec::new();
-                            for edge in edges {
-                                if edge.edge_type == "KNOWS" {
-                                    match transaction.get_vertex(&edge.to_vertex) {
-                                        Ok(Some(vertex)) => {
-                                            vertices.push(vertex.clone());
-                                        },
-                                        Ok(None) => println!("WARNING: Target vertex not found: {:?}", edge.to_vertex),
-                                        Err(e) => println!("WARNING: Error retrieving target vertex: {:?}", e),
-                                    }
-                                }
-                            }
-                            results.push(format!("JanusGraph fallback succeeded: found {} vertices via connected edges", vertices.len()));
-                            vertices
-                        },
-                        Err(edge_error) => {
-                            results.push("JanusGraph fallback also failed".to_string());
-                            return format!("Adjacent vertices retrieval failed - Primary error: {:?} | Fallback error: {:?} | Debug: Edge created successfully from {:?} to {:?} with type '{}' | Results: {:?}", 
-                                error, edge_error, vertex1.id, vertex2.id, edge.edge_type, results);
-                        }
-                    }
-                } else {
-                    results.push("Non-JanusGraph provider: get_adjacent_vertices failed".to_string());
-                    return format!("Adjacent vertices retrieval failed: {:?} | Provider: {} | Edge: {:?} -> {:?} | Results: {:?}", 
-                        error, PROVIDER, vertex1.id, vertex2.id, results);
-                }
+                println!("ERROR: get_adjacent_vertices failed: {:?}", error);
+                results.push("get_adjacent_vertices failed".to_string());
+                return format!("Adjacent vertices retrieval failed: {:?} | Provider: {} | Edge: {:?} -> {:?} | Results: {:?}", 
+                    error, PROVIDER, vertex1.id, vertex2.id, results);
             }
         };
 
