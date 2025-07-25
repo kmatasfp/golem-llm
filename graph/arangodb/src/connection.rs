@@ -14,7 +14,6 @@ impl ProviderGraph for Graph {
 
 impl GuestGraph for Graph {
     fn begin_transaction(&self) -> Result<TransactionResource, GraphError> {
-
         // Ensure common collections exist before starting transaction
         // This is act as just helper for testing purposes
         // let common_collections = vec![

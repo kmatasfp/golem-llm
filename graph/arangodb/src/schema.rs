@@ -17,7 +17,8 @@ impl SchemaGuest for GraphArangoDbComponent {
 
     fn get_schema_manager() -> Result<golem_graph::golem::graph::schema::SchemaManager, GraphError>
     {
-        let config: golem_graph::golem::graph::connection::ConnectionConfig = helpers::config_from_env()?;
+        let config: golem_graph::golem::graph::connection::ConnectionConfig =
+            helpers::config_from_env()?;
 
         let graph = GraphArangoDbComponent::connect_internal(&config)?;
 

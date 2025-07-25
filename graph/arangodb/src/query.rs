@@ -13,7 +13,6 @@ impl Transaction {
         parameters: Option<QueryParameters>,
         _options: Option<QueryOptions>,
     ) -> Result<QueryExecutionResult, GraphError> {
-
         let mut bind_vars = serde_json::Map::new();
         if let Some(p) = parameters {
             for (key, value) in p {

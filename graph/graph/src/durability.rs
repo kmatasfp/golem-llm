@@ -141,10 +141,10 @@ mod passthrough_impl {
 #[cfg(feature = "durability")]
 mod durable_impl {
     use super::*;
+    use crate::init_logging;
     use golem_rust::bindings::golem::durability::durability::WrappedFunctionType;
     use golem_rust::durability::Durability;
     use golem_rust::{with_persistence_level, FromValueAndType, IntoValue, PersistenceLevel};
-    use crate::init_logging;
 
     #[derive(Debug, Clone, FromValueAndType, IntoValue)]
     pub(super) struct Unit;
