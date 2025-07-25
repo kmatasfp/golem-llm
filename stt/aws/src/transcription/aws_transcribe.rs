@@ -650,7 +650,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
 
     async fn wait_for_vocabulary_ready(
         &self,
-        request_id: &str,
+        vocabulary_name: &str,
         max_wait_time: Duration,
     ) -> Result<(), golem_stt::error::Error> {
         let start_time = std::time::Instant::now();
@@ -660,20 +660,20 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
         loop {
             if start_time.elapsed() > max_wait_time {
                 return Err(golem_stt::error::Error::APIBadRequest {
-                    request_id: request_id.to_string(),
+                    request_id: vocabulary_name.to_string(),
                     provider_error: "Vocabulary creation timed out".to_string(),
                 });
             }
 
             self.runtime.sleep(retry_delay).await;
 
-            let res = self.get_vocabulary(request_id).await?;
+            let res = self.get_vocabulary(vocabulary_name).await?;
 
             match res.vocabulary_state.as_str() {
                 "READY" => return Ok(()),
                 "FAILED" => {
                     return Err(golem_stt::error::Error::APIBadRequest {
-                        request_id: request_id.to_string(),
+                        request_id: vocabulary_name.to_string(),
                         provider_error: format!(
                             "Vocabulary creation failed: {}",
                             res.failure_reason
@@ -689,7 +689,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
                 }
                 other => {
                     return Err(golem_stt::error::Error::APIBadRequest {
-                        request_id: request_id.to_string(),
+                        request_id: vocabulary_name.to_string(),
                         provider_error: format!("Unexpected vocabulary state: {}", other),
                     });
                 }

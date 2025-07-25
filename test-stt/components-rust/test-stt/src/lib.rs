@@ -79,7 +79,7 @@ impl Guest for Component {
                     successes, failures
                 ))
             }
-            Err(err) => Err(format!("error: {err:?}")),
+            Err(err) => Err(format!("multi transcription error: {err:?}")),
         }
     }
 }

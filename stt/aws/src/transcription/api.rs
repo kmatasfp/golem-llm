@@ -243,7 +243,7 @@ impl<S3: S3Service, TC: TranscribeService>
         let res = self
             .transcribe_client
             .start_transcription_job(
-                request_id.clone().as_ref(),
+                &request_id,
                 &format!("s3://{}/{object_key}", &self.bucket_name),
                 &request.audio_config,
                 request.transcription_config.as_ref(),

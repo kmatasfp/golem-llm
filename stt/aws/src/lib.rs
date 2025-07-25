@@ -116,6 +116,21 @@ impl TranscriptionGuest for Component {
                 })
                 .collect();
 
+            // Might need to enable this if https://github.com/golemcloud/golem/issues/1865 does not get fixed
+            // for request in requests {
+            //     let res = api_client.transcribe_audio(request).await; // returns a Result<TranscriptionResponse, TranscriptionError>
+            //     match res {
+            //         Ok(resp) => successes.push(resp.into()),
+            //         Err(err) => {
+            //             trace!("transcription request failed, error {}", err);
+            //             failures.push(WitFailedTranscription {
+            //                 request_id: err.request_id().to_string(),
+            //                 error: WitSttError::from(err),
+            //             });
+            //         }
+            //     }
+            // }
+
             for chunk in requests.into_iter().chunks(32).into_iter() {
                 let req_vec: Vec<_> = chunk.collect();
 
@@ -131,10 +146,13 @@ impl TranscriptionGuest for Component {
                 for res in results {
                     match res {
                         Ok(resp) => successes.push(resp.into()),
-                        Err(err) => failures.push(WitFailedTranscription {
-                            request_id: err.request_id().to_string(),
-                            error: WitSttError::from(err),
-                        }),
+                        Err(err) => {
+                            trace!("transcription request failed, error {}", err);
+                            failures.push(WitFailedTranscription {
+                                request_id: err.request_id().to_string(),
+                                error: WitSttError::from(err),
+                            })
+                        }
                     }
                 }
             }
