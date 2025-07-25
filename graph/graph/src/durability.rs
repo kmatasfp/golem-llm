@@ -160,7 +160,7 @@ mod durable_impl {
     }
 
     impl<T: GuestTransaction> DurableTransaction<T> {
-        pub fn new(inner: T) -> Self {
+        pub fn _new(inner: T) -> Self {
             Self { inner }
         }
     }
@@ -194,7 +194,7 @@ mod durable_impl {
     where
         Impl::Graph: ProviderGraph + 'static,
     {
-        type Transaction = DurableTransaction<Impl::Transaction>;
+        type Transaction = Impl::Transaction;
     }
 
     impl<Impl: ExtendedGuest + SchemaGuest> SchemaGuest for DurableGraph<Impl>
@@ -303,18 +303,12 @@ mod durable_impl {
     impl<G: ProviderGraph + 'static> connection::GuestGraph for DurableGraphResource<G> {
         fn begin_transaction(&self) -> Result<transactions::Transaction, GraphError> {
             init_logging();
-            self.graph.begin_transaction().map(|tx_wrapper| {
-                let provider_transaction = tx_wrapper.into_inner::<G::Transaction>();
-                transactions::Transaction::new(DurableTransaction::new(provider_transaction))
-            })
+            self.graph.begin_transaction()
         }
 
         fn begin_read_transaction(&self) -> Result<transactions::Transaction, GraphError> {
             init_logging();
-            self.graph.begin_read_transaction().map(|tx_wrapper| {
-                let provider_transaction = tx_wrapper.into_inner::<G::Transaction>();
-                transactions::Transaction::new(DurableTransaction::new(provider_transaction))
-            })
+            self.graph.begin_read_transaction()
         }
 
         fn ping(&self) -> Result<(), GraphError> {
