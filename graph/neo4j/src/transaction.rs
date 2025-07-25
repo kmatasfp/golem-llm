@@ -7,12 +7,10 @@ use golem_graph::golem::graph::{
     types::{Direction, Edge, ElementId, FilterCondition, PropertyMap, SortSpec, Vertex},
 };
 use golem_graph::query_utils::{build_sort_clause, build_where_clause, QuerySyntax};
-use golem_graph::LOGGING_STATE;
 use serde_json::{json, Map};
 
 impl Transaction {
     pub(crate) fn commit(&self) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         self.api.commit_transaction(&self.transaction_url)
     }
 }
@@ -35,12 +33,10 @@ fn cypher_syntax() -> QuerySyntax {
 
 impl GuestTransaction for Transaction {
     fn commit(&self) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         self.api.commit_transaction(&self.transaction_url)
     }
 
     fn rollback(&self) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         self.api.rollback_transaction(&self.transaction_url)
     }
 
@@ -49,7 +45,6 @@ impl GuestTransaction for Transaction {
         vertex_type: String,
         properties: PropertyMap,
     ) -> Result<Vertex, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         self.create_vertex_with_labels(vertex_type, vec![], properties)
     }
 
@@ -59,7 +54,6 @@ impl GuestTransaction for Transaction {
         additional_labels: Vec<String>,
         properties: PropertyMap,
     ) -> Result<Vertex, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut labels = vec![vertex_type];
         labels.extend(additional_labels);
         let cypher_labels = labels.join(":");
@@ -106,7 +100,6 @@ impl GuestTransaction for Transaction {
     }
 
     fn get_vertex(&self, id: ElementId) -> Result<Option<Vertex>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         if let ElementId::StringValue(s) = &id {
             if let Some((prop, value)) = s
                 .strip_prefix("prop:")
@@ -203,7 +196,6 @@ impl GuestTransaction for Transaction {
     }
 
     fn update_vertex(&self, id: ElementId, properties: PropertyMap) -> Result<Vertex, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let cypher_id = match id.clone() {
             ElementId::StringValue(s) => s,
             ElementId::Int64(i) => i.to_string(),
@@ -243,7 +235,6 @@ impl GuestTransaction for Transaction {
         id: ElementId,
         updates: PropertyMap,
     ) -> Result<Vertex, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let cypher_id = match id.clone() {
             ElementId::StringValue(s) => s,
             ElementId::Int64(i) => i.to_string(),
@@ -298,7 +289,6 @@ impl GuestTransaction for Transaction {
     }
 
     fn delete_vertex(&self, id: ElementId, delete_edges: bool) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let cypher_id = match id {
             ElementId::StringValue(s) => s,
             ElementId::Int64(i) => i.to_string(),
@@ -325,7 +315,6 @@ impl GuestTransaction for Transaction {
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<Vertex>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut params = Map::new();
         let syntax = cypher_syntax();
 
@@ -395,7 +384,6 @@ impl GuestTransaction for Transaction {
         to_vertex: ElementId,
         properties: PropertyMap,
     ) -> Result<Edge, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         // Convert ElementId to string for elementId() queries
         let from_id_str = match from_vertex.clone() {
             ElementId::StringValue(s) => s,
@@ -449,7 +437,6 @@ impl GuestTransaction for Transaction {
     }
 
     fn get_edge(&self, id: ElementId) -> Result<Option<Edge>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let cypher_id = match id.clone() {
             ElementId::StringValue(s) => s,
             ElementId::Int64(i) => i.to_string(),
@@ -497,7 +484,6 @@ impl GuestTransaction for Transaction {
     }
 
     fn update_edge(&self, id: ElementId, properties: PropertyMap) -> Result<Edge, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let cypher_id = match id.clone() {
             ElementId::StringValue(s) => s,
             ElementId::Int64(i) => i.to_string(),
@@ -552,7 +538,6 @@ impl GuestTransaction for Transaction {
         id: ElementId,
         updates: PropertyMap,
     ) -> Result<Edge, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let cypher_id = match id.clone() {
             ElementId::StringValue(s) => s,
             ElementId::Int64(i) => i.to_string(),
@@ -605,7 +590,6 @@ impl GuestTransaction for Transaction {
     }
 
     fn delete_edge(&self, id: ElementId) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let cypher_id = match id {
             ElementId::StringValue(s) => s,
             ElementId::Int64(i) => i.to_string(),
@@ -631,7 +615,6 @@ impl GuestTransaction for Transaction {
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<Edge>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut params = Map::new();
         let syntax = cypher_syntax();
 
@@ -704,7 +687,6 @@ impl GuestTransaction for Transaction {
         edge_types: Option<Vec<String>>,
         limit: Option<u32>,
     ) -> Result<Vec<Vertex>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let cypher_id = match vertex_id {
             ElementId::StringValue(s) => s,
             ElementId::Int64(i) => i.to_string(),
@@ -781,7 +763,6 @@ impl GuestTransaction for Transaction {
         edge_types: Option<Vec<String>>,
         limit: Option<u32>,
     ) -> Result<Vec<Edge>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let cypher_id = match vertex_id {
             ElementId::StringValue(s) => s,
             ElementId::Int64(i) => i.to_string(),
@@ -851,7 +832,6 @@ impl GuestTransaction for Transaction {
     }
 
     fn create_vertices(&self, vertices: Vec<VertexSpec>) -> Result<Vec<Vertex>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         if vertices.is_empty() {
             return Ok(vec![]);
         }
@@ -908,7 +888,6 @@ impl GuestTransaction for Transaction {
     }
 
     fn create_edges(&self, edges: Vec<EdgeSpec>) -> Result<Vec<Edge>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         if edges.is_empty() {
             return Ok(vec![]);
         }
@@ -977,7 +956,6 @@ impl GuestTransaction for Transaction {
         vertex_type: String,
         properties: PropertyMap,
     ) -> Result<Vertex, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         if id.is_some() {
             return Err(GraphError::UnsupportedOperation(
                 "upsert_vertex with a specific element ID is not yet supported. \
@@ -1064,7 +1042,6 @@ impl GuestTransaction for Transaction {
         to_vertex: ElementId,
         properties: PropertyMap,
     ) -> Result<Edge, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         if id.is_some() {
             return Err(GraphError::UnsupportedOperation(
                 "upsert_edge with a specific element ID is not yet supported. \
@@ -1150,7 +1127,6 @@ impl GuestTransaction for Transaction {
     }
 
     fn is_active(&self) -> bool {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         self.api
             .get_transaction_status(&self.transaction_url)
             .map(|status| status == "running")

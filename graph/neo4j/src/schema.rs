@@ -9,7 +9,6 @@ use golem_graph::golem::graph::{
         SchemaManager as SchemaManagerResource, VertexLabelSchema,
     },
 };
-use golem_graph::LOGGING_STATE;
 use log::trace;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -30,7 +29,6 @@ impl SchemaGuest for GraphNeo4jComponent {
 
 impl GuestSchemaManager for SchemaManager {
     fn define_vertex_label(&self, schema: VertexLabelSchema) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         for prop in schema.properties {
             if prop.required {
                 let q = format!(
@@ -81,7 +79,6 @@ impl GuestSchemaManager for SchemaManager {
     }
 
     fn define_edge_label(&self, schema: EdgeLabelSchema) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx = self.graph.begin_transaction()?;
         let mut statements = Vec::new();
 
@@ -97,7 +94,6 @@ impl GuestSchemaManager for SchemaManager {
             }
             if prop.unique {
                 // Neo4j does not support uniqueness constraints on relationship properties.
-                // We will silently ignore this for now.
             }
         }
 
@@ -116,7 +112,6 @@ impl GuestSchemaManager for SchemaManager {
         &self,
         label: String,
     ) -> Result<Option<VertexLabelSchema>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx = self.graph.begin_transaction()?;
 
         // Fetch node‐property metadata
@@ -239,7 +234,6 @@ impl GuestSchemaManager for SchemaManager {
     }
 
     fn get_edge_label_schema(&self, label: String) -> Result<Option<EdgeLabelSchema>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx = self.graph.begin_transaction()?;
 
         let props_query = "CALL db.schema.relTypeProperties() YIELD relType, propertyName, propertyTypes, mandatory WHERE relType = $label RETURN propertyName, propertyTypes, mandatory";
@@ -315,7 +309,6 @@ impl GuestSchemaManager for SchemaManager {
     }
 
     fn list_vertex_labels(&self) -> Result<Vec<String>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx = self.graph.begin_transaction()?;
         let result = tx.execute_schema_query_and_extract_string_list(
             "CALL db.labels() YIELD label RETURN label",
@@ -325,7 +318,6 @@ impl GuestSchemaManager for SchemaManager {
     }
 
     fn list_edge_labels(&self) -> Result<Vec<String>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx = self.graph.begin_transaction()?;
         let result = tx.execute_schema_query_and_extract_string_list(
             "CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType",
@@ -335,7 +327,6 @@ impl GuestSchemaManager for SchemaManager {
     }
 
     fn create_index(&self, index: IndexDefinition) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx = self.graph.begin_transaction()?;
 
         let index_type_str = match index.index_type {
@@ -365,7 +356,6 @@ impl GuestSchemaManager for SchemaManager {
     }
 
     fn drop_index(&self, name: String) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx = self.graph.begin_transaction()?;
         let query = format!("DROP INDEX {name} IF EXISTS");
         let statement = json!({ "statement": query, "parameters": {} });
@@ -376,7 +366,6 @@ impl GuestSchemaManager for SchemaManager {
     }
 
     fn list_indexes(&self) -> Result<Vec<IndexDefinition>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx = self.graph.begin_transaction()?;
         let query = "SHOW INDEXES";
         let statement = json!({ "statement": query, "parameters": {} });
@@ -447,14 +436,12 @@ impl GuestSchemaManager for SchemaManager {
     }
 
     fn get_index(&self, _name: String) -> Result<Option<IndexDefinition>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         Err(GraphError::UnsupportedOperation(
             "get_index is not supported by the Neo4j provider yet.".to_string(),
         ))
     }
 
     fn define_edge_type(&self, _definition: EdgeTypeDefinition) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         Err(GraphError::UnsupportedOperation(
             "define_edge_type is not supported by the Neo4j provider".to_string(),
         ))
@@ -463,7 +450,6 @@ impl GuestSchemaManager for SchemaManager {
     fn list_edge_types(
         &self,
     ) -> Result<Vec<golem_graph::golem::graph::schema::EdgeTypeDefinition>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         Err(GraphError::UnsupportedOperation(
             "list_edge_types is not supported by the Neo4j provider".to_string(),
         ))
@@ -474,7 +460,6 @@ impl GuestSchemaManager for SchemaManager {
         _name: String,
         _container_type: golem_graph::golem::graph::schema::ContainerType,
     ) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         Err(GraphError::UnsupportedOperation(
             "create_container is not supported by the Neo4j provider".to_string(),
         ))
@@ -483,7 +468,6 @@ impl GuestSchemaManager for SchemaManager {
     fn list_containers(
         &self,
     ) -> Result<Vec<golem_graph::golem::graph::schema::ContainerInfo>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         Ok(vec![])
     }
 }

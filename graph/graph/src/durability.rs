@@ -32,6 +32,7 @@ pub trait ProviderGraph: connection::GuestGraph {
 #[cfg(not(feature = "durability"))]
 mod passthrough_impl {
     use super::*;
+    use crate::init_logging;
 
     impl<Impl: ExtendedGuest> connection::Guest for DurableGraph<Impl>
     where
@@ -40,6 +41,7 @@ mod passthrough_impl {
         type Graph = Impl::Graph;
 
         fn connect(config: ConnectionConfig) -> Result<connection::Graph, GraphError> {
+            init_logging();
             let graph = Impl::connect_internal(&config)?;
             Ok(connection::Graph::new(graph))
         }
@@ -59,6 +61,7 @@ mod passthrough_impl {
         type SchemaManager = Impl::SchemaManager;
 
         fn get_schema_manager() -> Result<SchemaManager, GraphError> {
+            init_logging();
             Impl::get_schema_manager()
         }
     }
@@ -73,6 +76,7 @@ mod passthrough_impl {
             to_vertex: crate::golem::graph::types::ElementId,
             options: Option<PathOptions>,
         ) -> Result<Option<Path>, GraphError> {
+            init_logging();
             Impl::find_shortest_path(transaction, from_vertex, to_vertex, options)
         }
 
@@ -83,6 +87,7 @@ mod passthrough_impl {
             options: Option<PathOptions>,
             limit: Option<u32>,
         ) -> Result<Vec<Path>, GraphError> {
+            init_logging();
             Impl::find_all_paths(transaction, from_vertex, to_vertex, options, limit)
         }
 
@@ -91,6 +96,7 @@ mod passthrough_impl {
             center: crate::golem::graph::types::ElementId,
             options: crate::golem::graph::traversal::NeighborhoodOptions,
         ) -> Result<Subgraph, GraphError> {
+            init_logging();
             Impl::get_neighborhood(transaction, center, options)
         }
 
@@ -100,6 +106,7 @@ mod passthrough_impl {
             to_vertex: crate::golem::graph::types::ElementId,
             options: Option<PathOptions>,
         ) -> Result<bool, GraphError> {
+            init_logging();
             Impl::path_exists(transaction, from_vertex, to_vertex, options)
         }
 
@@ -110,6 +117,7 @@ mod passthrough_impl {
             direction: crate::golem::graph::types::Direction,
             edge_types: Option<Vec<String>>,
         ) -> Result<Vec<crate::golem::graph::types::Vertex>, GraphError> {
+            init_logging();
             Impl::get_vertices_at_distance(transaction, source, distance, direction, edge_types)
         }
     }
@@ -124,6 +132,7 @@ mod passthrough_impl {
             parameters: Option<Vec<(String, crate::golem::graph::types::PropertyValue)>>,
             options: Option<QueryOptions>,
         ) -> Result<QueryExecutionResult, GraphError> {
+            init_logging();
             Impl::execute_query(transaction, query, parameters, options)
         }
     }
@@ -135,6 +144,7 @@ mod durable_impl {
     use golem_rust::bindings::golem::durability::durability::WrappedFunctionType;
     use golem_rust::durability::Durability;
     use golem_rust::{with_persistence_level, FromValueAndType, IntoValue, PersistenceLevel};
+    use crate::init_logging;
 
     #[derive(Debug, Clone, FromValueAndType, IntoValue)]
     pub(super) struct Unit;
@@ -161,6 +171,7 @@ mod durable_impl {
     {
         type Graph = DurableGraphResource<Impl::Graph>;
         fn connect(config: ConnectionConfig) -> Result<connection::Graph, GraphError> {
+            init_logging();
             let durability = Durability::<Unit, GraphError>::new(
                 "golem_graph",
                 "connect",
@@ -193,6 +204,7 @@ mod durable_impl {
         type SchemaManager = Impl::SchemaManager;
 
         fn get_schema_manager() -> Result<SchemaManager, GraphError> {
+            init_logging();
             Impl::get_schema_manager()
         }
     }
@@ -207,6 +219,7 @@ mod durable_impl {
             to_vertex: crate::golem::graph::types::ElementId,
             options: Option<PathOptions>,
         ) -> Result<Option<Path>, GraphError> {
+            init_logging();
             Impl::find_shortest_path(transaction, from_vertex, to_vertex, options)
         }
 
@@ -217,6 +230,7 @@ mod durable_impl {
             options: Option<PathOptions>,
             limit: Option<u32>,
         ) -> Result<Vec<Path>, GraphError> {
+            init_logging();
             Impl::find_all_paths(transaction, from_vertex, to_vertex, options, limit)
         }
 
@@ -225,6 +239,7 @@ mod durable_impl {
             center: crate::golem::graph::types::ElementId,
             options: crate::golem::graph::traversal::NeighborhoodOptions,
         ) -> Result<Subgraph, GraphError> {
+            init_logging();
             Impl::get_neighborhood(transaction, center, options)
         }
 
@@ -234,6 +249,7 @@ mod durable_impl {
             to_vertex: crate::golem::graph::types::ElementId,
             options: Option<PathOptions>,
         ) -> Result<bool, GraphError> {
+            init_logging();
             Impl::path_exists(transaction, from_vertex, to_vertex, options)
         }
 
@@ -244,6 +260,7 @@ mod durable_impl {
             direction: crate::golem::graph::types::Direction,
             edge_types: Option<Vec<String>>,
         ) -> Result<Vec<crate::golem::graph::types::Vertex>, GraphError> {
+            init_logging();
             Impl::get_vertices_at_distance(transaction, source, distance, direction, edge_types)
         }
     }
@@ -258,6 +275,7 @@ mod durable_impl {
             parameters: Option<Vec<(String, crate::golem::graph::types::PropertyValue)>>,
             options: Option<QueryOptions>,
         ) -> Result<QueryExecutionResult, GraphError> {
+            init_logging();
             let durability: Durability<QueryExecutionResult, GraphError> = Durability::new(
                 "golem_graph_query",
                 "execute_query",
@@ -284,6 +302,7 @@ mod durable_impl {
 
     impl<G: ProviderGraph + 'static> connection::GuestGraph for DurableGraphResource<G> {
         fn begin_transaction(&self) -> Result<transactions::Transaction, GraphError> {
+            init_logging();
             self.graph.begin_transaction().map(|tx_wrapper| {
                 let provider_transaction = tx_wrapper.into_inner::<G::Transaction>();
                 transactions::Transaction::new(DurableTransaction::new(provider_transaction))
@@ -291,6 +310,7 @@ mod durable_impl {
         }
 
         fn begin_read_transaction(&self) -> Result<transactions::Transaction, GraphError> {
+            init_logging();
             self.graph.begin_read_transaction().map(|tx_wrapper| {
                 let provider_transaction = tx_wrapper.into_inner::<G::Transaction>();
                 transactions::Transaction::new(DurableTransaction::new(provider_transaction))
@@ -304,10 +324,12 @@ mod durable_impl {
         fn get_statistics(
             &self,
         ) -> Result<crate::golem::graph::connection::GraphStatistics, GraphError> {
+            init_logging();
             self.graph.get_statistics()
         }
 
         fn close(&self) -> Result<(), GraphError> {
+            init_logging();
             self.graph.close()
         }
     }
@@ -320,6 +342,7 @@ mod durable_impl {
 
     impl<T: GuestTransaction> GuestTransaction for DurableTransaction<T> {
         fn commit(&self) -> Result<(), GraphError> {
+            init_logging();
             let durability = Durability::<Unit, GraphError>::new(
                 "golem_graph_transaction",
                 "commit",
@@ -338,6 +361,7 @@ mod durable_impl {
         }
 
         fn rollback(&self) -> Result<(), GraphError> {
+            init_logging();
             let durability = Durability::<Unit, GraphError>::new(
                 "golem_graph_transaction",
                 "rollback",
@@ -360,6 +384,7 @@ mod durable_impl {
             vertex_type: String,
             properties: crate::golem::graph::types::PropertyMap,
         ) -> Result<crate::golem::graph::types::Vertex, GraphError> {
+            init_logging();
             let durability: Durability<crate::golem::graph::types::Vertex, GraphError> =
                 Durability::new(
                     "golem_graph_transaction",
@@ -385,6 +410,7 @@ mod durable_impl {
             &self,
             id: crate::golem::graph::types::ElementId,
         ) -> Result<Option<crate::golem::graph::types::Vertex>, GraphError> {
+            init_logging();
             self.inner.get_vertex(id)
         }
 
@@ -394,6 +420,7 @@ mod durable_impl {
             additional_labels: Vec<String>,
             properties: crate::golem::graph::types::PropertyMap,
         ) -> Result<crate::golem::graph::types::Vertex, GraphError> {
+            init_logging();
             let durability: Durability<crate::golem::graph::types::Vertex, GraphError> =
                 Durability::new(
                     "golem_graph_transaction",
@@ -419,6 +446,7 @@ mod durable_impl {
             id: crate::golem::graph::types::ElementId,
             properties: crate::golem::graph::types::PropertyMap,
         ) -> Result<crate::golem::graph::types::Vertex, GraphError> {
+            init_logging();
             let durability: Durability<crate::golem::graph::types::Vertex, GraphError> =
                 Durability::new(
                     "golem_graph_transaction",
@@ -440,6 +468,7 @@ mod durable_impl {
             id: crate::golem::graph::types::ElementId,
             updates: crate::golem::graph::types::PropertyMap,
         ) -> Result<crate::golem::graph::types::Vertex, GraphError> {
+            init_logging();
             let durability: Durability<crate::golem::graph::types::Vertex, GraphError> =
                 Durability::new(
                     "golem_graph_transaction",
@@ -462,6 +491,7 @@ mod durable_impl {
             id: crate::golem::graph::types::ElementId,
             delete_edges: bool,
         ) -> Result<(), GraphError> {
+            init_logging();
             let durability: Durability<Unit, GraphError> = Durability::new(
                 "golem_graph_transaction",
                 "delete_vertex",
@@ -487,6 +517,7 @@ mod durable_impl {
             limit: Option<u32>,
             offset: Option<u32>,
         ) -> Result<Vec<crate::golem::graph::types::Vertex>, GraphError> {
+            init_logging();
             self.inner
                 .find_vertices(vertex_type, filters, sort, limit, offset)
         }
@@ -498,6 +529,7 @@ mod durable_impl {
             to_vertex: crate::golem::graph::types::ElementId,
             properties: crate::golem::graph::types::PropertyMap,
         ) -> Result<crate::golem::graph::types::Edge, GraphError> {
+            init_logging();
             let durability: Durability<crate::golem::graph::types::Edge, GraphError> =
                 Durability::new(
                     "golem_graph_transaction",
@@ -531,6 +563,7 @@ mod durable_impl {
             &self,
             id: crate::golem::graph::types::ElementId,
         ) -> Result<Option<crate::golem::graph::types::Edge>, GraphError> {
+            init_logging();
             self.inner.get_edge(id)
         }
 
@@ -539,6 +572,7 @@ mod durable_impl {
             id: crate::golem::graph::types::ElementId,
             properties: crate::golem::graph::types::PropertyMap,
         ) -> Result<crate::golem::graph::types::Edge, GraphError> {
+            init_logging();
             let durability: Durability<crate::golem::graph::types::Edge, GraphError> =
                 Durability::new(
                     "golem_graph_transaction",
@@ -560,6 +594,7 @@ mod durable_impl {
             id: crate::golem::graph::types::ElementId,
             updates: crate::golem::graph::types::PropertyMap,
         ) -> Result<crate::golem::graph::types::Edge, GraphError> {
+            init_logging();
             let durability: Durability<crate::golem::graph::types::Edge, GraphError> =
                 Durability::new(
                     "golem_graph_transaction",
@@ -578,6 +613,7 @@ mod durable_impl {
         }
 
         fn delete_edge(&self, id: crate::golem::graph::types::ElementId) -> Result<(), GraphError> {
+            init_logging();
             let durability: Durability<Unit, GraphError> = Durability::new(
                 "golem_graph_transaction",
                 "delete_edge",
@@ -603,6 +639,7 @@ mod durable_impl {
             limit: Option<u32>,
             offset: Option<u32>,
         ) -> Result<Vec<crate::golem::graph::types::Edge>, GraphError> {
+            init_logging();
             self.inner
                 .find_edges(edge_types, filters, sort, limit, offset)
         }
@@ -614,6 +651,7 @@ mod durable_impl {
             edge_types: Option<Vec<String>>,
             limit: Option<u32>,
         ) -> Result<Vec<crate::golem::graph::types::Vertex>, GraphError> {
+            init_logging();
             self.inner
                 .get_adjacent_vertices(vertex_id, direction, edge_types, limit)
         }
@@ -625,6 +663,7 @@ mod durable_impl {
             edge_types: Option<Vec<String>>,
             limit: Option<u32>,
         ) -> Result<Vec<crate::golem::graph::types::Edge>, GraphError> {
+            init_logging();
             self.inner
                 .get_connected_edges(vertex_id, direction, edge_types, limit)
         }
@@ -633,6 +672,7 @@ mod durable_impl {
             &self,
             vertices: Vec<crate::golem::graph::transactions::VertexSpec>,
         ) -> Result<Vec<crate::golem::graph::types::Vertex>, GraphError> {
+            init_logging();
             let durability: Durability<Vec<crate::golem::graph::types::Vertex>, GraphError> =
                 Durability::new(
                     "golem_graph_transaction",
@@ -653,6 +693,7 @@ mod durable_impl {
             &self,
             edges: Vec<crate::golem::graph::transactions::EdgeSpec>,
         ) -> Result<Vec<crate::golem::graph::types::Edge>, GraphError> {
+            init_logging();
             let durability: Durability<Vec<crate::golem::graph::types::Edge>, GraphError> =
                 Durability::new(
                     "golem_graph_transaction",
@@ -675,6 +716,7 @@ mod durable_impl {
             vertex_type: String,
             properties: crate::golem::graph::types::PropertyMap,
         ) -> Result<crate::golem::graph::types::Vertex, GraphError> {
+            init_logging();
             let durability: Durability<crate::golem::graph::types::Vertex, GraphError> =
                 Durability::new(
                     "golem_graph_transaction",
@@ -700,6 +742,7 @@ mod durable_impl {
             to_vertex: crate::golem::graph::types::ElementId,
             properties: crate::golem::graph::types::PropertyMap,
         ) -> Result<crate::golem::graph::types::Edge, GraphError> {
+            init_logging();
             let durability: Durability<crate::golem::graph::types::Edge, GraphError> =
                 Durability::new(
                     "golem_graph_transaction",

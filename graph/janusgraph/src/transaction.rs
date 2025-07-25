@@ -7,7 +7,6 @@ use golem_graph::golem::graph::{
     transactions::{EdgeSpec, GuestTransaction, VertexSpec},
     types::{Direction, Edge, ElementId, FilterCondition, PropertyMap, SortSpec, Vertex},
 };
-use golem_graph::LOGGING_STATE;
 use log::trace;
 use serde_json::{json, Value};
 
@@ -60,12 +59,10 @@ fn first_list_item(data: &Value) -> Result<&Value, GraphError> {
 
 impl GuestTransaction for Transaction {
     fn commit(&self) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         Ok(())
     }
 
     fn rollback(&self) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         Ok(())
     }
 
@@ -74,7 +71,6 @@ impl GuestTransaction for Transaction {
         vertex_type: String,
         properties: PropertyMap,
     ) -> Result<Vertex, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         self.create_vertex_with_labels(vertex_type, vec![], properties)
     }
 
@@ -84,7 +80,6 @@ impl GuestTransaction for Transaction {
         _additional_labels: Vec<String>,
         properties: PropertyMap,
     ) -> Result<Vertex, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut gremlin = "g.addV(vertex_label)".to_string();
         let mut bindings = serde_json::Map::new();
         bindings.insert("vertex_label".to_string(), json!(vertex_type));
@@ -105,7 +100,6 @@ impl GuestTransaction for Transaction {
     }
 
     fn get_vertex(&self, id: ElementId) -> Result<Option<Vertex>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let gremlin = "g.V(vertex_id).elementMap()".to_string();
 
         let mut bindings = serde_json::Map::new();
@@ -163,7 +157,6 @@ impl GuestTransaction for Transaction {
     }
 
     fn update_vertex(&self, id: ElementId, properties: PropertyMap) -> Result<Vertex, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut gremlin = "g.V(vertex_id).sideEffect(properties().drop())".to_string();
         let mut bindings = serde_json::Map::new();
         bindings.insert(
@@ -247,7 +240,6 @@ impl GuestTransaction for Transaction {
         id: ElementId,
         updates: PropertyMap,
     ) -> Result<Vertex, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         if updates.is_empty() {
             return self
                 .get_vertex(id.clone())?
@@ -343,7 +335,6 @@ impl GuestTransaction for Transaction {
     }
 
     fn delete_vertex(&self, id: ElementId, _detach: bool) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         // Note: JanusGraph handles edge cleanup automatically during vertex deletion
         let gremlin = "g.V(vertex_id).drop().toList()";
         let mut bindings = serde_json::Map::new();
@@ -393,7 +384,6 @@ impl GuestTransaction for Transaction {
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<Vertex>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut gremlin = "g.V()".to_string();
         let mut bindings = serde_json::Map::new();
 
@@ -461,7 +451,6 @@ impl GuestTransaction for Transaction {
         to_vertex: ElementId,
         properties: PropertyMap,
     ) -> Result<Edge, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut gremlin = "g.V(from_id).addE(edge_label).to(__.V(to_id))".to_string();
         let mut bindings = serde_json::Map::new();
         let from_clone = from_vertex.clone();
@@ -565,7 +554,6 @@ impl GuestTransaction for Transaction {
     }
 
     fn get_edge(&self, id: ElementId) -> Result<Option<Edge>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let gremlin = "g.E(edge_id).elementMap()".to_string();
         let mut bindings = serde_json::Map::new();
         bindings.insert(
@@ -668,7 +656,6 @@ impl GuestTransaction for Transaction {
     }
 
     fn update_edge(&self, id: ElementId, properties: PropertyMap) -> Result<Edge, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let id_json = match &id {
             ElementId::StringValue(s) => json!(s),
             ElementId::Int64(i) => json!(i),
@@ -772,7 +759,6 @@ impl GuestTransaction for Transaction {
         id: ElementId,
         updates: PropertyMap,
     ) -> Result<Edge, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         if updates.is_empty() {
             return self
                 .get_edge(id.clone())?
@@ -883,7 +869,6 @@ impl GuestTransaction for Transaction {
     }
 
     fn delete_edge(&self, id: ElementId) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let gremlin = "g.E(edge_id).drop().toList()".to_string();
 
         let id_json = match id {
@@ -906,7 +891,6 @@ impl GuestTransaction for Transaction {
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<Edge>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut gremlin = "g.E()".to_string();
         let mut bindings = serde_json::Map::new();
 
@@ -961,7 +945,6 @@ impl GuestTransaction for Transaction {
         edge_types: Option<Vec<String>>,
         limit: Option<u32>,
     ) -> Result<Vec<Vertex>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut bindings = serde_json::Map::new();
         let id_json = match vertex_id {
             ElementId::StringValue(s) => json!(s),
@@ -1028,7 +1011,6 @@ impl GuestTransaction for Transaction {
         edge_types: Option<Vec<String>>,
         limit: Option<u32>,
     ) -> Result<Vec<Edge>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut bindings = serde_json::Map::new();
         let id_json = match vertex_id {
             ElementId::StringValue(s) => json!(s),
@@ -1089,7 +1071,6 @@ impl GuestTransaction for Transaction {
     }
 
     fn create_vertices(&self, vertices: Vec<VertexSpec>) -> Result<Vec<Vertex>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         if vertices.is_empty() {
             return Ok(vec![]);
         }
@@ -1128,7 +1109,6 @@ impl GuestTransaction for Transaction {
     }
 
     fn create_edges(&self, edges: Vec<EdgeSpec>) -> Result<Vec<Edge>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         if edges.is_empty() {
             return Ok(vec![]);
         }
@@ -1192,7 +1172,6 @@ impl GuestTransaction for Transaction {
         vertex_type: String,
         properties: PropertyMap,
     ) -> Result<Vertex, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         if properties.is_empty() {
             return Err(GraphError::UnsupportedOperation(
                 "Upsert requires at least one property to match on.".to_string(),
@@ -1244,7 +1223,6 @@ impl GuestTransaction for Transaction {
         to: ElementId,
         properties: PropertyMap,
     ) -> Result<Edge, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         if properties.is_empty() {
             return Err(GraphError::UnsupportedOperation(
                 "Upsert requires at least one property to match on.".to_string(),

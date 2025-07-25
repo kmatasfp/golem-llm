@@ -10,7 +10,6 @@ use golem_graph::golem::graph::{
     },
     types::{Edge, ElementId, Vertex},
 };
-use golem_graph::LOGGING_STATE;
 use serde_json::json;
 use std::collections::HashMap;
 
@@ -21,7 +20,6 @@ impl Transaction {
         to_vertex: ElementId,
         _options: Option<PathOptions>,
     ) -> Result<Option<Path>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         // from_vertex/to_vertex are ElementId::StringValue(s)
         let from_id = match from_vertex {
             ElementId::StringValue(s) => s,
@@ -85,7 +83,6 @@ impl Transaction {
         options: Option<PathOptions>,
         limit: Option<u32>,
     ) -> Result<Vec<Path>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let from_id = match from_vertex {
             ElementId::StringValue(s) => s,
             ElementId::Int64(i) => i.to_string(),
@@ -174,7 +171,6 @@ impl Transaction {
         center: ElementId,
         options: NeighborhoodOptions,
     ) -> Result<Subgraph, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let center_id = match center {
             ElementId::StringValue(s) => s,
             ElementId::Int64(i) => i.to_string(),
@@ -259,7 +255,6 @@ impl Transaction {
         to_vertex: ElementId,
         options: Option<PathOptions>,
     ) -> Result<bool, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         self.find_all_paths(from_vertex, to_vertex, options, Some(1))
             .map(|paths| !paths.is_empty())
     }
@@ -271,7 +266,6 @@ impl Transaction {
         direction: Direction,
         edge_types: Option<Vec<String>>,
     ) -> Result<Vec<Vertex>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let source_id = element_id_to_key(&source);
 
         let (left_arrow, right_arrow) = match direction {
@@ -332,7 +326,6 @@ impl TraversalGuest for GraphNeo4jComponent {
         to_vertex: ElementId,
         _options: Option<PathOptions>,
     ) -> Result<Option<Path>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx: &Transaction = transaction.get();
         tx.find_shortest_path(from_vertex, to_vertex, _options)
     }
@@ -344,7 +337,6 @@ impl TraversalGuest for GraphNeo4jComponent {
         options: Option<PathOptions>,
         limit: Option<u32>,
     ) -> Result<Vec<Path>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx: &Transaction = transaction.get();
         tx.find_all_paths(from_vertex, to_vertex, options, limit)
     }
@@ -354,7 +346,6 @@ impl TraversalGuest for GraphNeo4jComponent {
         center: ElementId,
         options: NeighborhoodOptions,
     ) -> Result<Subgraph, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx: &Transaction = transaction.get();
         tx.get_neighborhood(center, options)
     }
@@ -365,7 +356,6 @@ impl TraversalGuest for GraphNeo4jComponent {
         to_vertex: ElementId,
         options: Option<PathOptions>,
     ) -> Result<bool, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx: &Transaction = transaction.get();
         tx.path_exists(from_vertex, to_vertex, options)
     }
@@ -377,7 +367,6 @@ impl TraversalGuest for GraphNeo4jComponent {
         direction: Direction,
         edge_types: Option<Vec<String>>,
     ) -> Result<Vec<Vertex>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx: &Transaction = transaction.get();
         tx.get_vertices_at_distance(source, distance, direction, edge_types)
     }

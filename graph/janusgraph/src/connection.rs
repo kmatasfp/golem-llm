@@ -6,7 +6,6 @@ use golem_graph::{
         errors::GraphError,
         transactions::Transaction as TransactionResource,
     },
-    LOGGING_STATE,
 };
 
 impl ProviderGraph for Graph {
@@ -15,31 +14,26 @@ impl ProviderGraph for Graph {
 
 impl GuestGraph for Graph {
     fn begin_transaction(&self) -> Result<TransactionResource, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         self.api.execute("g.tx().open()", None)?;
         let transaction = Transaction::new(self.api.clone());
         Ok(TransactionResource::new(transaction))
     }
 
     fn begin_read_transaction(&self) -> Result<TransactionResource, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         self.begin_transaction()
     }
 
     fn ping(&self) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         self.api.execute("1+1", None)?;
         Ok(())
     }
 
     fn close(&self) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         // The underlying HTTP client doesn't need explicit closing for this implementation.
         Ok(())
     }
 
     fn get_statistics(&self) -> Result<GraphStatistics, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let vertex_count_res = self.api.execute("g.V().count()", None)?;
         let edge_count_res = self.api.execute("g.E().count()", None)?;
 

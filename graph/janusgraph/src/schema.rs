@@ -8,7 +8,6 @@ use golem_graph::golem::graph::{
         VertexLabelSchema,
     },
 };
-use golem_graph::LOGGING_STATE;
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -27,7 +26,6 @@ impl SchemaGuest for GraphJanusGraphComponent {
 
 impl GuestSchemaManager for SchemaManager {
     fn define_vertex_label(&self, schema: VertexLabelSchema) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut script = String::new();
 
         for prop in &schema.properties {
@@ -48,7 +46,6 @@ impl GuestSchemaManager for SchemaManager {
     }
 
     fn define_edge_label(&self, schema: EdgeLabelSchema) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut script = String::new();
 
         for prop in &schema.properties {
@@ -72,7 +69,6 @@ impl GuestSchemaManager for SchemaManager {
         &self,
         label: String,
     ) -> Result<Option<VertexLabelSchema>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let script = "mgmt.getVertexLabels().collect{ it.name() }";
         let result = self.execute_management_query(script)?;
 
@@ -92,7 +88,6 @@ impl GuestSchemaManager for SchemaManager {
 
     fn get_edge_label_schema(&self, label: String) -> Result<Option<EdgeLabelSchema>, GraphError> {
         // JanusGraph doesn't have getEdgeLabels() method, so we need to check directly
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let script = format!("mgmt.getEdgeLabel('{label}') != null");
         let result = self.execute_management_query(&script)?;
 
@@ -127,14 +122,12 @@ impl GuestSchemaManager for SchemaManager {
     }
 
     fn list_vertex_labels(&self) -> Result<Vec<String>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let script = "mgmt.getVertexLabels().collect{ it.name() }";
         let result = self.execute_management_query(script)?;
         self.parse_string_list_from_result(result)
     }
 
     fn list_edge_labels(&self) -> Result<Vec<String>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         // JanusGraph doesn't have getEdgeLabels() method, so return empty list or use alternative approach
         // For now, we'll return an error indicating this is not supported
         Err(GraphError::UnsupportedOperation(
@@ -143,7 +136,6 @@ impl GuestSchemaManager for SchemaManager {
     }
 
     fn create_index(&self, index: IndexDefinition) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut script_parts = Vec::new();
 
         for prop_name in &index.properties {
@@ -185,7 +177,6 @@ impl GuestSchemaManager for SchemaManager {
     }
 
     fn drop_index(&self, name: String) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let _ = name;
         Err(GraphError::UnsupportedOperation(
             "Dropping an index is not supported in this version.".to_string(),
@@ -193,7 +184,6 @@ impl GuestSchemaManager for SchemaManager {
     }
 
     fn list_indexes(&self) -> Result<Vec<IndexDefinition>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let script = "
             def results = [];
             mgmt.getGraphIndexes(Vertex.class).each { index ->
@@ -224,13 +214,11 @@ impl GuestSchemaManager for SchemaManager {
     }
 
     fn get_index(&self, name: String) -> Result<Option<IndexDefinition>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let indexes = self.list_indexes()?;
         Ok(indexes.into_iter().find(|i| i.name == name))
     }
 
     fn define_edge_type(&self, definition: EdgeTypeDefinition) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut script_parts = Vec::new();
         for from_label in &definition.from_collections {
             for to_label in &definition.to_collections {
@@ -253,7 +241,6 @@ impl GuestSchemaManager for SchemaManager {
     }
 
     fn list_edge_types(&self) -> Result<Vec<EdgeTypeDefinition>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         Err(GraphError::UnsupportedOperation(
             "Schema management is not supported in this version.".to_string(),
         ))
@@ -264,14 +251,12 @@ impl GuestSchemaManager for SchemaManager {
         _name: String,
         _container_type: golem_graph::golem::graph::schema::ContainerType,
     ) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         Err(GraphError::UnsupportedOperation(
             "Schema management is not supported in this version.".to_string(),
         ))
     }
 
     fn list_containers(&self) -> Result<Vec<ContainerInfo>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         Err(GraphError::UnsupportedOperation(
             "Schema management is not supported in this version.".to_string(),
         ))
@@ -280,7 +265,6 @@ impl GuestSchemaManager for SchemaManager {
 
 impl SchemaManager {
     fn execute_management_query(&self, script: &str) -> Result<Value, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let full_script = format!(
             "
             try {{
@@ -355,7 +339,6 @@ impl SchemaManager {
         &self,
         result: Value,
     ) -> Result<Vec<IndexDefinition>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut indexes = Vec::new();
 
         let items = if let Some(graphson_obj) = result.as_object() {
@@ -447,7 +430,6 @@ impl SchemaManager {
     fn map_wit_type_to_janus_class(
         prop_type: &golem_graph::golem::graph::schema::PropertyType,
     ) -> &'static str {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         use golem_graph::golem::graph::schema::PropertyType;
         match prop_type {
             PropertyType::StringType => "String.class",

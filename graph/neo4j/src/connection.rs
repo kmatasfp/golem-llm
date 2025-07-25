@@ -1,5 +1,4 @@
 use crate::{Graph, Transaction};
-use golem_graph::LOGGING_STATE;
 use golem_graph::{
     durability::ProviderGraph,
     golem::graph::{
@@ -15,32 +14,27 @@ impl ProviderGraph for Graph {
 
 impl GuestGraph for Graph {
     fn begin_transaction(&self) -> Result<TransactionResource, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let transaction_url = self.api.begin_transaction()?;
         let transaction = Transaction::new(self.api.clone(), transaction_url);
         Ok(TransactionResource::new(transaction))
     }
 
     fn begin_read_transaction(&self) -> Result<TransactionResource, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let transaction_url = self.api.begin_transaction()?;
         let transaction = Transaction::new(self.api.clone(), transaction_url);
         Ok(TransactionResource::new(transaction))
     }
 
     fn ping(&self) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let transaction_url = self.api.begin_transaction()?;
         self.api.rollback_transaction(&transaction_url)
     }
 
     fn close(&self) -> Result<(), GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         Ok(())
     }
 
     fn get_statistics(&self) -> Result<GraphStatistics, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let transaction_url = self.api.begin_transaction()?;
 
         // Query for node count

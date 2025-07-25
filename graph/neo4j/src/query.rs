@@ -4,7 +4,6 @@ use golem_graph::golem::graph::{
     errors::GraphError,
     query::{Guest as QueryGuest, QueryExecutionResult, QueryOptions, QueryParameters},
 };
-use golem_graph::LOGGING_STATE;
 use serde_json::{json, Map};
 
 impl Transaction {
@@ -14,7 +13,6 @@ impl Transaction {
         parameters: Option<QueryParameters>,
         _options: Option<QueryOptions>,
     ) -> Result<QueryExecutionResult, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let mut params = Map::new();
         if let Some(p) = parameters {
             for (key, value) in p {
@@ -102,7 +100,6 @@ impl Transaction {
         &self,
         query: &str,
     ) -> Result<Vec<String>, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let statement = json!({ "statement": query, "parameters": {} });
         let statements = json!({ "statements": [statement] });
         let response = self
@@ -144,7 +141,6 @@ impl QueryGuest for GraphNeo4jComponent {
         parameters: Option<QueryParameters>,
         options: Option<QueryOptions>,
     ) -> Result<QueryExecutionResult, GraphError> {
-        LOGGING_STATE.with_borrow_mut(|state| state.init());
         let tx: &Transaction = transaction.get();
         tx.execute_query(query, parameters, options)
     }
