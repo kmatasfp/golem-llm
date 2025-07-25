@@ -1,4 +1,7 @@
-use golem_stt::{http::HttpClient, transcription::SttProviderClient};
+use golem_stt::{
+    http::{HttpClient, MultipartBuilder},
+    transcription::SttProviderClient,
+};
 use log::trace;
 use serde::{Deserialize, Serialize};
 
@@ -84,8 +87,13 @@ pub fn get_supported_languages() -> &'static [Language] {
 pub enum AudioFormat {
     wav,
     mp3,
+    mp4,
+    mpeg,
+    mpga,
+    m4a,
     flac,
     ogg,
+    webm,
 }
 
 impl core::fmt::Display for AudioFormat {
@@ -93,8 +101,13 @@ impl core::fmt::Display for AudioFormat {
         let string_representation = match self {
             AudioFormat::wav => "wav",
             AudioFormat::mp3 => "mp3",
+            AudioFormat::mp4 => "mp4",
+            AudioFormat::mpeg => "mpeg",
+            AudioFormat::mpga => "mpga",
+            AudioFormat::m4a => "m4a",
             AudioFormat::flac => "flac",
             AudioFormat::ogg => "ogg",
+            AudioFormat::webm => "webm",
         };
         write!(fmt, "{string_representation}")
     }
@@ -132,6 +145,7 @@ impl std::fmt::Debug for TranscriptionRequest {
 /// The OpenAI API client for transcribing audio into the input language powered by their open source Whisper V2 model
 ///
 /// https://platform.openai.com/docs/api-reference/audio/createTranscription
+#[derive(Debug)]
 pub struct TranscriptionsApi<HC: HttpClient> {
     openai_api_token: String,
     http_client: HC,
@@ -159,7 +173,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
         let request_id = request.request_id;
 
         let file_name = format!("audio.{}", request.audio_config.format);
-        let mime_type = format!("audio/{}", request.audio_config.format);
+        let mime_type = get_mime_type(&request.audio_config.format);
 
         let audio_size_bytes = request.audio.len();
 
@@ -337,52 +351,17 @@ pub struct ErrorBody {
     pub code: Option<String>,
 }
 
-pub struct MultipartBuilder {
-    boundary: String,
-    parts: Vec<Vec<u8>>,
-}
-
-impl MultipartBuilder {
-    pub fn new() -> Self {
-        Self {
-            boundary: format!("----formdata-{}", uuid::Uuid::new_v4()),
-            parts: Vec::new(),
-        }
-    }
-
-    pub fn add_bytes(&mut self, name: &str, filename: &str, content_type: &str, data: Vec<u8>) {
-        self.parts.push(format!(
-                   "--{}\r\nContent-Disposition: form-data; name=\"{}\"; filename=\"{}\"\r\nContent-Type: {}\r\n\r\n",
-                   self.boundary, name, filename, content_type
-               ).into_bytes());
-        self.parts.push(data);
-        self.parts.push(b"\r\n".to_vec());
-    }
-
-    pub fn add_field(&mut self, name: &str, value: &str) {
-        self.parts.push(
-            format!(
-                "--{}\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\n{}\r\n",
-                self.boundary, name, value
-            )
-            .into_bytes(),
-        );
-    }
-
-    pub fn finish(mut self) -> (String, Vec<u8>) {
-        // Add end boundary
-        self.parts
-            .push(format!("--{}--\r\n", self.boundary).into_bytes());
-        // Calculate total size and build final buffer
-        let total_size: usize = self.parts.iter().map(|b| b.len()).sum();
-        let mut final_buffer = Vec::with_capacity(total_size);
-
-        for part in self.parts {
-            final_buffer.extend(part);
-        }
-
-        let content_type = format!("multipart/form-data; boundary={}", self.boundary);
-        (content_type, final_buffer)
+fn get_mime_type(format: &AudioFormat) -> String {
+    match format {
+        AudioFormat::wav => "audio/wav".to_string(),
+        AudioFormat::mp3 => "audio/mpeg".to_string(),
+        AudioFormat::flac => "audio/flac".to_string(),
+        AudioFormat::ogg => "audio/ogg".to_string(),
+        AudioFormat::mp4 => "video/mp4".to_string(),
+        AudioFormat::mpeg => "audio/mpeg".to_string(),
+        AudioFormat::mpga => "audio/mpeg".to_string(),
+        AudioFormat::m4a => "audio/mp4".to_string(),
+        AudioFormat::webm => "video/webm".to_string(),
     }
 }
 
