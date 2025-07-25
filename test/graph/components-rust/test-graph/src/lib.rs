@@ -57,6 +57,52 @@ fn get_test_host() -> String {
     std::env::var("GRAPH_TEST_HOST").unwrap_or_else(|_| DEFAULT_TEST_HOST.to_string())
 }
 
+// Helper function to ensure required collections exist for ArangoDB tests
+#[cfg(feature = "arangodb")]
+fn ensure_arangodb_collections(graph_connection: &crate::bindings::golem::graph::connection::Graph) -> Result<(), String> {
+    use crate::bindings::golem::graph::schema::{self, ContainerType};
+    
+    println!("Setting up ArangoDB collections for testing...");
+    
+    let schema_manager = match schema::get_schema_manager() {
+        Ok(manager) => manager,
+        Err(error) => return Err(format!("Failed to get schema manager: {:?}", error)),
+    };
+
+    let required_collections = vec![
+        ("Person", ContainerType::VertexContainer),
+        ("TempUser", ContainerType::VertexContainer),
+        ("Company", ContainerType::VertexContainer),
+        ("Employee", ContainerType::VertexContainer),
+        ("Node", ContainerType::VertexContainer),
+        ("Product", ContainerType::VertexContainer),
+        ("User", ContainerType::VertexContainer),
+        ("KNOWS", ContainerType::EdgeContainer),
+        ("WORKS_FOR", ContainerType::EdgeContainer),
+        ("CONNECTS", ContainerType::EdgeContainer),
+        ("FOLLOWS", ContainerType::EdgeContainer),
+    ];
+
+    for (name, container_type) in required_collections {
+        match schema_manager.ensure_container_exists(name, container_type) {
+            Ok(_) => println!("Collection '{}' ensured", name),
+            Err(error) => {
+                println!("Warning: Could not ensure collection '{}': {:?}", name, error);
+                // Continue with other collections even if one fails
+            }
+        }
+    }
+
+    println!("ArangoDB collection setup completed");
+    Ok(())
+}
+
+// Helper function for non-ArangoDB providers (no-op)
+#[cfg(not(feature = "arangodb"))]
+fn ensure_arangodb_collections(_graph_connection: &crate::bindings::golem::graph::connection::Graph) -> Result<(), String> {
+    Ok(())
+}
+
 impl Guest for Component {
     /// test1 demonstrates basic vertex creation and retrieval operations
     fn test1() -> String {
@@ -80,6 +126,9 @@ impl Guest for Component {
                 return format!("Connection failed please ensure you are connected: {:?}", error);
             }
         };
+        if let Err(error) = ensure_arangodb_collections(&graph_connection) {
+            println!("Warning: Collection setup failed: {}", error);
+        }
 
         println!("Beginning transaction...");
         let transaction = match graph_connection.begin_transaction() {
@@ -153,13 +202,17 @@ impl Guest for Component {
             Ok(conn) => conn,
             Err(error) => {
                 let error_msg = format!("{:?}", error);
-                if error_msg.contains("operation not supported on this platform") || 
+                if error_msg.contains("operation not supported on this platform") ||
                    error_msg.contains("Connect error") {
                     return format!("SKIPPED: Localhost connections not supported in WASI environment. Error: {}", error_msg);
                 }
                 return format!("Connection failed: {:?}", error);
             }
         };
+
+        if let Err(error) = ensure_arangodb_collections(&graph_connection) {
+            println!("Warning: Collection setup failed: {}", error);
+        } 
 
         let transaction = match graph_connection.begin_transaction() {
             Ok(tx) => tx,
@@ -308,6 +361,10 @@ impl Guest for Component {
             }
         };
 
+        if let Err(error) = ensure_arangodb_collections(&graph_connection) {
+            println!("Warning: Collection setup failed: {}", error);
+        }
+
         let transaction = match graph_connection.begin_transaction() {
             Ok(tx) => tx,
             Err(error) => {
@@ -380,6 +437,10 @@ impl Guest for Component {
                 return format!("Connection failed: {:?}", error);
             }
         };
+
+        if let Err(error) = ensure_arangodb_collections(&graph_connection) {
+            println!("Warning: Collection setup failed: {}", error);
+        }
 
         let transaction = match graph_connection.begin_transaction() {
             Ok(tx) => tx,
@@ -514,6 +575,10 @@ impl Guest for Component {
             Err(error) => return format!("Connection failed: {:?}", error),
         };
 
+        if let Err(error) = ensure_arangodb_collections(&graph_connection) {
+            println!("Warning: Collection setup failed: {}", error);
+        }
+
         let transaction = match graph_connection.begin_transaction() {
             Ok(tx) => tx,
             Err(error) => return format!("Transaction creation failed: {:?}", error),
@@ -634,6 +699,9 @@ impl Guest for Component {
             Ok(conn) => conn,
             Err(error) => return format!("Connection failed: {:?}", error),
         };
+        if let Err(error) = ensure_arangodb_collections(&graph_connection) {
+            println!("Warning: Collection setup failed: {}", error);
+        }
 
         let transaction = match graph_connection.begin_transaction() {
             Ok(tx) => tx,
@@ -737,6 +805,11 @@ impl Guest for Component {
                 return format!("Schema manager creation failed: {}", error_msg);
             }
         };
+
+        // Ensure required collections exist for ArangoDB
+        if let Err(error) = ensure_arangodb_collections(&graph_connection) {
+            println!("Warning: Collection setup failed: {}", error);
+        }
 
         // Try to list existing schema elements to verify the schema manager works
         let mut vertex_count = 0;
