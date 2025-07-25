@@ -65,7 +65,7 @@ fn ensure_arangodb_collections(graph_connection: &crate::bindings::golem::graph:
     
     println!("Setting up ArangoDB collections for testing...");
     
-    let schema_manager = match schema::get_schema_manager() {
+    let schema_manager = match schema::get_schema_manager(None) {
         Ok(manager) => manager,
         Err(error) => return Err(format!("Failed to get schema manager: {:?}", error)),
     };
@@ -814,7 +814,7 @@ impl Guest for Component {
         println!("Starting test7: Schema operations with {}", PROVIDER);
         
         // Test schema manager creation
-        let schema_manager = match schema::get_schema_manager() {
+        let schema_manager = match schema::get_schema_manager(None) {
             Ok(manager) => manager,
             Err(error) => {
                 // If schema manager creation fails, check if it's a connection issue
