@@ -8,6 +8,7 @@ mod transaction;
 mod traversal;
 
 use client::Neo4jApi;
+use golem_graph::config::with_config_key;
 use golem_graph::durability::{DurableGraph, ExtendedGuest};
 use golem_graph::golem::graph::{
     connection::ConnectionConfig, errors::GraphError, transactions::Guest as TransactionGuest,
@@ -32,21 +33,24 @@ pub struct SchemaManager {
 impl ExtendedGuest for GraphNeo4jComponent {
     type Graph = Graph;
     fn connect_internal(config: &ConnectionConfig) -> Result<Graph, GraphError> {
-        let host = config
-            .hosts
-            .first()
+        let host = with_config_key(config, "NEO4J_HOST")
+            .or_else(|| config.hosts.first().cloned())
             .ok_or_else(|| GraphError::ConnectionFailed("Missing host".to_string()))?;
-        let port = config.port.unwrap_or(7687);
-        let username = config
-            .username
-            .as_deref()
+        
+        let port = with_config_key(config, "NEO4J_PORT")
+            .and_then(|p| p.parse().ok())
+            .or(config.port)
+            .unwrap_or(7687);
+        
+        let username = with_config_key(config, "NEO4J_USER")
+            .or_else(|| config.username.clone())
             .ok_or_else(|| GraphError::ConnectionFailed("Missing username".to_string()))?;
-        let password = config
-            .password
-            .as_deref()
+        
+        let password = with_config_key(config, "NEO4J_PASSWORD")
+            .or_else(|| config.password.clone())
             .ok_or_else(|| GraphError::ConnectionFailed("Missing password".to_string()))?;
 
-        let api = Neo4jApi::new(host, port, "neo4j", username, password);
+        let api = Neo4jApi::new(&host, port, "neo4j", &username, &password);
         Ok(Graph::new(api))
     }
 }

@@ -9,6 +9,7 @@ mod transaction;
 mod traversal;
 
 use client::JanusGraphApi;
+use golem_graph::config::with_config_key;
 use golem_graph::durability::{DurableGraph, ExtendedGuest};
 use golem_graph::golem::graph::{
     connection::ConnectionConfig, errors::GraphError, transactions::Guest as TransactionGuest,
@@ -32,15 +33,22 @@ pub struct SchemaManager {
 impl ExtendedGuest for GraphJanusGraphComponent {
     type Graph = Graph;
     fn connect_internal(config: &ConnectionConfig) -> Result<Graph, GraphError> {
-        let host = config
-            .hosts
-            .first()
+        let host = with_config_key(config, "JANUSGRAPH_HOST")
+            .or_else(|| config.hosts.first().cloned())
             .ok_or_else(|| GraphError::ConnectionFailed("Missing host".to_string()))?;
-        let port = config.port.unwrap_or(8182); // Default Gremlin Server port
-        let username = config.username.as_deref();
-        let password = config.password.as_deref();
+            
+        let port = with_config_key(config, "JANUSGRAPH_PORT")
+            .and_then(|p| p.parse().ok())
+            .or(config.port)
+            .unwrap_or(8182); // Default Gremlin Server port
+            
+        let username = with_config_key(config, "JANUSGRAPH_USER")
+            .or_else(|| config.username.clone());
+            
+        let password = with_config_key(config, "JANUSGRAPH_PASSWORD")
+            .or_else(|| config.password.clone());
 
-        let api = JanusGraphApi::new(host, port, username, password)?;
+        let api = JanusGraphApi::new(&host, port, username.as_deref(), password.as_deref())?;
         api.execute("g.tx().open()", None)?;
         Ok(Graph::new(api))
     }
