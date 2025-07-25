@@ -542,8 +542,8 @@ impl Guest for Component {
         };
 
         // Create edges
-        let _ = transaction.create_edge("CONNECTS", &vertex_a.id.clone(), &vertex_b.id.clone(), &[]);
-        let _ = transaction.create_edge("CONNECTS", &vertex_b.id.clone(), &vertex_c.id.clone(), &[]);
+        let _ = transaction.create_edge("CONNECTS", &vertex_a.id.clone(), &vertex_b.id.clone(), &vec![]);
+        let _ = transaction.create_edge("CONNECTS", &vertex_b.id.clone(), &vertex_c.id.clone(), &vec![]);
 
         // Test neighborhood exploration
         let neighborhood = match traversal::get_neighborhood(
