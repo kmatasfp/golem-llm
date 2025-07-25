@@ -154,12 +154,6 @@ impl Guest for Component {
         let transaction = match graph_connection.begin_transaction() {
             Ok(tx) => tx,
             Err(error) => {
-                let error_msg = format!("{:?}", error);
-                if error_msg.contains("operation not supported on this platform") || 
-                   error_msg.contains("Connect error") ||
-                   error_msg.contains("error sending request") {
-                    return format!("SKIPPED: Localhost connections not supported in WASI environment ensure support . Error: {} provider : {}", error_msg, PROVIDER);
-                }
                 return format!("Transaction creation failed: {:?}", error);
             }
         };
@@ -221,11 +215,6 @@ impl Guest for Component {
         let graph_connection = match connect(&config) {
             Ok(conn) => conn,
             Err(error) => {
-                let error_msg = format!("{:?}", error);
-                if error_msg.contains("operation not supported on this platform") ||
-                   error_msg.contains("Connect error") {
-                    return format!("SKIPPED: Localhost connections not supported in WASI environment. Error: {}", error_msg);
-                }
                 return format!("Connection failed: {:?}", error);
             }
         };
@@ -237,11 +226,6 @@ impl Guest for Component {
         let transaction = match graph_connection.begin_transaction() {
             Ok(tx) => tx,
             Err(error) => {
-                let error_msg = format!("{:?}", error);
-                if error_msg.contains("operation not supported on this platform") || 
-                   error_msg.contains("Connect error") {
-                    return format!("SKIPPED: Localhost connections not supported in WASI environment. Error: {}", error_msg);
-                }
                 return format!("Transaction creation failed: {:?}", error);
             }
         };
@@ -371,12 +355,6 @@ impl Guest for Component {
         let graph_connection = match connect(&config) {
             Ok(conn) => conn,
             Err(error) => {
-                let error_msg = format!("{:?}", error);
-                if error_msg.contains("operation not supported on this platform") || 
-                   error_msg.contains("Connect error") ||
-                   error_msg.contains("error sending request") {
-                    return format!("SKIPPED: Localhost connections not supported in WASI environment. Error: {}", error_msg);
-                }
                 return format!("Connection failed: {:?}", error);
             }
         };
@@ -388,12 +366,6 @@ impl Guest for Component {
         let transaction = match graph_connection.begin_transaction() {
             Ok(tx) => tx,
             Err(error) => {
-                let error_msg = format!("{:?}", error);
-                if error_msg.contains("operation not supported on this platform") || 
-                   error_msg.contains("Connect error") ||
-                   error_msg.contains("error sending request") {
-                    return format!("SKIPPED: Localhost connections not supported in WASI environment. Error: {}", error_msg);
-                }
                 return format!("Transaction creation failed: {:?}", error);
             }
         };
@@ -448,12 +420,6 @@ impl Guest for Component {
         let graph_connection = match connect(&config) {
             Ok(conn) => conn,
             Err(error) => {
-                let error_msg = format!("{:?}", error);
-                if error_msg.contains("operation not supported on this platform") || 
-                   error_msg.contains("Connect error") ||
-                   error_msg.contains("error sending request") {
-                    return format!("SKIPPED: Localhost connections not supported in WASI environment. Error: {}", error_msg);
-                }
                 return format!("Connection failed: {:?}", error);
             }
         };
@@ -465,12 +431,6 @@ impl Guest for Component {
         let transaction = match graph_connection.begin_transaction() {
             Ok(tx) => tx,
             Err(error) => {
-                let error_msg = format!("{:?}", error);
-                if error_msg.contains("operation not supported on this platform") || 
-                   error_msg.contains("Connect error") ||
-                   error_msg.contains("error sending request") {
-                    return format!("SKIPPED: Localhost connections not supported in WASI environment. Error: {}", error_msg);
-                }
                 return format!("Transaction creation failed: {:?}", error);
             }
         };
