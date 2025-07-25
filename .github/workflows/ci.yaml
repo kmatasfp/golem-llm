@@ -182,7 +182,7 @@ jobs:
           
           # ArangoDB
           echo "Starting ArangoDB..."
-          docker run -d --name arangodb -e ARANGO_NO_AUTH=1 -p 8529:8529 -v arangodb_data:/var/lib/arangodb3 -v arangodb_apps:/var/lib/arangodb3-apps arangodb/arangodb:latest
+          docker run -d --name arangodb -e ARANGO_NO_AUTH=1 -p 8529:8529 -v arangodb_data:/var/lib/arangodb3 -v arangodb_apps:/var/lib/arangodb3-apps arangodb
           timeout 60 bash -c 'until curl -f http://localhost:8529/_api/version; do sleep 2; done'
           echo "ArangoDB is ready"
           
