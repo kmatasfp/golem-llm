@@ -182,8 +182,12 @@ jobs:
           
           # ArangoDB
           echo "Starting ArangoDB..."
-          docker run -d --name arangodb -e ARANGO_NO_AUTH=1 -p 8529:8529 -v arangodb_data:/var/lib/arangodb3 -v arangodb_apps:/var/lib/arangodb3-apps arangodb
+          docker run -d --name arangodb -e ARANGO_NO_AUTH=1 -p 8529:8529 -v arangodb_data:/var/lib/arangodb3 -v arangodb_apps:/var/lib/arangodb3-apps arangodb/arangodb:latest
           timeout 60 bash -c 'until curl -f http://localhost:8529/_api/version; do sleep 2; done'
+          echo "Creating test database..."
+          curl -X POST http://localhost:8529/_api/database \
+            -H "Content-Type: application/json" \
+            -d '{"name": "test"}' || echo "Database might already exist"
           echo "ArangoDB is ready"
           
           # JanusGraph with Cassandra
@@ -235,7 +239,7 @@ jobs:
           
           echo "Testing ArangoDB integration..."
           golem app deploy -b arangodb-debug test:graph test:helper
-          golem worker new -e ARANGODB_HOST=localhost -e ARANGODB_USER=root -e ARANGODB_PASSWORD=test -e ARANGODB_PORT="8529" -e ARANGODB_DATABASE=_system test:graph/arangodb-1
+          golem worker new -e ARANGODB_HOST=localhost -e ARANGODB_USER="" -e ARANGODB_PASSWORD="" -e ARANGODB_PORT="8529" -e ARANGODB_DATABASE="test" test:graph/arangodb-1
           golem worker invoke test:graph/arangodb-1 test1 | grep -v "ERROR: "
           golem worker invoke test:graph/arangodb-1 test2 | grep -v "ERROR: "
           golem worker invoke test:graph/arangodb-1 test3 | grep -v "ERROR: "
