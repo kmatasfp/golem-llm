@@ -1,6 +1,7 @@
 #[allow(static_mut_refs)]
 mod bindings;
 
+use std::collections::HashSet;
 use crate::bindings::exports::test::graph_exports::test_graph_api::*;
 use crate::bindings::golem::graph::{
     connection::{self, ConnectionConfig, connect},
@@ -83,11 +84,30 @@ fn ensure_arangodb_collections(graph_connection: &crate::bindings::golem::graph:
         ("FOLLOWS", ContainerType::EdgeContainer),
     ];
 
+    // Get existing containers to avoid duplicate creation
+    let existing_containers = match schema_manager.list_containers() {
+        Ok(containers) => containers,
+        Err(error) => {
+            println!("Warning: Could not list existing containers: {:?}", error);
+            vec![] // Continue with empty list, will try to create all
+        }
+    };
+
+    let existing_names: HashSet<String> = existing_containers
+        .iter()
+        .map(|c| c.name.clone())
+        .collect();
+
     for (name, container_type) in required_collections {
-        match schema_manager.ensure_container_exists(name, container_type) {
-            Ok(_) => println!("Collection '{}' ensured", name),
+        if existing_names.contains(name) {
+            println!("Collection '{}' already exists", name);
+            continue;
+        }
+
+        match schema_manager.create_container(name, container_type) {
+            Ok(_) => println!("Collection '{}' created successfully", name),
             Err(error) => {
-                println!("Warning: Could not ensure collection '{}': {:?}", name, error);
+                println!("Warning: Could not create collection '{}': {:?}", name, error);
                 // Continue with other collections even if one fails
             }
         }
@@ -805,11 +825,6 @@ impl Guest for Component {
                 return format!("Schema manager creation failed: {}", error_msg);
             }
         };
-
-        // Ensure required collections exist for ArangoDB
-        if let Err(error) = ensure_arangodb_collections(&graph_connection) {
-            println!("Warning: Collection setup failed: {}", error);
-        }
 
         // Try to list existing schema elements to verify the schema manager works
         let mut vertex_count = 0;
