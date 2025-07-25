@@ -235,7 +235,7 @@ jobs:
           
           echo "Testing ArangoDB integration..."
           golem app deploy -b arangodb-debug test:graph test:helper
-          golem worker new -e ARANGODB_HOST=localhost -e ARANGODB_USER=root -e ARANGODB_PASSWORD=test -e ARANGODB_PORT="8529" -e ARANGODB_DATABASE="_system" test:graph/arangodb-1
+          golem worker new -e ARANGODB_HOST=localhost -e ARANGODB_USER=root -e ARANGODB_PASSWORD=test -e ARANGODB_PORT="8529" -e ARANGODB_DATABASE=_system test:graph/arangodb-1
           golem worker invoke test:graph/arangodb-1 test1 | grep -v "ERROR: "
           golem worker invoke test:graph/arangodb-1 test2 | grep -v "ERROR: "
           golem worker invoke test:graph/arangodb-1 test3 | grep -v "ERROR: "
