@@ -20,7 +20,6 @@ impl GuestGraph for Graph {
     }
 
     fn begin_read_transaction(&self) -> Result<TransactionResource, GraphError> {
-
         let transaction_id = self.api.begin_dynamic_transaction(true)?;
         let transaction = Transaction::new(self.api.clone(), transaction_id);
         Ok(TransactionResource::new(transaction))
