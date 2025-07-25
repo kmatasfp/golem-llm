@@ -1,4 +1,5 @@
 use base64::{engine::general_purpose, Engine as _};
+use chrono::{Datelike, Timelike};
 use golem_graph::golem::graph::{
     errors::GraphError,
     types::{
@@ -189,14 +190,43 @@ pub(crate) fn from_json_value(value: Value) -> Result<PropertyValue, GraphError>
                     });
             }
 
-            if let Ok(dt) = parse_iso_datetime(&s) {
-                return Ok(PropertyValue::Datetime(dt));
+            if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&s) {
+                let naive_date = dt.date_naive();
+                let naive_time = dt.time();
+                let date = Date {
+                    year: naive_date.year() as u32,
+                    month: naive_date.month() as u8,
+                    day: naive_date.day() as u8,
+                };
+                let time = Time {
+                    hour: naive_time.hour() as u8,
+                    minute: naive_time.minute() as u8,
+                    second: naive_time.second() as u8,
+                    nanosecond: naive_time.nanosecond(),
+                };
+                let timezone_offset_minutes = Some(dt.offset().local_minus_utc() as i16 / 60);
+                return Ok(PropertyValue::Datetime(Datetime {
+                    date,
+                    time,
+                    timezone_offset_minutes,
+                }));
             }
-            if let Ok(d) = parse_iso_date(&s) {
-                return Ok(PropertyValue::Date(d));
+
+            if let Ok(d) = chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d") {
+                return Ok(PropertyValue::Date(Date {
+                    year: d.year() as u32,
+                    month: d.month() as u8,
+                    day: d.day() as u8,
+                }));
             }
-            if let Ok(t) = parse_iso_time(&s) {
-                return Ok(PropertyValue::Time(t));
+
+            if let Ok(t) = chrono::NaiveTime::parse_from_str(&s, "%H:%M:%S%.f") {
+                return Ok(PropertyValue::Time(Time {
+                    hour: t.hour() as u8,
+                    minute: t.minute() as u8,
+                    second: t.second() as u8,
+                    nanosecond: t.nanosecond(),
+                }));
             }
 
             Ok(PropertyValue::StringValue(s))
@@ -294,81 +324,6 @@ pub(crate) fn from_json_value(value: Value) -> Result<PropertyValue, GraphError>
             "Unsupported property type from Neo4j".to_string(),
         )),
     }
-}
-
-fn parse_iso_date(s: &str) -> Result<Date, ()> {
-    let parts: Vec<&str> = s.split('-').collect();
-    if parts.len() != 3 {
-        return Err(());
-    }
-    let year = parts[0].parse().map_err(|_| ())?;
-    let month = parts[1].parse().map_err(|_| ())?;
-    let day = parts[2].parse().map_err(|_| ())?;
-    Ok(Date { year, month, day })
-}
-
-fn parse_iso_time(s: &str) -> Result<Time, ()> {
-    let time_part = s
-        .split_once('Z')
-        .or_else(|| s.split_once('+'))
-        .or_else(|| s.split_once('-'))
-        .map_or(s, |(tp, _)| tp);
-    let main_parts: Vec<&str> = time_part.split(':').collect();
-    if main_parts.len() != 3 {
-        return Err(());
-    }
-    let hour = main_parts[0].parse().map_err(|_| ())?;
-    let minute = main_parts[1].parse().map_err(|_| ())?;
-    let (second, nanosecond) = if main_parts[2].contains('.') {
-        let sec_parts: Vec<&str> = main_parts[2].split('.').collect();
-        let s = sec_parts[0].parse().map_err(|_| ())?;
-        let ns_str = format!("{:0<9}", sec_parts[1]);
-        let ns = ns_str[..9].parse().map_err(|_| ())?;
-        (s, ns)
-    } else {
-        (main_parts[2].parse().map_err(|_| ())?, 0)
-    };
-
-    Ok(Time {
-        hour,
-        minute,
-        second,
-        nanosecond,
-    })
-}
-
-fn parse_iso_datetime(s: &str) -> Result<Datetime, ()> {
-    let (date_str, time_str) = s.split_once('T').ok_or(())?;
-    let date = parse_iso_date(date_str)?;
-    let time = parse_iso_time(time_str)?;
-
-    let timezone_offset_minutes = if time_str.ends_with('Z') {
-        Some(0)
-    } else if let Some((_, tz)) = time_str.rsplit_once('+') {
-        let parts: Vec<&str> = tz.split(':').collect();
-        if parts.len() != 2 {
-            return Err(());
-        }
-        let hours: i16 = parts[0].parse().map_err(|_| ())?;
-        let minutes: i16 = parts[1].parse().map_err(|_| ())?;
-        Some(hours * 60 + minutes)
-    } else if let Some((_, tz)) = time_str.rsplit_once('-') {
-        let parts: Vec<&str> = tz.split(':').collect();
-        if parts.len() != 2 {
-            return Err(());
-        }
-        let hours: i16 = parts[0].parse().map_err(|_| ())?;
-        let minutes: i16 = parts[1].parse().map_err(|_| ())?;
-        Some(-(hours * 60 + minutes))
-    } else {
-        None
-    };
-
-    Ok(Datetime {
-        date,
-        time,
-        timezone_offset_minutes,
-    })
 }
 
 #[cfg(test)]

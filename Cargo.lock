@@ -888,6 +888,7 @@ name = "golem-graph-neo4j"
 version = "0.0.0"
 dependencies = [
  "base64 0.22.1",
+ "chrono",
  "golem-graph",
  "golem-rust",
  "log",
