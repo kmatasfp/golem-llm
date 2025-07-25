@@ -520,21 +520,21 @@ impl Guest for Component {
         };
 
         // Create a small network: A -> B -> C
-        let vertex_a = match transaction.create_vertex("Node", &[
+        let vertex_a = match transaction.create_vertex("Node", &vec![
             ("name".to_string(), PropertyValue::StringValue("A".to_string())),
         ]) {
             Ok(v) => v,
             Err(error) => return format!("Vertex A creation failed: {:?}", error),
         };
 
-        let vertex_b = match transaction.create_vertex("Node", &[
+        let vertex_b = match transaction.create_vertex("Node", &vec![
             ("name".to_string(), PropertyValue::StringValue("B".to_string())),
         ]) {
             Ok(v) => v,
             Err(error) => return format!("Vertex B creation failed: {:?}", error),
         };
 
-        let vertex_c = match transaction.create_vertex("Node", &[
+        let vertex_c = match transaction.create_vertex("Node", &vec![
             ("name".to_string(), PropertyValue::StringValue("C".to_string())),
         ]) {
             Ok(v) => v,
@@ -641,12 +641,12 @@ impl Guest for Component {
         };
 
         // Create some test data first
-        let _ = transaction.create_vertex("Product", &[
+        let _ = transaction.create_vertex("Product", &vec![
             ("name".to_string(), PropertyValue::StringValue("Widget".to_string())),
             ("price".to_string(), PropertyValue::Float32Value(19.99)),
         ]);
 
-        let _ = transaction.create_vertex("Product", &[
+        let _ = transaction.create_vertex("Product", &vec![
             ("name".to_string(), PropertyValue::StringValue("Gadget".to_string())),
             ("price".to_string(), PropertyValue::Float32Value(29.99)),
         ]);
