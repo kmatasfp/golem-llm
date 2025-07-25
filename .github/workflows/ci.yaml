@@ -200,8 +200,6 @@ jobs:
             -e gremlinserver.channelizer=org.apache.tinkerpop.gremlin.server.channel.WsAndHttpChannelizer \
             -e GREMLIN_OPTS="-Dtx.max-commit-time=60000 -Dstorage.cassandra.read-consistency-level=ONE -Dstorage.cassandra.write-consistency-level=ONE" \
             -p 8182:8182 janusgraph/janusgraph:latest
-          echo "Waiting for JanusGraph to be ready..."
-          timeout 120 bash -c 'until curl -f http://localhost:8182/ 2>/dev/null | grep -q "gremlin"; do sleep 5; done'
           echo "JanusGraph is ready"
           
           # Setup Neo4j
