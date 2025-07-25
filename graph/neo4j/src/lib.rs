@@ -36,16 +36,16 @@ impl ExtendedGuest for GraphNeo4jComponent {
         let host = with_config_key(config, "NEO4J_HOST")
             .or_else(|| config.hosts.first().cloned())
             .ok_or_else(|| GraphError::ConnectionFailed("Missing host".to_string()))?;
-        
+
         let port = with_config_key(config, "NEO4J_PORT")
             .and_then(|p| p.parse().ok())
             .or(config.port)
             .unwrap_or(7687);
-        
+
         let username = with_config_key(config, "NEO4J_USER")
             .or_else(|| config.username.clone())
             .ok_or_else(|| GraphError::ConnectionFailed("Missing username".to_string()))?;
-        
+
         let password = with_config_key(config, "NEO4J_PASSWORD")
             .or_else(|| config.password.clone())
             .ok_or_else(|| GraphError::ConnectionFailed("Missing password".to_string()))?;

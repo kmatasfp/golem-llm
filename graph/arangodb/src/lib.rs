@@ -48,7 +48,7 @@ impl ExtendedGuest for GraphArangoDbComponent {
             .or_else(|| with_config_key(config, "ARANGODB_USER"))
             .or_else(|| config.username.clone())
             .ok_or_else(|| GraphError::ConnectionFailed("Missing username".to_string()))?;
-            
+
         let password = with_config_key(config, "ARANGO_PASSWORD")
             .or_else(|| with_config_key(config, "ARANGODB_PASSWORD"))
             .or_else(|| config.password.clone())

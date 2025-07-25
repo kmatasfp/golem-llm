@@ -36,17 +36,17 @@ impl ExtendedGuest for GraphJanusGraphComponent {
         let host = with_config_key(config, "JANUSGRAPH_HOST")
             .or_else(|| config.hosts.first().cloned())
             .ok_or_else(|| GraphError::ConnectionFailed("Missing host".to_string()))?;
-            
+
         let port = with_config_key(config, "JANUSGRAPH_PORT")
             .and_then(|p| p.parse().ok())
             .or(config.port)
             .unwrap_or(8182); // Default Gremlin Server port
-            
-        let username = with_config_key(config, "JANUSGRAPH_USER")
-            .or_else(|| config.username.clone());
-            
-        let password = with_config_key(config, "JANUSGRAPH_PASSWORD")
-            .or_else(|| config.password.clone());
+
+        let username =
+            with_config_key(config, "JANUSGRAPH_USER").or_else(|| config.username.clone());
+
+        let password =
+            with_config_key(config, "JANUSGRAPH_PASSWORD").or_else(|| config.password.clone());
 
         let api = JanusGraphApi::new(&host, port, username.as_deref(), password.as_deref())?;
         api.execute("g.tx().open()", None)?;
