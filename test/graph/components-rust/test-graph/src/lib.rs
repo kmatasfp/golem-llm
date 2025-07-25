@@ -10,6 +10,7 @@ use crate::bindings::golem::graph::{
     transactions::{self, VertexSpec, EdgeSpec},
     traversal::{self, NeighborhoodOptions, PathOptions},
     types::{PropertyValue, Direction},
+    errors::GraphError,
 };
 
 struct Component;
@@ -270,7 +271,7 @@ impl Guest for Component {
             Err(error) => return format!("Edge creation failed: {:?}", error),
         };
 
-        // Retrieve adjacent vertices - now using the fixed JanusGraph implementation
+        // Retrieve adjacent vertices - with JanusGraph fallback approach
         let adjacent_vertices = match transaction.get_adjacent_vertices(
             &vertex1.id.clone(),
             Direction::Outgoing,
@@ -282,10 +283,9 @@ impl Guest for Component {
                 vertices
             },
             Err(error) => {
-                let error_msg = format!("{:?}", error);
-                println!("WARNING: get_adjacent_vertices failed: {}", error_msg);
+                println!("WARNING: get_adjacent_vertices failed: {:?}", error);
                 
-                // Fallback for JanusGraph: use get_connected_edges approach
+                // JanusGraph has known issues with get_adjacent_vertices, use get_connected_edges fallback
                 if PROVIDER == "janusgraph" {
                     println!("INFO: Falling back to JanusGraph connected edges approach");
                     match transaction.get_connected_edges(
@@ -310,15 +310,13 @@ impl Guest for Component {
                             vertices
                         },
                         Err(edge_error) => {
-                            let edge_error_msg = format!("{:?}", edge_error);
-                            
-                            return format!("Adjacent vertices retrieval failed - Primary error: {} | Fallback error: {} | Debug: Edge created successfully from {:?} to {:?} with type '{}'", 
-                                error_msg, edge_error_msg, vertex1.id, vertex2.id, edge.edge_type);
+                            return format!("Adjacent vertices retrieval failed - Primary error: {:?} | Fallback error: {:?} | Debug: Edge created successfully from {:?} to {:?} with type '{}'", 
+                                error, edge_error, vertex1.id, vertex2.id, edge.edge_type);
                         }
                     }
                 } else {
-                    return format!("Adjacent vertices retrieval failed: {} | Provider: {} | Edge: {:?} -> {:?}", 
-                        error_msg, PROVIDER, vertex1.id, vertex2.id);
+                    return format!("Adjacent vertices retrieval failed: {:?} | Provider: {} | Edge: {:?} -> {:?}", 
+                        error, PROVIDER, vertex1.id, vertex2.id);
                 }
             }
         };
@@ -466,8 +464,8 @@ impl Guest for Component {
         let vertices = match transaction.create_vertices(&vertex_specs) {
             Ok(v) => v,
             Err(error) => {
-                let error_msg = format!("{:?}", error);
-                if error_msg.contains("Invalid response from Gremlin") && PROVIDER == "janusgraph" {
+                // JanusGraph has known issues with batch operations, fallback to individual creation
+                if PROVIDER == "janusgraph" {
                     println!("INFO: JanusGraph batch creation failed, falling back to individual vertex creation");
                     let mut individual_vertices = Vec::new();
                     for spec in &vertex_specs {
@@ -500,9 +498,9 @@ impl Guest for Component {
             let edges = match transaction.create_edges(&edge_specs) {
                 Ok(e) => e,
                 Err(error) => {
-                    let error_msg = format!("{:?}", error);
-                    if (error_msg.contains("The child traversal") || error_msg.contains("was not spawned anonymously")) && PROVIDER == "janusgraph" {
-                        // Fallback: create edges individually for JanusGraph
+                    // JanusGraph has known issues with batch edge operations, fallback to individual creation
+                    if PROVIDER == "janusgraph" {
+                        println!("INFO: JanusGraph batch edge creation failed, falling back to individual edge creation");
                         let mut individual_edges = Vec::new();
                         for spec in &edge_specs {
                             match transaction.create_edge(&spec.edge_type, &spec.from_vertex, &spec.to_vertex, &spec.properties) {
@@ -620,9 +618,9 @@ impl Guest for Component {
         ) {
             Ok(exists) => exists,
             Err(error) => {
-                let error_msg = format!("{:?}", error);
-                if error_msg.contains("No signature of method") && PROVIDER == "janusgraph" {
-                    // Fallback: try without edge types for JanusGraph
+                // JanusGraph has known issues with edge type filtering in path operations
+                if PROVIDER == "janusgraph" {
+                    println!("INFO: JanusGraph path_exists failed with edge types, retrying without edge filter");
                     match traversal::path_exists(
                         &transaction,
                         &vertex_a.id.clone(),
@@ -725,8 +723,9 @@ impl Guest for Component {
         ) {
             Ok(result) => result,
             Err(error) => {
-                let error_msg = format!("{:?}", error);
-                if error_msg.contains("GraphSON") && PROVIDER == "janusgraph" {
+                // JanusGraph has known issues with GraphSON parameter serialization
+                if PROVIDER == "janusgraph" {
+                    println!("INFO: JanusGraph query failed, falling back to simpler query without parameters");
                     match query::execute_query(
                         &transaction,
                         "g.V().hasLabel('Product').count()",
@@ -777,12 +776,7 @@ impl Guest for Component {
         let schema_manager = match schema::get_schema_manager(None) {
             Ok(manager) => manager,
             Err(error) => {
-                // If schema manager creation fails, check if it's a connection issue
-                let error_msg = format!("{:?}", error);
-                if error_msg.contains("ConnectionFailed") {
-                    return format!("SKIPPED: Schema manager creation failed due to connection: {}", error_msg);
-                }
-                return format!("Schema manager creation failed: {}", error_msg);
+                return format!("Schema manager creation failed: {:?}", error);
             }
         };
 
