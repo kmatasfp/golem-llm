@@ -1,9 +1,9 @@
 use base64::{engine::general_purpose, Engine as _};
-use golem_graph::error::{enhance_error_with_element_id, from_reqwest_error};
 use golem_graph::golem::graph::errors::GraphError;
 use golem_graph::golem::graph::schema::{
     ContainerInfo, ContainerType, EdgeTypeDefinition, IndexDefinition, IndexType,
 };
+use golem_graph::golem::graph::types::ElementId;
 use log::trace;
 use reqwest::{Client, Method, Response};
 use serde::de::DeserializeOwned;
@@ -63,7 +63,7 @@ impl ArangoDbApi {
 
         let response = request_builder
             .send()
-            .map_err(|e| from_reqwest_error("Request failed", e))?;
+            .map_err(|e| self.from_arango_reqwest_error("Request failed", e))?;
 
         self.handle_response(response)
     }
@@ -109,8 +109,7 @@ impl ArangoDbApi {
                 map_arangodb_http_status(status_code, error_msg, &error_body)
             };
 
-            // Post-process to extract element IDs when possible
-            error = enhance_error_with_element_id(error, &error_body);
+            error = self.enhance_arangodb_error(error, &error_body);
 
             Err(error)
         }
@@ -204,7 +203,7 @@ impl ArangoDbApi {
             .header("x-arango-trx-id", transaction_id)
             .body(body_string)
             .send()
-            .map_err(|e| from_reqwest_error("Transaction query failed", e))?;
+            .map_err(|e| self.from_arango_reqwest_error("Transaction query failed", e))?;
 
         self.handle_response(response)
     }
@@ -213,6 +212,128 @@ impl ArangoDbApi {
         trace!("Ping ArangoDB");
         let _: Value = self.execute(Method::GET, "/_api/version", None)?;
         Ok(())
+    }
+
+    fn enhance_arangodb_error(
+        &self,
+        error: GraphError,
+        error_body: &serde_json::Value,
+    ) -> GraphError {
+        match &error {
+            GraphError::InternalError(_)
+                if self.is_arangodb_document_not_found_error(error_body) =>
+            {
+                if let Some(element_id) = self.extract_arangodb_element_id(error_body) {
+                    GraphError::ElementNotFound(element_id)
+                } else {
+                    error
+                }
+            }
+            // ArangoDB unique constraint violations (error code 1210)
+            GraphError::ConstraintViolation(_)
+                if self.is_arangodb_unique_constraint_error(error_body) =>
+            {
+                if let Some(element_id) = self.extract_arangodb_element_id(error_body) {
+                    GraphError::DuplicateElement(element_id)
+                } else {
+                    error
+                }
+            }
+            _ => error,
+        }
+    }
+
+    fn is_arangodb_document_not_found_error(&self, error_body: &serde_json::Value) -> bool {
+        if let Some(error_num) = error_body.get("errorNum").and_then(|v| v.as_i64()) {
+            return error_num == 1202;
+        }
+        false
+    }
+
+    fn is_arangodb_unique_constraint_error(&self, error_body: &serde_json::Value) -> bool {
+        if let Some(error_num) = error_body.get("errorNum").and_then(|v| v.as_i64()) {
+            return error_num == 1210;
+        }
+        false
+    }
+
+    fn extract_arangodb_element_id(&self, error_body: &serde_json::Value) -> Option<ElementId> {
+        if let Some(doc_id) = error_body.get("_id").and_then(|v| v.as_str()) {
+            return Some(ElementId::StringValue(doc_id.to_string()));
+        }
+
+        if let Some(doc_key) = error_body.get("_key").and_then(|v| v.as_str()) {
+            return Some(ElementId::StringValue(doc_key.to_string()));
+        }
+
+        if let Some(error_msg) = error_body.get("errorMessage").and_then(|v| v.as_str()) {
+            if let Some(element_id) = self.extract_arangodb_id_from_message(error_msg) {
+                return Some(element_id);
+            }
+        }
+        None
+    }
+
+    fn extract_arangodb_id_from_message(&self, message: &str) -> Option<ElementId> {
+        // ArangoDB uses collection/key format for document handles
+        if let Some(start) = message.find('"') {
+            if let Some(end) = message[start + 1..].find('"') {
+                let potential_id = &message[start + 1..start + 1 + end];
+                if potential_id.contains('/') && potential_id.len() > 3 {
+                    return Some(ElementId::StringValue(potential_id.to_string()));
+                }
+            }
+        }
+
+        if message.contains('/') {
+            let words: Vec<&str> = message.split_whitespace().collect();
+            for word in words {
+                if word.contains('/') && word.matches('/').count() == 1 {
+                    let parts: Vec<&str> = word.split('/').collect();
+                    if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+                        return Some(ElementId::StringValue(word.to_string()));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn from_arango_reqwest_error(&self, details: &str, err: reqwest::Error) -> GraphError {
+        if err.is_timeout() {
+            return GraphError::Timeout;
+        }
+
+        if err.is_request() {
+            return GraphError::ConnectionFailed(format!(
+                "ArangoDB request failed ({}): {}",
+                details, err
+            ));
+        }
+
+        if err.is_decode() {
+            return GraphError::InternalError(format!(
+                "ArangoDB response decode failed ({}): {}",
+                details, err
+            ));
+        }
+
+        if err.is_status() {
+            if let Some(status) = err.status() {
+                let error_msg = format!(
+                    "ArangoDB HTTP error {} ({}): {}",
+                    status.as_u16(),
+                    details,
+                    err
+                );
+                return map_arangodb_http_status(
+                    status.as_u16(),
+                    &error_msg,
+                    &serde_json::Value::Null,
+                );
+            }
+        }
+        GraphError::InternalError(format!("ArangoDB request error ({}): {}", details, err))
     }
 
     // Schema operations
@@ -508,20 +629,6 @@ impl ArangoDbApi {
         self.execute(Method::POST, "/_api/cursor", Some(&query))
     }
 
-    #[allow(dead_code)]
-    pub fn ensure_collection_exists(
-        &self,
-        name: &str,
-        container_type: ContainerType,
-    ) -> Result<(), GraphError> {
-        trace!("Ensure collection exists: {name}, type: {container_type:?}");
-        match self.create_collection(name, container_type) {
-            Ok(_) => Ok(()),
-            Err(GraphError::InternalError(msg)) if msg.contains("duplicate name") => Ok(()),
-            Err(e) => Err(e),
-        }
-    }
-
     pub fn begin_dynamic_transaction(&self, read_only: bool) -> Result<String, GraphError> {
         trace!("Begin dynamic transaction (read_only={read_only})");
         let common_collections = vec![
@@ -628,21 +735,26 @@ impl<'de> serde::Deserialize<'de> for ArangoCollectionType {
     }
 }
 
-/// Map ArangoDB-specific error code to GraphError
 pub fn from_arangodb_error_code(error_code: i64, message: &str) -> GraphError {
     match error_code {
-        // Document/Element errors (1200-1299)
+        // document/element errors (1200-1299)
         1202 => GraphError::InternalError(format!("Document not found: {message}")),
         1210 => GraphError::ConstraintViolation(format!("Unique constraint violated: {message}")),
         1213 => GraphError::SchemaViolation(format!("Collection not found: {message}")),
         1218 => GraphError::SchemaViolation(format!("Document handle bad: {message}")),
         1221 => GraphError::InvalidPropertyType(format!("Illegal document key: {message}")),
         1229 => GraphError::ConstraintViolation(format!("Document key missing: {message}")),
+        1232 => GraphError::InternalError(format!("Document not found in collection: {message}")),
+        1233 => GraphError::ConstraintViolation(format!("Collection read-only: {message}")),
+        1234 => GraphError::ConstraintViolation(format!("Document key exists: {message}")),
 
-        // Query errors (1500-1599)
+        // query errors (1500-1599)
         1501 => GraphError::InvalidQuery(format!("Query parse error: {message}")),
         1502 => GraphError::InvalidQuery(format!("Query empty: {message}")),
+        1503 => GraphError::InvalidQuery(format!("Query runtime error: {message}")),
         1504 => GraphError::InvalidQuery(format!("Query number out of range: {message}")),
+        1505 => GraphError::InvalidQuery(format!("Query geo index violation: {message}")),
+        1510 => GraphError::InvalidQuery(format!("Query fulltext index missing: {message}")),
         1521 => GraphError::InvalidQuery(format!("AQL function not found: {message}")),
         1522 => {
             GraphError::InvalidQuery(format!("AQL function argument number mismatch: {message}"))
@@ -651,37 +763,103 @@ pub fn from_arangodb_error_code(error_code: i64, message: &str) -> GraphError {
         1541 => GraphError::InvalidQuery(format!("No bind parameter value: {message}")),
         1562 => GraphError::InvalidQuery(format!("Variable already declared: {message}")),
         1563 => GraphError::InvalidQuery(format!("Variable not declared: {message}")),
+        1570 => GraphError::InvalidQuery(format!("Query killed: {message}")),
         1579 => GraphError::Timeout,
+        1580 => GraphError::InvalidQuery(format!("Query warning: {message}")),
 
-        // Transaction errors (1650-1699)
+        // transaction errors (1650-1699)
+        1650 => GraphError::TransactionFailed(format!("Transaction not found: {message}")),
         1651 => GraphError::TransactionFailed(format!("Transaction already started: {message}")),
         1652 => GraphError::TransactionFailed(format!("Transaction not started: {message}")),
         1653 => GraphError::TransactionFailed(format!(
             "Transaction already committed/aborted: {message}"
         )),
+        1654 => GraphError::TransactionFailed(format!("Transaction nested: {message}")),
         1655 => GraphError::TransactionTimeout,
         1656 => GraphError::DeadlockDetected,
         1658 => GraphError::TransactionConflict,
+        1659 => GraphError::TransactionFailed(format!("Transaction internal: {message}")),
+        1660 => {
+            GraphError::TransactionFailed(format!("Transaction unregistered collection: {message}"))
+        }
+        1661 => {
+            GraphError::TransactionFailed(format!("Transaction disallowed operation: {message}"))
+        }
 
-        // Schema/Collection errors
+        // schema/collection errors
         1207 => GraphError::SchemaViolation(format!("Collection must be unloaded: {message}")),
         1228 => GraphError::SchemaViolation(format!("Document revision bad: {message}")),
+        1220 => GraphError::ConstraintViolation(format!("Conflict: {message}")),
+        1200 => GraphError::InternalError(format!("Arango error: {message}")),
+        1203 => GraphError::SchemaViolation(format!("Collection name invalid: {message}")),
+        1208 => GraphError::SchemaViolation(format!("Collection corrupted: {message}")),
 
-        // Resource errors
+        // Index errors (1201, 1204-1206, etc.)
+        1204 => GraphError::SchemaViolation(format!("Collection can't be dropped: {message}")),
+        1205 => GraphError::SchemaViolation(format!("Collection can't be renamed: {message}")),
+        1206 => GraphError::SchemaViolation(format!("Collection needs to be loaded: {message}")),
+        1212 => {
+            GraphError::SchemaViolation(format!("Cross-collection request forbidden: {message}"))
+        }
+        1230 => GraphError::SchemaViolation(format!("Datafile sealed: {message}")),
+
+        // resource errors
         32 => GraphError::ResourceExhausted(format!("Out of memory: {message}")),
         1104 => GraphError::ResourceExhausted(format!("Collection full: {message}")),
+        1105 => GraphError::ResourceExhausted(format!("Collection empty: {message}")),
 
         // Cluster/replication errors
         1447 => GraphError::ServiceUnavailable(format!("Cluster backend unavailable: {message}")),
         1448 => GraphError::TransactionConflict,
         1449 => GraphError::ServiceUnavailable(format!("Cluster coordinator error: {message}")),
+        1450 => GraphError::ServiceUnavailable(format!("Cluster reading plan agency: {message}")),
+        1451 => GraphError::ServiceUnavailable(format!(
+            "Cluster could not create collection in plan: {message}"
+        )),
+        1452 => GraphError::ServiceUnavailable(format!(
+            "Cluster could not read current collection: {message}"
+        )),
+        1453 => GraphError::ServiceUnavailable(format!(
+            "Cluster could not create collection: {message}"
+        )),
+        1454 => GraphError::Timeout,
+        1455 => GraphError::ServiceUnavailable(format!(
+            "Cluster leadership challenge ongoing: {message}"
+        )),
 
-        // Default fallback
+        // Authentication and authorization errors (11xx)
+        1100 => GraphError::AuthenticationFailed(format!("Forbidden: {message}")),
+        1401 => GraphError::AuthenticationFailed(format!("Authentication required: {message}")),
+        1402 => GraphError::AuthenticationFailed(format!("Database name missing: {message}")),
+        1403 => GraphError::AuthenticationFailed(format!("User name missing: {message}")),
+        1404 => GraphError::AuthenticationFailed(format!("Password missing: {message}")),
+        1405 => GraphError::AuthorizationFailed(format!("Invalid password: {message}")),
+        1406 => GraphError::AuthorizationFailed(format!("User active: {message}")),
+        1407 => GraphError::AuthorizationFailed(format!("User not found: {message}")),
+        1410 => GraphError::AuthorizationFailed(format!("User duplicate: {message}")),
+        1430 => GraphError::AuthorizationFailed(format!("Insufficient rights: {message}")),
+
+        // Graph specific errors (1901-1999)
+        1901 => GraphError::SchemaViolation(format!("Graph invalid graph: {message}")),
+        1902 => GraphError::SchemaViolation(format!("Graph could not create graph: {message}")),
+        1903 => GraphError::SchemaViolation(format!("Graph invalid vertex: {message}")),
+        1904 => GraphError::SchemaViolation(format!("Graph could not create vertex: {message}")),
+        1905 => GraphError::SchemaViolation(format!("Graph invalid edge: {message}")),
+        1906 => GraphError::SchemaViolation(format!("Graph could not create edge: {message}")),
+        1907 => GraphError::SchemaViolation(format!("Graph too many iterations: {message}")),
+        1908 => GraphError::SchemaViolation(format!("Graph invalid filter result: {message}")),
+        1909 => GraphError::SchemaViolation(format!("Graph collection multi use: {message}")),
+        1910 => GraphError::SchemaViolation(format!("Graph edge collection not used: {message}")),
+        1920 => GraphError::InvalidQuery(format!("Graph edge col does not exist: {message}")),
+        1921 => GraphError::InvalidQuery(format!("Graph wrong collection type edge: {message}")),
+        1922 => GraphError::InvalidQuery(format!("Graph not found: {message}")),
+        1924 => GraphError::InvalidQuery(format!("Graph vertex col does not exist: {message}")),
+        1925 => GraphError::InvalidQuery(format!("Graph wrong collection type vertex: {message}")),
+
         _ => GraphError::InternalError(format!("ArangoDB error [{error_code}]: {message}")),
     }
 }
 
-/// ArangoDB-specific HTTP status code mapping (used when no ArangoDB error code is available)
 fn map_arangodb_http_status(
     status: u16,
     message: &str,
@@ -695,27 +873,11 @@ fn map_arangodb_http_status(
         403 => GraphError::AuthorizationFailed(format!("ArangoDB authorization failed: {message}")),
 
         // Client errors specific to ArangoDB context
-        400 => {
-            // ArangoDB typically provides specific error codes, but if we don't have them:
-            if message.to_lowercase().contains("aql") || message.to_lowercase().contains("query") {
-                GraphError::InvalidQuery(format!("ArangoDB bad request - query error: {message}"))
-            } else if message.to_lowercase().contains("collection") {
-                GraphError::SchemaViolation(format!("ArangoDB collection error: {message}"))
-            } else {
-                GraphError::InternalError(format!("ArangoDB bad request: {message}"))
-            }
-        }
-        404 => {
-            if message.to_lowercase().contains("collection") {
-                GraphError::SchemaViolation(format!("ArangoDB collection not found: {message}"))
-            } else if message.to_lowercase().contains("document") {
-                GraphError::InternalError(format!("ArangoDB document not found: {message}"))
-            } else {
-                GraphError::InternalError(format!("ArangoDB resource not found: {message}"))
-            }
-        }
+        400 => GraphError::InvalidQuery(format!("ArangoDB bad request: {message}")),
+        404 => GraphError::ServiceUnavailable(format!("ArangoDB resource not found: {message}")),
         409 => GraphError::TransactionConflict,
         412 => GraphError::ConstraintViolation(format!("ArangoDB precondition failed: {message}")),
+        413 => GraphError::ResourceExhausted(format!("ArangoDB request too large: {message}")),
         422 => GraphError::SchemaViolation(format!("ArangoDB unprocessable entity: {message}")),
         429 => GraphError::ResourceExhausted(format!("ArangoDB rate limit exceeded: {message}")),
 
@@ -726,7 +888,6 @@ fn map_arangodb_http_status(
         504 => GraphError::Timeout,
         507 => GraphError::ResourceExhausted(format!("ArangoDB insufficient storage: {message}")),
 
-        // Default fallback with debug info
         _ => {
             let debug_info = format!(
                 "ArangoDB HTTP error [{}]: {} | Error body sample: {}",

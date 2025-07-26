@@ -1,5 +1,4 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use golem_graph::error::from_reqwest_error;
 use golem_graph::golem::graph::errors::GraphError;
 use log::trace;
 use reqwest::{Client, Response};
@@ -41,6 +40,44 @@ impl Neo4jApi {
         format!("/db/{}/tx", self.database)
     }
 
+    fn from_neo4j_reqwest_error(&self, details: &str, err: reqwest::Error) -> GraphError {
+        if err.is_timeout() {
+            return GraphError::Timeout;
+        }
+
+        if err.is_request() {
+            return GraphError::ConnectionFailed(format!(
+                "Neo4j request failed ({}): {}",
+                details, err
+            ));
+        }
+
+        if err.is_decode() {
+            return GraphError::InternalError(format!(
+                "Neo4j response decode failed ({}): {}",
+                details, err
+            ));
+        }
+
+        if err.is_status() {
+            if let Some(status) = err.status() {
+                let error_msg = format!(
+                    "Neo4j HTTP error {} ({}): {}",
+                    status.as_u16(),
+                    details,
+                    err
+                );
+                return Self::map_neo4j_http_status(
+                    status.as_u16(),
+                    &error_msg,
+                    &serde_json::Value::Null,
+                );
+            }
+        }
+
+        GraphError::InternalError(format!("Neo4j request error ({}): {}", details, err))
+    }
+
     pub(crate) fn begin_transaction(&self) -> Result<String, GraphError> {
         trace!("Begin Neo4j transaction for database: {}", self.database);
         let url = format!("{}{}", self.base_url, self.tx_endpoint());
@@ -49,7 +86,7 @@ impl Neo4jApi {
             .post(&url)
             .header("Authorization", &self.auth_header)
             .send()
-            .map_err(|e| from_reqwest_error("Neo4j begin transaction failed", e))?;
+            .map_err(|e| self.from_neo4j_reqwest_error("Neo4j begin transaction failed", e))?;
         Self::ensure_success_and_get_location(resp)
     }
 
@@ -67,7 +104,7 @@ impl Neo4jApi {
             .header("Content-Type", "application/json")
             .body(statements.to_string())
             .send()
-            .map_err(|e| from_reqwest_error("Neo4j execute in transaction failed", e))?;
+            .map_err(|e| self.from_neo4j_reqwest_error("Neo4j execute in transaction failed", e))?;
         let json = Self::ensure_success_and_json(resp)?;
         trace!("[Neo4jApi] Cypher response: {json}");
         Ok(json)
@@ -81,7 +118,7 @@ impl Neo4jApi {
             .post(&commit_url)
             .header("Authorization", &self.auth_header)
             .send()
-            .map_err(|e| from_reqwest_error("Neo4j commit transaction failed", e))?;
+            .map_err(|e| self.from_neo4j_reqwest_error("Neo4j commit transaction failed", e))?;
         Self::ensure_success(resp).map(|_| ())
     }
 
@@ -92,7 +129,7 @@ impl Neo4jApi {
             .delete(tx_url)
             .header("Authorization", &self.auth_header)
             .send()
-            .map_err(|e| from_reqwest_error("Neo4j rollback transaction failed", e))?;
+            .map_err(|e| self.from_neo4j_reqwest_error("Neo4j rollback transaction failed", e))?;
         Self::ensure_success(resp).map(|_| ())
     }
 
@@ -103,15 +140,15 @@ impl Neo4jApi {
             .get(tx_url)
             .header("Authorization", &self.auth_header)
             .send()
-            .map_err(|e| from_reqwest_error("Neo4j get transaction status failed", e))?;
+            .map_err(|e| self.from_neo4j_reqwest_error("Neo4j get transaction status failed", e))?;
 
         if resp.status().is_success() {
             Ok("running".to_string())
         } else {
             let status_code = resp.status().as_u16();
-            let text = resp
-                .text()
-                .map_err(|e| from_reqwest_error("Failed to read Neo4j response body", e))?;
+            let text = resp.text().map_err(|e| {
+                GraphError::InternalError(format!("Failed to read Neo4j response body: {e}"))
+            })?;
             let error_body: Value = serde_json::from_str(&text)
                 .unwrap_or_else(|_| serde_json::json!({"message": text, "raw_body": text}));
 
@@ -136,9 +173,9 @@ impl Neo4jApi {
             Ok(response)
         } else {
             let status_code = response.status().as_u16();
-            let text = response
-                .text()
-                .map_err(|e| from_reqwest_error("Failed to read Neo4j response body", e))?;
+            let text = response.text().map_err(|e| {
+                GraphError::InternalError(format!("Failed to read Neo4j response body: {e}"))
+            })?;
             let error_body: Value = serde_json::from_str(&text)
                 .unwrap_or_else(|_| serde_json::json!({"message": text, "raw_body": text}));
 
@@ -153,14 +190,14 @@ impl Neo4jApi {
 
     fn ensure_success_and_json(response: Response) -> Result<Value, GraphError> {
         if response.status().is_success() {
-            response
-                .json()
-                .map_err(|e| from_reqwest_error("Failed to parse Neo4j response JSON", e))
+            response.json().map_err(|e| {
+                GraphError::InternalError(format!("Failed to parse Neo4j response JSON: {e}"))
+            })
         } else {
             let status_code = response.status().as_u16();
-            let text = response
-                .text()
-                .map_err(|e| from_reqwest_error("Failed to read Neo4j response body", e))?;
+            let text = response.text().map_err(|e| {
+                GraphError::InternalError(format!("Failed to read Neo4j response body: {e}"))
+            })?;
             let error_body: Value = serde_json::from_str(&text)
                 .unwrap_or_else(|_| serde_json::json!({"message": text, "raw_body": text}));
 
@@ -183,9 +220,9 @@ impl Neo4jApi {
                 .ok_or_else(|| GraphError::InternalError("Missing Location header".into()))
         } else {
             let status_code = response.status().as_u16();
-            let text = response
-                .text()
-                .map_err(|e| from_reqwest_error("Failed to read Neo4j response body", e))?;
+            let text = response.text().map_err(|e| {
+                GraphError::InternalError(format!("Failed to read Neo4j response body: {e}"))
+            })?;
             let error_body: Value = serde_json::from_str(&text)
                 .unwrap_or_else(|_| serde_json::json!({"message": text, "raw_body": text}));
 
@@ -222,14 +259,12 @@ impl Neo4jApi {
             enhanced
         };
 
-        // Fallback to Neo4j-specific HTTP status mapping
         Self::map_neo4j_http_status(status_code, message, &enhanced_error_body)
     }
 
-    /// Map Neo4j-specific error codes to GraphError
     fn from_neo4j_error_code(code: &str, message: &str, error_body: &Value) -> GraphError {
         match code {
-            // Client errors - Authentication and Authorization
+            //  authentication and authorization
             "Neo.ClientError.Security.Unauthorized" => {
                 GraphError::AuthenticationFailed(format!("Neo4j authentication failed: {message}"))
             }
@@ -239,14 +274,25 @@ impl Neo4jApi {
             "Neo.ClientError.Security.AuthenticationRateLimit" => GraphError::ResourceExhausted(
                 format!("Authentication rate limit exceeded: {message}"),
             ),
+            "Neo.ClientError.Security.CredentialsExpired" => {
+                GraphError::AuthenticationFailed(format!("Neo4j credentials expired: {message}"))
+            }
+            "Neo.ClientError.Security.TokenExpired" => {
+                GraphError::AuthenticationFailed(format!("Neo4j token expired: {message}"))
+            }
 
-            // Client errors - Request issues
+            // request issues
             "Neo.ClientError.Request.Invalid" => {
                 GraphError::InvalidQuery(format!("Invalid Neo4j request: {message}"))
             }
             "Neo.ClientError.Request.InvalidFormat" => {
                 GraphError::InvalidQuery(format!("Invalid request format: {message}"))
             }
+            "Neo.ClientError.Request.InvalidUsage" => {
+                GraphError::InvalidQuery(format!("Invalid usage: {message}"))
+            }
+
+            // statement/query issues
             "Neo.ClientError.Statement.SyntaxError" => {
                 GraphError::InvalidQuery(format!("Cypher syntax error: {message}"))
             }
@@ -259,16 +305,34 @@ impl Neo4jApi {
             "Neo.ClientError.Statement.TypeError" => {
                 GraphError::InvalidPropertyType(format!("Type error: {message}"))
             }
+            "Neo.ClientError.Statement.ArgumentError" => {
+                GraphError::InvalidQuery(format!("Argument error: {message}"))
+            }
+            "Neo.ClientError.Statement.EntityNotFound" => {
+                if let Some(element_id) =
+                    golem_graph::error::mapping::extract_element_id_from_message(message)
+                {
+                    GraphError::ElementNotFound(element_id)
+                } else {
+                    GraphError::InternalError(format!("Entity not found: {message}"))
+                }
+            }
 
-            // Client errors - Schema and constraints
+            // schema and constraints
             "Neo.ClientError.Schema.ConstraintValidationFailed" => {
                 GraphError::ConstraintViolation(format!("Constraint validation failed: {message}"))
             }
             "Neo.ClientError.Schema.ConstraintViolation" => {
                 GraphError::ConstraintViolation(format!("Constraint violation: {message}"))
             }
+            "Neo.ClientError.Schema.ConstraintAlreadyExists" => {
+                GraphError::ConstraintViolation(format!("Constraint already exists: {message}"))
+            }
             "Neo.ClientError.Schema.IndexNotFound" => {
                 GraphError::SchemaViolation(format!("Index not found: {message}"))
+            }
+            "Neo.ClientError.Schema.IndexAlreadyExists" => {
+                GraphError::SchemaViolation(format!("Index already exists: {message}"))
             }
             "Neo.ClientError.Schema.LabelNotFound" => {
                 GraphError::SchemaViolation(format!("Label not found: {message}"))
@@ -276,8 +340,22 @@ impl Neo4jApi {
             "Neo.ClientError.Schema.PropertyKeyNotFound" => {
                 GraphError::SchemaViolation(format!("Property key not found: {message}"))
             }
+            "Neo.ClientError.Schema.RelationshipTypeNotFound" => {
+                GraphError::SchemaViolation(format!("Relationship type not found: {message}"))
+            }
 
-            // Client errors - Transaction issues
+            // procedure issues
+            "Neo.ClientError.Procedure.ProcedureNotFound" => {
+                GraphError::InvalidQuery(format!("Procedure not found: {message}"))
+            }
+            "Neo.ClientError.Procedure.ProcedureCallFailed" => {
+                GraphError::InvalidQuery(format!("Procedure call failed: {message}"))
+            }
+            "Neo.ClientError.Procedure.TypeError" => {
+                GraphError::InvalidPropertyType(format!("Procedure type error: {message}"))
+            }
+
+            // transaction issues
             "Neo.ClientError.Transaction.InvalidType" => {
                 GraphError::TransactionFailed(format!("Invalid transaction type: {message}"))
             }
@@ -289,40 +367,64 @@ impl Neo4jApi {
             "Neo.ClientError.Transaction.MarkedAsFailed" => {
                 GraphError::TransactionFailed(format!("Transaction marked as failed: {message}"))
             }
+            "Neo.ClientError.Transaction.InvalidBookmark" => {
+                GraphError::TransactionFailed(format!("Invalid bookmark: {message}"))
+            }
+            "Neo.ClientError.Transaction.BookmarkTimeout" => GraphError::TransactionTimeout,
 
-            // Transient errors - Database issues
+            // transient errors - database issues
             "Neo.TransientError.Database.DatabaseUnavailable" => {
                 GraphError::ServiceUnavailable(format!("Database unavailable: {message}"))
             }
             "Neo.TransientError.General.DatabaseUnavailable" => {
                 GraphError::ServiceUnavailable(format!("General database unavailable: {message}"))
             }
+            "Neo.TransientError.Network.UnknownFailure" => {
+                GraphError::ConnectionFailed(format!("Network failure: {message}"))
+            }
 
-            // Transient errors - Transaction issues
+            // transient errors - transaction issues
             "Neo.TransientError.Transaction.DeadlockDetected" => GraphError::DeadlockDetected,
             "Neo.TransientError.Transaction.LockClientStopped" => GraphError::TransactionConflict,
             "Neo.TransientError.Transaction.Terminated" => {
                 GraphError::TransactionFailed(format!("Transaction terminated: {message}"))
             }
             "Neo.TransientError.Transaction.LockWaitTimeout" => GraphError::TransactionTimeout,
+            "Neo.TransientError.Transaction.ConstraintsChanged" => GraphError::TransactionConflict,
 
-            // Database errors - General
+            // database errors -general
             "Neo.DatabaseError.General.UnknownError" => {
                 GraphError::InternalError(format!("Neo4j unknown error: {message}"))
+            }
+            "Neo.DatabaseError.General.CorruptSchemaRule" => {
+                GraphError::SchemaViolation(format!("Corrupt schema rule: {message}"))
             }
             "Neo.DatabaseError.Statement.ExecutionFailed" => {
                 GraphError::InternalError(format!("Statement execution failed: {message}"))
             }
 
-            // Database errors - Transaction
+            // database errors - schema
+            "Neo.DatabaseError.Schema.ConstraintCreationFailed" => {
+                GraphError::SchemaViolation(format!("Constraint creation failed: {message}"))
+            }
+            "Neo.DatabaseError.Schema.IndexCreationFailed" => {
+                GraphError::SchemaViolation(format!("Index creation failed: {message}"))
+            }
+            "Neo.DatabaseError.Schema.SchemaRuleNotFound" => {
+                GraphError::SchemaViolation(format!("Schema rule not found: {message}"))
+            }
+
+            // database errors - transaction
             "Neo.DatabaseError.Transaction.TransactionLogError" => {
                 GraphError::TransactionFailed(format!("Transaction log error: {message}"))
             }
             "Neo.DatabaseError.Transaction.TransactionValidationFailed" => {
                 GraphError::TransactionFailed(format!("Transaction validation failed: {message}"))
             }
+            "Neo.DatabaseError.Transaction.TransactionCommitFailed" => {
+                GraphError::TransactionFailed(format!("Transaction commit failed: {message}"))
+            }
 
-            // Default fallback with enhanced debugging info
             _ => {
                 let enhanced_message = format!("Neo4j error [{code}]: {message}");
                 let mut debug_error_body = error_body.clone();
@@ -342,7 +444,6 @@ impl Neo4jApi {
         }
     }
 
-    /// Neo4j-specific HTTP status code mapping (used when no Neo4j error code is available)
     fn map_neo4j_http_status(
         status: u16,
         message: &str,
@@ -358,29 +459,11 @@ impl Neo4jApi {
             }
 
             // Client errors specific to Neo4j context
-            400 => {
-                // Neo4j typically provides specific error codes, but if we don't have them:
-                if message.to_lowercase().contains("cypher")
-                    || message.to_lowercase().contains("query")
-                {
-                    GraphError::InvalidQuery(format!("Neo4j bad request - Cypher error: {message}"))
-                } else if message.to_lowercase().contains("transaction") {
-                    GraphError::TransactionFailed(format!("Neo4j transaction error: {message}"))
-                } else {
-                    GraphError::InternalError(format!("Neo4j bad request: {message}"))
-                }
-            }
-            404 => {
-                if message.to_lowercase().contains("transaction") {
-                    GraphError::TransactionFailed(format!("Neo4j transaction not found: {message}"))
-                } else if message.to_lowercase().contains("database") {
-                    GraphError::ServiceUnavailable(format!("Neo4j database not found: {message}"))
-                } else {
-                    GraphError::InternalError(format!("Neo4j resource not found: {message}"))
-                }
-            }
+            400 => GraphError::InvalidQuery(format!("Neo4j bad request: {message}")),
+            404 => GraphError::ServiceUnavailable(format!("Neo4j resource not found: {message}")),
             409 => GraphError::TransactionConflict,
             412 => GraphError::ConstraintViolation(format!("Neo4j precondition failed: {message}")),
+            413 => GraphError::ResourceExhausted(format!("Neo4j request too large: {message}")),
             422 => GraphError::InvalidQuery(format!("Neo4j unprocessable entity: {message}")),
             429 => GraphError::ResourceExhausted(format!("Neo4j rate limit exceeded: {message}")),
 
@@ -391,7 +474,6 @@ impl Neo4jApi {
             504 => GraphError::Timeout,
             507 => GraphError::ResourceExhausted(format!("Neo4j insufficient storage: {message}")),
 
-            // Default fallback with debug info
             _ => {
                 let debug_info = format!(
                     "Neo4j HTTP error [{}]: {} | Error body sample: {}",

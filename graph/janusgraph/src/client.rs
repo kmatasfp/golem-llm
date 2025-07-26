@@ -1,4 +1,3 @@
-use golem_graph::error::from_reqwest_error;
 use golem_graph::golem::graph::errors::GraphError;
 use log::trace;
 use reqwest::{Client, Response};
@@ -100,7 +99,7 @@ impl JanusGraphApi {
             .send()
             .map_err(|e| {
                 log::error!("[JanusGraphApi] ERROR - Request failed: {e}");
-                from_reqwest_error("JanusGraph request failed", e)
+                self.handle_janusgraph_reqwest_error("JanusGraph request failed", e)
             })?;
 
         log::info!(
@@ -129,7 +128,9 @@ impl JanusGraphApi {
             .header("Content-Length", body_string.len().to_string())
             .body(body_string)
             .send()
-            .map_err(|e| from_reqwest_error("JanusGraph read request failed", e))?;
+            .map_err(|e| {
+                self.handle_janusgraph_reqwest_error("JanusGraph read request failed", e)
+            })?;
         Self::handle_response(response)
     }
 
@@ -152,13 +153,53 @@ impl JanusGraphApi {
             .header("Content-Length", body_string.len().to_string())
             .body(body_string)
             .send()
-            .map_err(|e| from_reqwest_error("JanusGraph close session failed", e))?;
+            .map_err(|e| {
+                self.handle_janusgraph_reqwest_error("JanusGraph close session failed", e)
+            })?;
         Self::handle_response(response).map(|_| ())
     }
 
     pub fn session_id(&self) -> &str {
         trace!("Get session ID: {}", self.session_id);
         &self.session_id
+    }
+
+    fn handle_janusgraph_reqwest_error(&self, details: &str, err: reqwest::Error) -> GraphError {
+        if err.is_timeout() {
+            return GraphError::Timeout;
+        }
+
+        if err.is_request() {
+            return GraphError::ConnectionFailed(format!(
+                "JanusGraph request failed ({}): {}",
+                details, err
+            ));
+        }
+
+        if err.is_decode() {
+            return GraphError::InternalError(format!(
+                "JanusGraph response decode failed ({}): {}",
+                details, err
+            ));
+        }
+
+        if err.is_status() {
+            if let Some(status) = err.status() {
+                let error_msg = format!(
+                    "JanusGraph HTTP error {} ({}): {}",
+                    status.as_u16(),
+                    details,
+                    err
+                );
+                return Self::map_janusgraph_http_status(
+                    status.as_u16(),
+                    &error_msg,
+                    &serde_json::Value::Null,
+                );
+            }
+        }
+
+        GraphError::InternalError(format!("JanusGraph request error ({}): {}", details, err))
     }
 
     fn handle_response(response: Response) -> Result<Value, GraphError> {
@@ -201,54 +242,40 @@ impl JanusGraphApi {
             }
         }
 
-        let msg_lower = message.to_lowercase();
-
-        if (msg_lower.contains("groovy") || msg_lower.contains("gremlin"))
-            && (msg_lower.contains("syntax") || msg_lower.contains("compilation"))
-        {
-            return GraphError::InvalidQuery(format!("Gremlin syntax error: {message}"));
+        if let Some(result) = error_body.get("result") {
+            if let Some(result_obj) = result.as_object() {
+                if let Some(data) = result_obj.get("data") {
+                    if let Some(detailed_message_val) = data.get("detailedMessage") {
+                        if let Some(detailed_msg) = detailed_message_val.as_str() {
+                            return Self::from_janusgraph_detailed_error(detailed_msg, error_body);
+                        }
+                    }
+                }
+            }
         }
 
-        if msg_lower.contains("vertex") && msg_lower.contains("not found") {
-            return GraphError::InternalError(format!("JanusGraph vertex not found: {message}"));
-        }
-
-        if msg_lower.contains("edge") && msg_lower.contains("not found") {
-            return GraphError::InternalError(format!("JanusGraph edge not found: {message}"));
-        }
-
-        if msg_lower.contains("property") && msg_lower.contains("not found") {
-            return GraphError::SchemaViolation(format!(
-                "JanusGraph property not found: {message}"
-            ));
-        }
-
-        if msg_lower.contains("timeout") || msg_lower.contains("timed out") {
-            return GraphError::Timeout;
-        }
-
-        if msg_lower.contains("transaction") {
-            return GraphError::TransactionFailed(format!(
-                "JanusGraph transaction error: {message}"
-            ));
+        if let Some(exceptions) = error_body.get("exceptions") {
+            if let Some(exceptions_array) = exceptions.as_array() {
+                if let Some(first_exception) = exceptions_array.first() {
+                    if let Some(exception_msg) = first_exception.as_str() {
+                        return Self::from_janusgraph_exception(exception_msg, error_body);
+                    }
+                }
+            }
         }
 
         Self::map_janusgraph_http_status(status_code, message, error_body)
     }
 
-    /// Gremlin server status code mapping
     fn from_gremlin_status_code(
         code: u16,
         message: &str,
-        _error_body: &serde_json::Value,
+        error_body: &serde_json::Value,
     ) -> GraphError {
+        let detailed_error = Self::extract_gremlin_exception_info(error_body);
+
         match code {
-            // Gremlin server status codes
-            200 => {
-                GraphError::InternalError(format!("Unexpected success in error context: {message}"))
-            }
-            204 => GraphError::InternalError(format!("No content: {message}")),
-            206 => GraphError::InternalError(format!("Partial content: {message}")),
+            // Authentication and Authorization
             401 => GraphError::AuthenticationFailed(format!(
                 "Gremlin authentication failed: {message}"
             )),
@@ -258,17 +285,209 @@ impl JanusGraphApi {
             407 => GraphError::AuthenticationFailed(format!(
                 "Gremlin authentication challenge: {message}"
             )),
-            498 => GraphError::InvalidQuery(format!("Gremlin malformed request: {message}")),
+
+            // Client Request Errors
+            498 => {
+                if let Some(detailed) = detailed_error {
+                    return detailed;
+                }
+                GraphError::InvalidQuery(format!("Gremlin malformed request: {message}"))
+            }
             499 => {
                 GraphError::InvalidQuery(format!("Gremlin invalid request arguments: {message}"))
             }
-            500 => GraphError::InternalError(format!("Gremlin server error: {message}")),
-            597 => GraphError::InvalidQuery(format!("Gremlin script evaluation error: {message}")),
+
+            // Server Errors
+            500 => {
+                if let Some(detailed) = detailed_error {
+                    return detailed;
+                }
+                GraphError::InternalError(format!("Gremlin server error: {message}"))
+            }
+            597 => {
+                if let Some(detailed) = detailed_error {
+                    return detailed;
+                }
+                GraphError::InvalidQuery(format!("Gremlin script evaluation error: {message}"))
+            }
             598 => GraphError::Timeout,
             599 => GraphError::InternalError(format!("Gremlin serialization error: {message}")),
 
-            _ => GraphError::InternalError(format!("Gremlin error [{code}]: {message}")),
+            // Default fallback
+            _ => {
+                if let Some(detailed) = detailed_error {
+                    return detailed;
+                }
+                let debug_info = format!(
+                    "Gremlin status code [{code}]: {message} | Error body sample: {}",
+                    error_body.to_string().chars().take(200).collect::<String>()
+                );
+                GraphError::InternalError(debug_info)
+            }
         }
+    }
+
+    fn extract_gremlin_exception_info(error_body: &serde_json::Value) -> Option<GraphError> {
+        if let Some(result) = error_body.get("result") {
+            if let Some(data) = result.get("data") {
+                if let Some(at_type) = data.get("@type") {
+                    if at_type.as_str() == Some("g:Map") {
+                        if let Some(exception_class) = data.get("java.lang.Class") {
+                            if let Some(class_name) = exception_class.as_str() {
+                                return Self::map_java_exception_class(class_name, data);
+                            }
+                        }
+
+                        if let Some(stack_trace) = data.get("stackTrace") {
+                            if let Some(stack_str) = stack_trace.as_str() {
+                                return Self::extract_from_stack_trace(stack_str);
+                            }
+                        }
+                    }
+                }
+
+                if let Some(exception_type) = data.get("exceptionType") {
+                    if let Some(ex_type) = exception_type.as_str() {
+                        return Self::map_java_exception_class(ex_type, data);
+                    }
+                }
+            }
+        }
+
+        if let Some(exceptions) = error_body.get("exceptions") {
+            if let Some(exceptions_array) = exceptions.as_array() {
+                if let Some(first_exception) = exceptions_array.first() {
+                    if let Some(exception_obj) = first_exception.as_object() {
+                        if let Some(exception_type) = exception_obj.get("@type") {
+                            if let Some(ex_type) = exception_type.as_str() {
+                                return Self::map_java_exception_class(ex_type, first_exception);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    fn map_java_exception_class(
+        class_name: &str,
+        exception_data: &serde_json::Value,
+    ) -> Option<GraphError> {
+        let message = exception_data
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or(class_name);
+
+        match class_name {
+            // JanusGraph specific exceptions
+            "org.janusgraph.core.SchemaViolationException" => {
+                Some(GraphError::SchemaViolation(format!("JanusGraph schema violation: {message}")))
+            }
+            "org.janusgraph.core.JanusGraphException" => {
+                Some(GraphError::InternalError(format!("JanusGraph error: {message}")))
+            }
+            "org.janusgraph.diskstorage.TemporaryBackendException" => {
+                Some(GraphError::ServiceUnavailable(format!("JanusGraph backend temporarily unavailable: {message}")))
+            }
+            "org.janusgraph.diskstorage.PermanentBackendException" => {
+                Some(GraphError::InternalError(format!("JanusGraph backend permanent error: {message}")))
+            }
+            // Gremlin/TinkerPop exceptions
+            "org.apache.tinkerpop.gremlin.process.traversal.strategy.verification.VerificationException" => {
+                Some(GraphError::InvalidQuery(format!("Gremlin verification error: {message}")))
+            }
+            "org.apache.tinkerpop.gremlin.groovy.CompilationFailedException" => {
+                Some(GraphError::InvalidQuery(format!("Gremlin compilation error: {message}")))
+            }
+            "org.apache.tinkerpop.gremlin.driver.exception.ResponseException" => {
+                if let Some(response_code) = exception_data.get("responseStatusCode") {
+                    if let Some(code) = response_code.as_u64() {
+                        return Some(Self::from_gremlin_status_code(code as u16, message, exception_data));
+                    }
+                }
+                Some(GraphError::InternalError(format!("Gremlin response error: {message}")))
+            }
+            // Standard Java exceptions with graph context
+            "java.util.concurrent.TimeoutException" => {
+                Some(GraphError::Timeout)
+            }
+            "java.lang.IllegalArgumentException" => {
+                Some(GraphError::InvalidQuery(format!("Invalid argument: {message}")))
+            }
+            "java.lang.UnsupportedOperationException" => {
+                Some(GraphError::UnsupportedOperation(format!("Unsupported operation: {message}")))
+            }
+            "java.lang.IllegalStateException" => {
+                Some(GraphError::TransactionFailed(format!("Illegal state: {message}")))
+            }
+            "java.util.NoSuchElementException" => {
+                if let Some(element_id) = golem_graph::error::mapping::extract_element_id_from_message(message) {
+                    Some(GraphError::ElementNotFound(element_id))
+                } else {
+                    Some(GraphError::InternalError(format!("Element not found: {message}")))
+                }
+            }
+            // Transaction related exceptions
+            "org.apache.tinkerpop.gremlin.structure.util.TransactionException" => {
+                Some(GraphError::TransactionFailed(format!("Transaction error: {message}")))
+            }
+            _ => None
+
+        }
+    }
+
+    fn extract_from_stack_trace(stack_trace: &str) -> Option<GraphError> {
+        let first_line = stack_trace.lines().next()?;
+
+        if let Some(colon_pos) = first_line.find(':') {
+            let exception_part = &first_line[..colon_pos];
+            let message_part = &first_line[colon_pos + 1..].trim();
+
+            if let Some(last_dot) = exception_part.rfind('.') {
+                let _class_name = &exception_part[last_dot + 1..];
+                let full_class_name = exception_part;
+
+                let exception_data = serde_json::json!({
+                    "message": message_part
+                });
+
+                return Self::map_java_exception_class(full_class_name, &exception_data);
+            }
+        }
+
+        None
+    }
+
+    fn from_janusgraph_detailed_error(
+        detailed_message: &str,
+        error_body: &serde_json::Value,
+    ) -> GraphError {
+        if let Some(detailed_error) = Self::extract_gremlin_exception_info(error_body) {
+            return detailed_error;
+        }
+
+        if let Some(exception_error) = Self::extract_from_stack_trace(detailed_message) {
+            return exception_error;
+        }
+
+        GraphError::InternalError(format!("JanusGraph detailed error: {detailed_message}"))
+    }
+
+    fn from_janusgraph_exception(
+        exception_message: &str,
+        error_body: &serde_json::Value,
+    ) -> GraphError {
+        if let Some(detailed_error) = Self::extract_gremlin_exception_info(error_body) {
+            return detailed_error;
+        }
+
+        if let Some(exception_error) = Self::extract_from_stack_trace(exception_message) {
+            return exception_error;
+        }
+
+        GraphError::InternalError(format!("JanusGraph exception: {exception_message}"))
     }
 
     fn map_janusgraph_http_status(
@@ -286,17 +505,28 @@ impl JanusGraphApi {
             )),
 
             // Client errors
-            400 => GraphError::InvalidQuery(format!("JanusGraph bad request: {message}")),
+            400 => {
+                if let Some(detailed_error) = Self::extract_gremlin_exception_info(error_body) {
+                    return detailed_error;
+                }
+                GraphError::InvalidQuery(format!("JanusGraph bad request: {message}"))
+            }
             404 => {
-                GraphError::ServiceUnavailable(format!("JanusGraph endpoint not found: {message}"))
+                GraphError::ServiceUnavailable(format!("JanusGraph resource not found: {message}"))
             }
             409 => GraphError::TransactionConflict,
+            413 => {
+                GraphError::ResourceExhausted(format!("JanusGraph request too large: {message}"))
+            }
             429 => {
                 GraphError::ResourceExhausted(format!("JanusGraph rate limit exceeded: {message}"))
             }
 
             // Server errors
             500 => {
+                if let Some(detailed_error) = Self::extract_gremlin_exception_info(error_body) {
+                    return detailed_error;
+                }
                 GraphError::InternalError(format!("JanusGraph internal server error: {message}"))
             }
             502 => GraphError::ServiceUnavailable(format!("JanusGraph bad gateway: {message}")),
@@ -304,9 +534,15 @@ impl JanusGraphApi {
                 GraphError::ServiceUnavailable(format!("JanusGraph service unavailable: {message}"))
             }
             504 => GraphError::Timeout,
+            507 => {
+                GraphError::ResourceExhausted(format!("JanusGraph insufficient storage: {message}"))
+            }
 
-            // Default fallback with debug info
             _ => {
+                if let Some(detailed_error) = Self::extract_gremlin_exception_info(error_body) {
+                    return detailed_error;
+                }
+
                 let debug_info = format!(
                     "JanusGraph HTTP error [{}]: {} | Error body sample: {}",
                     status,
