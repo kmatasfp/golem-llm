@@ -15,7 +15,6 @@ use crate::bindings::golem::graph::{
 
 struct Component;
 
-// Configuration constants for different graph database providers
 #[cfg(feature = "arangodb")]
 const PROVIDER: &'static str = "arangodb";
 #[cfg(feature = "janusgraph")]
@@ -25,8 +24,6 @@ const PROVIDER: &'static str = "neo4j";
 
 const DEFAULT_TEST_HOST: &'static str = "127.0.0.1";
 
-
-// Database-specific configuration
 #[cfg(feature = "arangodb")]
 const TEST_DATABASE: &'static str = "test";
 #[cfg(feature = "arangodb")]
@@ -54,7 +51,6 @@ const TEST_USERNAME: &'static str = "neo4j";
 #[cfg(feature = "neo4j")]
 const TEST_PASSWORD: &'static str = "password";
 
-// Helper function to get the test host
 fn get_test_host() -> String {
     std::env::var("GRAPH_TEST_HOST").unwrap_or_else(|_| DEFAULT_TEST_HOST.to_string())
 }
@@ -85,12 +81,11 @@ fn ensure_arangodb_collections(graph_connection: &crate::bindings::golem::graph:
         ("FOLLOWS", ContainerType::EdgeContainer),
     ];
 
-    // Get existing containers to avoid duplicate creation
     let existing_containers = match schema_manager.list_containers() {
         Ok(containers) => containers,
         Err(error) => {
             println!("Warning: Could not list existing containers: {:?}", error);
-            vec![] // Continue with empty list, will try to create all
+            vec![] 
         }
     };
 
@@ -109,7 +104,6 @@ fn ensure_arangodb_collections(graph_connection: &crate::bindings::golem::graph:
             Ok(_) => println!("Collection '{}' created successfully", name),
             Err(error) => {
                 println!("Warning: Could not create collection '{}': {:?}", name, error);
-                // Continue with other collections even if one fails
             }
         }
     }
@@ -118,7 +112,6 @@ fn ensure_arangodb_collections(graph_connection: &crate::bindings::golem::graph:
     Ok(())
 }
 
-// Helper function for non-ArangoDB providers (no-op)
 #[cfg(not(feature = "arangodb"))]
 fn ensure_arangodb_collections(_graph_connection: &crate::bindings::golem::graph::connection::Graph) -> Result<(), String> {
     Ok(())
@@ -159,7 +152,6 @@ impl Guest for Component {
             }
         };
 
-        // Create a test vertex
         let properties = vec![
             ("name".to_string(), PropertyValue::StringValue("Alice".to_string())),
             ("age".to_string(), PropertyValue::Int32(30)),
@@ -174,14 +166,14 @@ impl Guest for Component {
 
         println!("Created vertex with ID: {:?}", vertex.id);
 
-        // Retrieve the vertex by ID
+        // Retrieving the vertex by ID
         let retrieved_vertex = match transaction.get_vertex(&vertex.id.clone()) {
             Ok(Some(v)) => v,
             Ok(None) => return "Vertex not found after creation".to_string(),
             Err(error) => return format!("Vertex retrieval failed: {:?}", error),
         };
 
-        // Commit transaction
+        // Committing the transaction
         match transaction.commit() {
             Ok(_) => println!("Transaction committed successfully"),
             Err(error) => return format!("Commit failed: {:?}", error),
@@ -232,7 +224,7 @@ impl Guest for Component {
             }
         };
 
-        // Create two vertices
+        // Creating two vertices
         let person1_props = vec![
             ("name".to_string(), PropertyValue::StringValue("Bob".to_string())),
             ("age".to_string(), PropertyValue::Int32(25)),
@@ -340,7 +332,7 @@ impl Guest for Component {
             }
         };
 
-        // Create a vertex
+        // Creating a vertex
         let properties = vec![
             ("name".to_string(), PropertyValue::StringValue("TestUser".to_string())),
             ("temp".to_string(), PropertyValue::Boolean(true)),
@@ -353,7 +345,7 @@ impl Guest for Component {
 
         let is_active_before = transaction.is_active();
         
-        // Intentionally rollback the transaction
+        // Intentionally rolling-back the transaction
         match transaction.rollback() {
             Ok(_) => println!("Transaction rolled back successfully"),
             Err(error) => return format!("Rollback failed: {:?}", error),
@@ -406,7 +398,7 @@ impl Guest for Component {
             }
         };
 
-        // Create multiple vertices in a batch
+        // Creating multiple vertices in a batch
         let vertex_specs = vec![
             transactions::VertexSpec {
                 vertex_type: "Company".to_string(),
@@ -445,7 +437,7 @@ impl Guest for Component {
             }
         };
 
-        // Create edges between the vertices
+        // Creating edges between the vertices
         if vertices.len() >= 3 {
             let edge_specs = vec![
                 transactions::EdgeSpec {
@@ -541,11 +533,11 @@ impl Guest for Component {
             Err(error) => return format!("Vertex C creation failed: {:?}", error),
         };
 
-        // Create edges
+        // Creating edges
         let _ = transaction.create_edge("CONNECTS", &vertex_a.id.clone(), &vertex_b.id.clone(), &vec![]);
         let _ = transaction.create_edge("CONNECTS", &vertex_b.id.clone(), &vertex_c.id.clone(), &vec![]);
 
-        // Test neighborhood exploration
+        // Testing neighborhood exploration
         let neighborhood = match traversal::get_neighborhood(
             &transaction,
             &vertex_b.id.clone(),
@@ -635,7 +627,7 @@ impl Guest for Component {
             Err(error) => return format!("Transaction creation failed: {:?}", error),
         };
 
-        // Create some test data first
+        // Creating some test data first
         let _ = transaction.create_vertex("Product", &vec![
             ("name".to_string(), PropertyValue::StringValue("Widget".to_string())),
             ("price".to_string(), PropertyValue::Float32Value(19.99)),
@@ -717,7 +709,7 @@ impl Guest for Component {
     fn test7() -> String {
         println!("Starting test7: Schema operations with {}", PROVIDER);
         
-        // Test schema manager creation
+        // Testing schema manager creation
         let schema_manager = match schema::get_schema_manager(None) {
             Ok(manager) => manager,
             Err(error) => {
@@ -725,7 +717,6 @@ impl Guest for Component {
             }
         };
 
-        // Try to list existing schema elements to verify the schema manager works
         let mut vertex_count = 0;
         let mut edge_count = 0;
         let mut index_count = 0;
@@ -750,7 +741,7 @@ impl Guest for Component {
             }
         }
 
-        // Try to list indexes
+        // Trying to list indexes
         match schema_manager.list_indexes() {
             Ok(idx_list) => {
                 index_count = idx_list.len();
