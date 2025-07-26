@@ -1097,7 +1097,7 @@ impl GuestTransaction for Transaction {
                 bindings.insert(key_binding, json!(key));
                 bindings.insert(val_binding, conversions::to_json_value(value.clone())?);
             }
-            
+
             union_parts.push(part);
         }
 
@@ -1164,7 +1164,8 @@ impl GuestTransaction for Transaction {
             bindings.insert(to_binding.clone(), to_id_json);
             bindings.insert(label_binding.clone(), json!(edge_spec.edge_type));
 
-            let mut part = format!("V({from_binding}).addE({label_binding}).to(__.V({to_binding}))");
+            let mut part =
+                format!("V({from_binding}).addE({label_binding}).to(__.V({to_binding}))");
 
             for (j, (key, value)) in edge_spec.properties.iter().enumerate() {
                 let key_binding = format!("k_{i}_{j}");

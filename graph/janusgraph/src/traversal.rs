@@ -224,7 +224,7 @@ impl Transaction {
             Direction::Both => "both",
         }
         .to_string();
-        
+
         let gremlin = if let Some(labels) = &edge_types {
             if !labels.is_empty() {
                 let label_bindings: Vec<String> = labels
