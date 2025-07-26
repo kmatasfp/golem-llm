@@ -63,7 +63,7 @@ impl ArangoDbApi {
 
         let response = request_builder
             .send()
-            .map_err(|e| self.from_arango_reqwest_error("Request failed", e))?;
+            .map_err(|e| self.handle_arango_reqwest_error("Request failed", e))?;
 
         self.handle_response(response)
     }
@@ -203,7 +203,7 @@ impl ArangoDbApi {
             .header("x-arango-trx-id", transaction_id)
             .body(body_string)
             .send()
-            .map_err(|e| self.from_arango_reqwest_error("Transaction query failed", e))?;
+            .map_err(|e| self.handle_arango_reqwest_error("Transaction query failed", e))?;
 
         self.handle_response(response)
     }
@@ -299,22 +299,20 @@ impl ArangoDbApi {
         None
     }
 
-    fn from_arango_reqwest_error(&self, details: &str, err: reqwest::Error) -> GraphError {
+    fn handle_arango_reqwest_error(&self, details: &str, err: reqwest::Error) -> GraphError {
         if err.is_timeout() {
             return GraphError::Timeout;
         }
 
         if err.is_request() {
             return GraphError::ConnectionFailed(format!(
-                "ArangoDB request failed ({}): {}",
-                details, err
+                "ArangoDB request failed ({details}): {err}"
             ));
         }
 
         if err.is_decode() {
             return GraphError::InternalError(format!(
-                "ArangoDB response decode failed ({}): {}",
-                details, err
+                "ArangoDB response decode failed ({details}): {err}"
             ));
         }
 
@@ -333,7 +331,7 @@ impl ArangoDbApi {
                 );
             }
         }
-        GraphError::InternalError(format!("ArangoDB request error ({}): {}", details, err))
+        GraphError::InternalError(format!("ArangoDB request error ({details}): {err}"))
     }
 
     // Schema operations

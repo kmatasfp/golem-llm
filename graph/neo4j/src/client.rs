@@ -40,22 +40,20 @@ impl Neo4jApi {
         format!("/db/{}/tx", self.database)
     }
 
-    fn from_neo4j_reqwest_error(&self, details: &str, err: reqwest::Error) -> GraphError {
+    fn handle_neo4j_reqwest_error(&self, details: &str, err: reqwest::Error) -> GraphError {
         if err.is_timeout() {
             return GraphError::Timeout;
         }
 
         if err.is_request() {
             return GraphError::ConnectionFailed(format!(
-                "Neo4j request failed ({}): {}",
-                details, err
+                "Neo4j request failed ({details}): {err}"
             ));
         }
 
         if err.is_decode() {
             return GraphError::InternalError(format!(
-                "Neo4j response decode failed ({}): {}",
-                details, err
+                "Neo4j response decode failed ({details}): {err}"
             ));
         }
 
@@ -75,7 +73,7 @@ impl Neo4jApi {
             }
         }
 
-        GraphError::InternalError(format!("Neo4j request error ({}): {}", details, err))
+        GraphError::InternalError(format!("Neo4j request error ({details}): {err}"))
     }
 
     pub(crate) fn begin_transaction(&self) -> Result<String, GraphError> {
@@ -86,7 +84,7 @@ impl Neo4jApi {
             .post(&url)
             .header("Authorization", &self.auth_header)
             .send()
-            .map_err(|e| self.from_neo4j_reqwest_error("Neo4j begin transaction failed", e))?;
+            .map_err(|e| self.handle_neo4j_reqwest_error("Neo4j begin transaction failed", e))?;
         Self::ensure_success_and_get_location(resp)
     }
 
@@ -104,7 +102,7 @@ impl Neo4jApi {
             .header("Content-Type", "application/json")
             .body(statements.to_string())
             .send()
-            .map_err(|e| self.from_neo4j_reqwest_error("Neo4j execute in transaction failed", e))?;
+            .map_err(|e| self.handle_neo4j_reqwest_error("Neo4j execute in transaction failed", e))?;
         let json = Self::ensure_success_and_json(resp)?;
         trace!("[Neo4jApi] Cypher response: {json}");
         Ok(json)
@@ -118,7 +116,7 @@ impl Neo4jApi {
             .post(&commit_url)
             .header("Authorization", &self.auth_header)
             .send()
-            .map_err(|e| self.from_neo4j_reqwest_error("Neo4j commit transaction failed", e))?;
+            .map_err(|e| self.handle_neo4j_reqwest_error("Neo4j commit transaction failed", e))?;
         Self::ensure_success(resp).map(|_| ())
     }
 
@@ -129,7 +127,7 @@ impl Neo4jApi {
             .delete(tx_url)
             .header("Authorization", &self.auth_header)
             .send()
-            .map_err(|e| self.from_neo4j_reqwest_error("Neo4j rollback transaction failed", e))?;
+            .map_err(|e| self.handle_neo4j_reqwest_error("Neo4j rollback transaction failed", e))?;
         Self::ensure_success(resp).map(|_| ())
     }
 
@@ -140,7 +138,7 @@ impl Neo4jApi {
             .get(tx_url)
             .header("Authorization", &self.auth_header)
             .send()
-            .map_err(|e| self.from_neo4j_reqwest_error("Neo4j get transaction status failed", e))?;
+            .map_err(|e| self.handle_neo4j_reqwest_error("Neo4j get transaction status failed", e))?;
 
         if resp.status().is_success() {
             Ok("running".to_string())

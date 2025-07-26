@@ -171,15 +171,13 @@ impl JanusGraphApi {
 
         if err.is_request() {
             return GraphError::ConnectionFailed(format!(
-                "JanusGraph request failed ({}): {}",
-                details, err
+                "JanusGraph request failed ({details}): {err}"
             ));
         }
 
         if err.is_decode() {
             return GraphError::InternalError(format!(
-                "JanusGraph response decode failed ({}): {}",
-                details, err
+                "JanusGraph response decode failed ({details}): {err}"
             ));
         }
 
@@ -199,7 +197,7 @@ impl JanusGraphApi {
             }
         }
 
-        GraphError::InternalError(format!("JanusGraph request error ({}): {}", details, err))
+        GraphError::InternalError(format!("JanusGraph request error ({details}): {err}"))
     }
 
     fn handle_response(response: Response) -> Result<Value, GraphError> {
