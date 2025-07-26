@@ -273,7 +273,7 @@ impl Transaction {
                             PropertyValue::Float64Value(f) => f.to_string(),
                             PropertyValue::Int32(i) => i.to_string(),
                             PropertyValue::Int64(i) => i.to_string(),
-                            PropertyValue::StringValue(s) => format!("'{}'", s),
+                            PropertyValue::StringValue(s) => format!("'{s}'"),
                             PropertyValue::Boolean(b) => b.to_string(),
                             _ => {
                                 continue;
