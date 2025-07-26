@@ -440,26 +440,8 @@ impl Guest for Component {
                 v
             },
             Err(error) => {
-                // JanusGraph has known issues with batch operations, fallback to individual creation
-                if PROVIDER == "janusgraph" {
-                    println!("INFO: JanusGraph batch creation failed, falling back to individual vertex creation");
-                    results.push("JanusGraph fallback: batch vertex creation failed, using individual creation".to_string());
-                    let mut individual_vertices = Vec::new();
-                    for spec in &vertex_specs {
-                        match transaction.create_vertex(&spec.vertex_type, &spec.properties) {
-                            Ok(vertex) => individual_vertices.push(vertex),
-                            Err(e) => {
-                                results.push("JanusGraph individual vertex creation also failed".to_string());
-                                return format!("Individual vertex creation failed during batch fallback: {:?} | Results: {:?}", e, results);
-                            }
-                        }
-                    }
-                    results.push(format!("JanusGraph fallback succeeded: created {} vertices individually", individual_vertices.len()));
-                    individual_vertices
-                } else {
-                    results.push("Non-JanusGraph provider: batch vertex creation failed".to_string());
-                    return format!("Batch vertex creation failed: {:?} | Results: {:?}", error, results);
-                }
+                results.push("Batch vertex creation failed".to_string());
+                return format!("Batch vertex creation failed: {:?} | Results: {:?}", error, results);
             }
         };
 
@@ -483,26 +465,8 @@ impl Guest for Component {
                     e
                 },
                 Err(error) => {
-                    // JanusGraph has known issues with batch edge operations, fallback to individual creation
-                    if PROVIDER == "janusgraph" {
-                        println!("INFO: JanusGraph batch edge creation failed, falling back to individual edge creation");
-                        results.push("JanusGraph fallback: batch edge creation failed, using individual creation".to_string());
-                        let mut individual_edges = Vec::new();
-                        for spec in &edge_specs {
-                            match transaction.create_edge(&spec.edge_type, &spec.from_vertex, &spec.to_vertex, &spec.properties) {
-                                Ok(edge) => individual_edges.push(edge),
-                                Err(e) => {
-                                    results.push("JanusGraph individual edge creation also failed".to_string());
-                                    return format!("Individual edge creation failed during batch fallback: {:?} | Results: {:?}", e, results);
-                                }
-                            }
-                        }
-                        results.push(format!("JanusGraph fallback succeeded: created {} edges individually", individual_edges.len()));
-                        individual_edges
-                    } else {
-                        results.push("Non-JanusGraph provider: batch edge creation failed".to_string());
-                        return format!("Batch edge creation failed: {:?} | Results: {:?}", error, results);
-                    }
+                    results.push("Batch edge creation failed".to_string());
+                    return format!("Batch edge creation failed: {:?} | Results: {:?}", error, results);
                 }
             };
 
@@ -620,35 +584,8 @@ impl Guest for Component {
                 exists
             },
             Err(error) => {
-                // JanusGraph has known issues with edge type filtering in path operations
-                if PROVIDER == "janusgraph" {
-                    println!("INFO: JanusGraph path_exists failed with edge types, retrying without edge filter");
-                    results.push("JanusGraph fallback: path_exists failed with edge types, retrying without edge filter".to_string());
-                    match traversal::path_exists(
-                        &transaction,
-                        &vertex_a.id.clone(),
-                        &vertex_c.id.clone(),
-                        Some(&traversal::PathOptions {
-                            max_depth: Some(3),
-                            edge_types: None,
-                            vertex_types: None,
-                            vertex_filters: None,
-                            edge_filters: None,
-                        }),
-                    ) {
-                        Ok(exists) => {
-                            results.push("JanusGraph fallback succeeded: path_exists worked without edge filter".to_string());
-                            exists
-                        },
-                        Err(e2) => {
-                            results.push("JanusGraph fallback also failed".to_string());
-                            return format!("Path existence check failed (both with and without edge filter): Original: {:?}, Retry: {:?} | Results: {:?}", error, e2, results);
-                        }
-                    }
-                } else {
-                    results.push("Non-JanusGraph provider: path existence check failed".to_string());
-                    return format!("Path existence check failed: {:?} | Results: {:?}", error, results);
-                }
+                results.push("Path existence check failed".to_string());
+                return format!("Path existence check failed: {:?} | Results: {:?}", error, results);
             }
         };
 
@@ -722,8 +659,9 @@ impl Guest for Component {
                  vec![("min_price".to_string(), PropertyValue::Float32Value(15.0))])
             },
             "janusgraph" => {
-                results.push("Using JanusGraph Gremlin query without parameters (GraphSON issues)".to_string());
-                ("g.V().hasLabel('Product').has('price', gt(15.0))".to_string(), vec![])
+                results.push("Using JanusGraph Gremlin query with parameters".to_string());
+                ("g.V().hasLabel('Product').has('price', gt(min_price))".to_string(),
+                 vec![("min_price".to_string(), PropertyValue::Float32Value(15.0))])
             },
             _ => {
                 results.push("Using generic SQL-like query".to_string());
@@ -747,34 +685,8 @@ impl Guest for Component {
                 result
             },
             Err(error) => {
-                // JanusGraph has known issues with GraphSON parameter serialization
-                if PROVIDER == "janusgraph" {
-                    println!("INFO: JanusGraph query failed, falling back to simpler query without parameters");
-                    results.push("JanusGraph fallback: query failed, using simpler count query".to_string());
-                    match query::execute_query(
-                        &transaction,
-                        "g.V().hasLabel('Product').count()",
-                        None,
-                        Some(query::QueryOptions {
-                            timeout_seconds: Some(30),
-                            max_results: Some(100),
-                            explain: false,
-                            profile: false,
-                        }),
-                    ) {
-                        Ok(result) => {
-                            results.push("JanusGraph fallback succeeded: count query worked".to_string());
-                            result
-                        },
-                        Err(e2) => {
-                            results.push("JanusGraph fallback also failed".to_string());
-                            return format!("Query execution failed (both complex and simple): Original: {:?}, Retry: {:?} | Results: {:?}", error, e2, results);
-                        }
-                    }
-                } else {
-                    results.push("Non-JanusGraph provider: query execution failed".to_string());
-                    return format!("Query execution failed: {:?} | Results: {:?}", error, results);
-                }
+                results.push("Query execution failed".to_string());
+                return format!("Query execution failed: {:?} | Results: {:?}", error, results);
             }
         };
 
