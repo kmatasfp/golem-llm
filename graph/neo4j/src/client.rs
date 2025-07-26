@@ -102,7 +102,9 @@ impl Neo4jApi {
             .header("Content-Type", "application/json")
             .body(statements.to_string())
             .send()
-            .map_err(|e| self.handle_neo4j_reqwest_error("Neo4j execute in transaction failed", e))?;
+            .map_err(|e| {
+                self.handle_neo4j_reqwest_error("Neo4j execute in transaction failed", e)
+            })?;
         let json = Self::ensure_success_and_json(resp)?;
         trace!("[Neo4jApi] Cypher response: {json}");
         Ok(json)
@@ -138,7 +140,9 @@ impl Neo4jApi {
             .get(tx_url)
             .header("Authorization", &self.auth_header)
             .send()
-            .map_err(|e| self.handle_neo4j_reqwest_error("Neo4j get transaction status failed", e))?;
+            .map_err(|e| {
+                self.handle_neo4j_reqwest_error("Neo4j get transaction status failed", e)
+            })?;
 
         if resp.status().is_success() {
             Ok("running".to_string())
