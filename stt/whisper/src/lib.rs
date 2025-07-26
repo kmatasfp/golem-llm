@@ -24,6 +24,7 @@ use transcription::{
     TranscriptionsApi, WhisperTranscription,
 };
 use wstd::runtime::block_on;
+use wstd::time::Duration;
 
 mod transcription;
 
@@ -55,7 +56,10 @@ impl TranscriptionGuest for Component {
         })?;
 
         block_on(async {
-            let api_client = TranscriptionsApi::new(api_key, WstdHttpClient::default());
+            let api_client = TranscriptionsApi::new(
+                api_key,
+                WstdHttpClient::new_with_timeout(Duration::from_secs(60), Duration::from_secs(600)),
+            );
 
             let api_response = api_client.transcribe_audio(req.try_into()?).await?;
 
@@ -73,7 +77,10 @@ impl TranscriptionGuest for Component {
         })?;
 
         block_on(async {
-            let api_client = TranscriptionsApi::new(api_key, WstdHttpClient::default());
+            let api_client = TranscriptionsApi::new(
+                api_key,
+                WstdHttpClient::new_with_timeout(Duration::from_secs(60), Duration::from_secs(600)),
+            );
 
             let mut successes: Vec<WitTranscriptionResult> = Vec::new();
             let mut failures: Vec<WitFailedTranscription> = Vec::new();

@@ -27,6 +27,7 @@ use golem_stt::golem::stt::types::{
 use futures_concurrency::future::Join;
 use itertools::Itertools;
 use wstd::runtime::block_on;
+use wstd::time::Duration;
 
 mod transcription;
 
@@ -58,7 +59,10 @@ impl TranscriptionGuest for Component {
         })?;
 
         block_on(async {
-            let api_client = PreRecordedAudioApi::new(api_key, WstdHttpClient::default());
+            let api_client = PreRecordedAudioApi::new(
+                api_key,
+                WstdHttpClient::new_with_timeout(Duration::from_secs(60), Duration::from_secs(600)),
+            );
 
             let api_response = api_client.transcribe_audio(req.try_into()?).await?;
 
@@ -76,7 +80,10 @@ impl TranscriptionGuest for Component {
         })?;
 
         block_on(async {
-            let api_client = PreRecordedAudioApi::new(api_key, WstdHttpClient::default());
+            let api_client = PreRecordedAudioApi::new(
+                api_key,
+                WstdHttpClient::new_with_timeout(Duration::from_secs(60), Duration::from_secs(600)),
+            );
 
             let mut successes: Vec<WitTranscriptionResult> = Vec::new();
             let mut failures: Vec<WitFailedTranscription> = Vec::new();

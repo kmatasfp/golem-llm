@@ -26,6 +26,7 @@ use transcription::{
     AudioConfig, AudioFormat, DiarizationConfig, FastTranscriptionApi, ProfanityFilterMode,
     TranscriptionConfig, TranscriptionRequest, TranscriptionResponse,
 };
+use wstd::time::Duration;
 
 #[allow(unused)]
 struct Component;
@@ -59,8 +60,11 @@ impl TranscriptionGuest for Component {
         })?;
 
         block_on(async {
-            let api_client =
-                FastTranscriptionApi::new(subscription_key, region, WstdHttpClient::default());
+            let api_client = FastTranscriptionApi::new(
+                subscription_key,
+                region,
+                WstdHttpClient::new_with_timeout(Duration::from_secs(60), Duration::from_secs(600)),
+            );
 
             let api_response = api_client.transcribe_audio(req.try_into()?).await?;
 
@@ -82,8 +86,11 @@ impl TranscriptionGuest for Component {
         })?;
 
         block_on(async {
-            let api_client =
-                FastTranscriptionApi::new(subscription_key, region, WstdHttpClient::default());
+            let api_client = FastTranscriptionApi::new(
+                subscription_key,
+                region,
+                WstdHttpClient::new_with_timeout(Duration::from_secs(60), Duration::from_secs(600)),
+            );
 
             let mut successes: Vec<WitTranscriptionResult> = Vec::new();
             let mut failures: Vec<WitFailedTranscription> = Vec::new();
