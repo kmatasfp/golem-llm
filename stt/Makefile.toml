@@ -4,31 +4,51 @@ default_to_workspace = false
 skip_core_tasks = true
 
 [tasks.build]
-run_task = { name = ["build-whisper", "build-deepgram"] }
+run_task = { name = [
+    "build-aws",
+    "build-azure",
+    "build-deepgram",
+    "build-whisper",
+] }
 
 [tasks.build-portable]
-run_task = { name = ["build-whisper-portable", "build-deepgram-portable"] }
+run_task = { name = [
+    "build-aws-portable",
+    "build-azure-portable",
+    "build-deepgram-portable",
+    "build-whisper-portable",
+] }
 
 [tasks.release-build]
 run_task = { name = ["release-build-whisper", "release-build-deepgram"] }
 
 [tasks.release-build-portable]
 run_task = { name = [
-    "release-build-whisper-portable",
+    "release-build-aws-portable",
+    "release-build-azure-portable",
     "release-build-deepgram-portable",
+    "release-build-whisper-portable",
 ] }
 
-[tasks.build-whisper]
+[tasks.build-aws]
 install_crate = { crate_name = "cargo-component", version = "0.20.0" }
 command = "cargo-component"
-args = ["build", "-p", "golem-stt-whisper"]
+args = ["build", "-p", "golem-stt-aws"]
 
-
-[tasks.build-whisper-portable]
+[tasks.build-aws-portable]
 install_crate = { crate_name = "cargo-component", version = "0.20.0" }
 command = "cargo-component"
-args = ["build", "-p", "golem-stt-whisper", "--no-default-features"]
+args = ["build", "-p", "golem-stt-aws", "--no-default-features"]
 
+[tasks.build-azure]
+install_crate = { crate_name = "cargo-component", version = "0.20.0" }
+command = "cargo-component"
+args = ["build", "-p", "golem-stt-azure"]
+
+[tasks.build-azure-portable]
+install_crate = { crate_name = "cargo-component", version = "0.20.0" }
+command = "cargo-component"
+args = ["build", "-p", "golem-stt-azure", "--no-default-features"]
 
 [tasks.build-deepgram]
 install_crate = { crate_name = "cargo-component", version = "0.20.0" }
@@ -40,21 +60,35 @@ install_crate = { crate_name = "cargo-component", version = "0.20.0" }
 command = "cargo-component"
 args = ["build", "-p", "golem-stt-deepgram", "--no-default-features"]
 
-[tasks.release-build-whisper]
+[tasks.build-whisper]
 install_crate = { crate_name = "cargo-component", version = "0.20.0" }
 command = "cargo-component"
-args = ["build", "-p", "golem-stt-whisper", "--release"]
+args = ["build", "-p", "golem-stt-whisper"]
 
-[tasks.release-build-whisper-portable]
+[tasks.build-whisper-portable]
 install_crate = { crate_name = "cargo-component", version = "0.20.0" }
 command = "cargo-component"
-args = [
-    "build",
-    "-p",
-    "golem-stt-whisper",
-    "--release",
-    "--no-default-features",
-]
+args = ["build", "-p", "golem-stt-whisper", "--no-default-features"]
+
+[tasks.release-build-aws]
+install_crate = { crate_name = "cargo-component", version = "0.20.0" }
+command = "cargo-component"
+args = ["build", "-p", "golem-stt-aws", "--release"]
+
+[tasks.release-build-aws-portable]
+install_crate = { crate_name = "cargo-component", version = "0.20.0" }
+command = "cargo-component"
+args = ["build", "-p", "golem-stt-aws", "--release", "--no-default-features"]
+
+[tasks.release-build-azure]
+install_crate = { crate_name = "cargo-component", version = "0.20.0" }
+command = "cargo-component"
+args = ["build", "-p", "golem-stt-azure", "--release"]
+
+[tasks.release-build-azure-portable]
+install_crate = { crate_name = "cargo-component", version = "0.20.0" }
+command = "cargo-component"
+args = ["build", "-p", "golem-stt-azure", "--release", "--no-default-features"]
 
 [tasks.release-build-deepgram]
 install_crate = { crate_name = "cargo-component", version = "0.20.0" }
@@ -72,6 +106,22 @@ args = [
     "--no-default-features",
 ]
 
+[tasks.release-build-whisper]
+install_crate = { crate_name = "cargo-component", version = "0.20.0" }
+command = "cargo-component"
+args = ["build", "-p", "golem-stt-whisper", "--release"]
+
+[tasks.release-build-whisper-portable]
+install_crate = { crate_name = "cargo-component", version = "0.20.0" }
+command = "cargo-component"
+args = [
+    "build",
+    "-p",
+    "golem-stt-whisper",
+    "--release",
+    "--no-default-features",
+]
+
 [tasks.wit-update]
 install_crate = { crate_name = "wit-deps-cli" }
 command = "wit-deps"
@@ -82,7 +132,7 @@ dependencies = ["wit-update"]
 
 script_runner = "@duckscript"
 script = """
-modules = array aws whisper deepgram
+modules = array aws azure whisper deepgram
 
 for module in ${modules}
     rm -r ${module}/wit/deps
@@ -116,6 +166,13 @@ cargo-binstall wac-cli --locked --no-confirm
 cd ../test-stt
 
 golem-cli --version
+golem-cli --version
+golem-cli app clean
+golem-cli app build -b aws-debug
+golem-cli app clean
+golem-cli app build -b azure-debug
+golem-cli app clean
+golem-cli app build -b deepgram-debug
 golem-cli app clean
 golem-cli app build -b whisper-debug
 '''

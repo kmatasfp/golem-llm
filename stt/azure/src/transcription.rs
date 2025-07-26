@@ -81,14 +81,16 @@ impl std::fmt::Display for AudioFormat {
 #[derive(Debug, Clone)]
 pub struct AudioConfig {
     pub format: AudioFormat,
+    pub channels: Option<u8>,
 }
 
 #[derive(Debug, Clone)]
 pub struct DiarizationConfig {
     pub enabled: bool,
-    pub max_speakers: Option<u32>,
+    pub max_speakers: u8,
 }
 
+#[allow(unused)]
 #[derive(Debug, Clone)]
 pub enum ProfanityFilterMode {
     None,
@@ -112,7 +114,6 @@ impl std::fmt::Display for ProfanityFilterMode {
 pub struct TranscriptionConfig {
     pub locales: Vec<String>,
     pub diarization: Option<DiarizationConfig>,
-    pub channels: Option<Vec<u32>>,
     pub profanity_filter_mode: Option<ProfanityFilterMode>,
 }
 
@@ -121,7 +122,7 @@ pub struct TranscriptionRequest {
     pub request_id: String,
     pub audio: Vec<u8>,
     pub audio_config: AudioConfig,
-    pub transcription_config: TranscriptionConfig,
+    pub transcription_config: Option<TranscriptionConfig>,
 }
 
 impl std::fmt::Debug for TranscriptionRequest {
@@ -171,34 +172,56 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
 
         let file_name = format!("audio.{}", request.audio_config.format);
         let mime_type = get_mime_type(&request.audio_config.format);
+        let req_locales = request
+            .transcription_config
+            .as_ref()
+            .map(|config| config.locales.clone())
+            .unwrap_or_default();
 
         let audio_size_bytes = request.audio.len();
 
-        let definition = AzureTranscriptionDefinition {
-            locales: if request.transcription_config.locales.is_empty() {
-                None
-            } else {
-                Some(request.transcription_config.locales.clone())
-            },
-            diarization: request.transcription_config.diarization.as_ref().map(|d| {
-                AzureDiarizationConfig {
-                    enabled: d.enabled,
-                    max_speakers: d.max_speakers,
-                }
-            }),
-            channels: request.transcription_config.channels.clone(),
-            profanity_filter_mode: request
-                .transcription_config
-                .profanity_filter_mode
-                .map(|pfm| pfm.to_string()),
-        };
+        let definition_json = if let Some(config) = request.transcription_config {
+            let channels = request
+                .audio_config
+                .channels
+                .as_ref()
+                .and_then(|&channels| {
+                    if !config
+                        .diarization
+                        .as_ref()
+                        .map(|dcf| dcf.enabled)
+                        .unwrap_or(false)
+                        && channels == 2
+                    {
+                        Some(vec![0, 1])
+                    } else {
+                        None
+                    }
+                });
 
-        let definition_json = serde_json::to_string(&definition).map_err(|e| {
-            SttError::Http(
-                request_id.clone(),
-                HttpError::Generic(format!("Failed to serialize definition: {}", e)),
-            )
-        })?;
+            let definition = AzureTranscriptionDefinition {
+                locales: if !config.locales.is_empty() {
+                    Some(config.locales)
+                } else {
+                    None
+                },
+                diarization: config.diarization.as_ref().map(|d| AzureDiarizationConfig {
+                    enabled: d.enabled,
+                    max_speakers: d.max_speakers as u32,
+                }),
+                channels,
+                profanity_filter_mode: config.profanity_filter_mode.map(|pfm| pfm.to_string()),
+            };
+
+            serde_json::to_string(&definition).map_err(|e| {
+                SttError::Http(
+                    request_id.clone(),
+                    HttpError::Generic(format!("Failed to serialize definition: {}", e)),
+                )
+            })?
+        } else {
+            "{}".to_string()
+        };
 
         let mut form = MultipartBuilder::new();
         form.add_bytes("audio", &file_name, &mime_type, request.audio);
@@ -230,7 +253,9 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
             })?;
 
             Ok(TranscriptionResponse {
+                request_id,
                 audio_size_bytes,
+                locales: req_locales,
                 azure_transcription,
             })
         } else {
@@ -246,39 +271,39 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
 
             match response.status() {
                 StatusCode::BAD_REQUEST => Err(SttError::APIBadRequest {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
                 StatusCode::UNAUTHORIZED => Err(SttError::APIUnauthorized {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
                 StatusCode::FORBIDDEN => Err(SttError::APIForbidden {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
                 StatusCode::NOT_FOUND => Err(SttError::APINotFound {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
                 StatusCode::CONFLICT => Err(SttError::APIConflict {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
                 StatusCode::UNPROCESSABLE_ENTITY => Err(SttError::APIUnprocessableEntity {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
                 StatusCode::TOO_MANY_REQUESTS => Err(SttError::APIRateLimit {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
                 status if status.is_server_error() => Err(SttError::APIInternalServerError {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
                 _ => Err(SttError::APIUnknown {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
             }
@@ -288,7 +313,9 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
 
 #[derive(Debug)]
 pub struct TranscriptionResponse {
+    pub request_id: String,
     pub audio_size_bytes: usize,
+    pub locales: Vec<String>,
     pub azure_transcription: AzureTranscription,
 }
 
@@ -345,8 +372,7 @@ struct AzureTranscriptionDefinition {
 #[serde(rename_all = "camelCase")]
 struct AzureDiarizationConfig {
     pub enabled: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_speakers: Option<u32>,
+    pub max_speakers: u32,
 }
 
 fn get_mime_type(format: &AudioFormat) -> String {
@@ -478,13 +504,13 @@ mod tests {
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                channels: Some(2),
             },
-            transcription_config: TranscriptionConfig {
+            transcription_config: Some(TranscriptionConfig {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
-                channels: None,
                 profanity_filter_mode: None,
-            },
+            }),
         };
 
         let result = api.transcribe_audio(request).await;
@@ -548,16 +574,16 @@ mod tests {
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                channels: None,
             },
-            transcription_config: TranscriptionConfig {
+            transcription_config: Some(TranscriptionConfig {
                 locales: vec!["en-US".to_string()],
                 diarization: Some(DiarizationConfig {
                     enabled: true,
-                    max_speakers: Some(3),
+                    max_speakers: 3,
                 }),
-                channels: None,
                 profanity_filter_mode: None,
-            },
+            }),
         };
 
         let _result = api.transcribe_audio(request).await.unwrap();
@@ -597,7 +623,7 @@ mod tests {
             locales: Some(vec!["en-US".to_string()]),
             diarization: Some(AzureDiarizationConfig {
                 enabled: true,
-                max_speakers: Some(3),
+                max_speakers: 3,
             }),
             channels: None,
             profanity_filter_mode: None,
@@ -698,13 +724,13 @@ mod tests {
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                channels: Some(2),
             },
-            transcription_config: TranscriptionConfig {
+            transcription_config: Some(TranscriptionConfig {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
-                channels: Some(vec![0, 1]),
                 profanity_filter_mode: None,
-            },
+            }),
         };
 
         let _result = api.transcribe_audio(request).await.unwrap();
@@ -796,13 +822,13 @@ mod tests {
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                channels: None,
             },
-            transcription_config: TranscriptionConfig {
+            transcription_config: Some(TranscriptionConfig {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
-                channels: None,
                 profanity_filter_mode: Some(ProfanityFilterMode::Masked),
-            },
+            }),
         };
 
         let _result = api.transcribe_audio(request).await.unwrap();
@@ -895,13 +921,9 @@ mod tests {
             audio: audio_bytes.clone(),
             audio_config: AudioConfig {
                 format: AudioFormat::flac,
-            },
-            transcription_config: TranscriptionConfig {
-                locales: vec![],
-                diarization: None,
                 channels: None,
-                profanity_filter_mode: None,
             },
+            transcription_config: None,
         };
 
         let _result = api.transcribe_audio(request).await.unwrap();
@@ -1196,16 +1218,16 @@ mod tests {
             audio: audio_bytes.clone(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                channels: None,
             },
-            transcription_config: TranscriptionConfig {
+            transcription_config: Some(TranscriptionConfig {
                 locales: vec!["en-US".to_string()],
                 diarization: Some(DiarizationConfig {
                     enabled: true,
-                    max_speakers: Some(2),
+                    max_speakers: 2,
                 }),
-                channels: None,
                 profanity_filter_mode: None,
-            },
+            }),
         };
 
         let result = api.transcribe_audio(request).await;
@@ -1359,13 +1381,13 @@ mod tests {
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                channels: None,
             },
-            transcription_config: TranscriptionConfig {
+            transcription_config: Some(TranscriptionConfig {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
-                channels: None,
                 profanity_filter_mode: None,
-            },
+            }),
         };
 
         let result = api.transcribe_audio(request).await;
@@ -1413,13 +1435,13 @@ mod tests {
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                channels: None,
             },
-            transcription_config: TranscriptionConfig {
+            transcription_config: Some(TranscriptionConfig {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
-                channels: None,
                 profanity_filter_mode: None,
-            },
+            }),
         };
 
         let result = api.transcribe_audio(request).await;
@@ -1467,13 +1489,13 @@ mod tests {
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                channels: None,
             },
-            transcription_config: TranscriptionConfig {
+            transcription_config: Some(TranscriptionConfig {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
-                channels: None,
                 profanity_filter_mode: None,
-            },
+            }),
         };
 
         let result = api.transcribe_audio(request).await;
@@ -1521,13 +1543,13 @@ mod tests {
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                channels: None,
             },
-            transcription_config: TranscriptionConfig {
+            transcription_config: Some(TranscriptionConfig {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
-                channels: None,
                 profanity_filter_mode: None,
-            },
+            }),
         };
 
         let result = api.transcribe_audio(request).await;
@@ -1575,13 +1597,13 @@ mod tests {
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                channels: None,
             },
-            transcription_config: TranscriptionConfig {
+            transcription_config: Some(TranscriptionConfig {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
-                channels: None,
                 profanity_filter_mode: None,
-            },
+            }),
         };
 
         let result = api.transcribe_audio(request).await;
@@ -1629,13 +1651,13 @@ mod tests {
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                channels: None,
             },
-            transcription_config: TranscriptionConfig {
+            transcription_config: Some(TranscriptionConfig {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
-                channels: None,
                 profanity_filter_mode: None,
-            },
+            }),
         };
 
         let result = api.transcribe_audio(request).await;
@@ -1683,13 +1705,13 @@ mod tests {
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                channels: None,
             },
-            transcription_config: TranscriptionConfig {
+            transcription_config: Some(TranscriptionConfig {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
-                channels: None,
                 profanity_filter_mode: None,
-            },
+            }),
         };
 
         let result = api.transcribe_audio(request).await;
@@ -1728,13 +1750,13 @@ mod tests {
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                channels: None,
             },
-            transcription_config: TranscriptionConfig {
+            transcription_config: Some(TranscriptionConfig {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
-                channels: None,
                 profanity_filter_mode: None,
-            },
+            }),
         };
 
         let result = api.transcribe_audio(request).await;
