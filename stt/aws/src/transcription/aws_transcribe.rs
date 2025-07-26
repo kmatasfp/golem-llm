@@ -225,6 +225,12 @@ pub struct Transcript {
     pub redacted_transcript_file_uri: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct DeleteTranscriptionJobRequest {
+    pub transcription_job_name: String,
+}
+
 // https://docs.aws.amazon.com/transcribe/latest/APIReference/API_GetTranscriptionJob.html
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "PascalCase")]
@@ -379,9 +385,14 @@ pub trait TranscribeService {
         vocabulary_name: Option<&str>,
     ) -> Result<StartTranscriptionJobResponse, golem_stt::error::Error>;
 
+    async fn delete_transcription_job(
+        &self,
+        transcription_job_name: &str,
+    ) -> Result<(), golem_stt::error::Error>;
+
     async fn get_transcription_job(
         &self,
-        transcription_job_name: String,
+        transcription_job_name: &str,
     ) -> Result<GetTranscriptionJobResponse, golem_stt::error::Error>;
 
     async fn wait_for_transcription_job_completion(
@@ -994,9 +1005,111 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
         }
     }
 
+    async fn delete_transcription_job(
+        &self,
+        transcription_job_name: &str,
+    ) -> Result<(), golem_stt::error::Error> {
+        let timestamp = Utc::now();
+        let uri = format!(
+            "https://transcribe.{}.amazonaws.com/",
+            self.signer.get_region()
+        );
+
+        let request_body = DeleteTranscriptionJobRequest {
+            transcription_job_name: transcription_job_name.to_string(),
+        };
+
+        let json_body = serde_json::to_string(&request_body).map_err(|e| {
+            (
+                transcription_job_name.to_string(),
+                golem_stt::http::Error::Generic(format!("Failed to serialize request: {}", e)),
+            )
+        })?;
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(&uri)
+            .header("Content-Type", "application/x-amz-json-1.1")
+            .header(
+                "X-Amz-Target",
+                "com.amazonaws.transcribe.Transcribe.DeleteTranscriptionJob",
+            )
+            .body(json_body.into_bytes())
+            .map_err(|e| {
+                (
+                    transcription_job_name.to_string(),
+                    golem_stt::http::Error::HttpError(e),
+                )
+            })?;
+
+        let signed_request = self
+            .signer
+            .sign_request(request, timestamp)
+            .map_err(|err| {
+                (
+                    transcription_job_name.to_string(),
+                    golem_stt::http::Error::Generic(format!("Failed to sign request: {}", err)),
+                )
+            })?;
+
+        let response = self
+            .http_client
+            .execute(signed_request)
+            .await
+            .map_err(|err| (transcription_job_name.to_string(), err))?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            let error_body = String::from_utf8(response.body().to_vec())
+                .unwrap_or_else(|_| "Unknown error".to_string());
+
+            let status = response.status();
+            let request_id = transcription_job_name.to_string();
+
+            match status.as_u16() {
+                400 => Err(golem_stt::error::Error::APIBadRequest {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe DeleteTranscriptionJob bad request: {}",
+                        error_body
+                    ),
+                }),
+                403 => Err(golem_stt::error::Error::APIForbidden {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe DeleteTranscriptionJob forbidden: {}",
+                        error_body
+                    ),
+                }),
+                500 => Err(golem_stt::error::Error::APIInternalServerError {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe DeleteTranscriptionJob server error: {}",
+                        error_body
+                    ),
+                }),
+                503 => Err(golem_stt::error::Error::APIInternalServerError {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe DeleteTranscriptionJob service unavailable: {}",
+                        error_body
+                    ),
+                }),
+                _ => Err(golem_stt::error::Error::APIUnknown {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe DeleteTranscriptionJob unknown error ({}): {}",
+                        status, error_body
+                    ),
+                }),
+            }
+        }
+    }
+
     async fn get_transcription_job(
         &self,
-        transcription_job_name: String,
+        transcription_job_name: &str,
     ) -> Result<GetTranscriptionJobResponse, golem_stt::error::Error> {
         let timestamp = Utc::now();
         let uri = format!(
@@ -1005,12 +1118,12 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
         );
 
         let request_body = GetTranscriptionJobRequest {
-            transcription_job_name: transcription_job_name.clone(),
+            transcription_job_name: transcription_job_name.to_string(),
         };
 
         let json_body = serde_json::to_string(&request_body).map_err(|e| {
             (
-                transcription_job_name.clone(),
+                transcription_job_name.to_string(),
                 golem_stt::http::Error::Generic(format!("Failed to serialize request: {}", e)),
             )
         })?;
@@ -1026,7 +1139,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
             .body(json_body.into_bytes())
             .map_err(|e| {
                 (
-                    transcription_job_name.clone(),
+                    transcription_job_name.to_string(),
                     golem_stt::http::Error::HttpError(e),
                 )
             })?;
@@ -1036,7 +1149,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
             .sign_request(request, timestamp)
             .map_err(|err| {
                 (
-                    transcription_job_name.clone(),
+                    transcription_job_name.to_string(),
                     golem_stt::http::Error::Generic(format!("Failed to sign request: {}", err)),
                 )
             })?;
@@ -1045,13 +1158,13 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
             .http_client
             .execute(signed_request)
             .await
-            .map_err(|err| (transcription_job_name.clone(), err))?;
+            .map_err(|err| (transcription_job_name.to_string(), err))?;
 
         if response.status().is_success() {
             let transcription_response: GetTranscriptionJobResponse =
                 serde_json::from_slice(response.body()).map_err(|e| {
                     (
-                        transcription_job_name.clone(),
+                        transcription_job_name.to_string(),
                         golem_stt::http::Error::Generic(format!(
                             "Failed to deserialize response: {}",
                             e
@@ -1065,7 +1178,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
                 .unwrap_or_else(|_| "Unknown error".to_string());
 
             let status = response.status();
-            let request_id = transcription_job_name.clone();
+            let request_id = transcription_job_name.to_string();
 
             // Map HTTP status codes based on AWS Transcribe GetTranscriptionJob API spec
             match status.as_u16() {
@@ -1127,9 +1240,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
 
             self.runtime.sleep(retry_delay).await;
 
-            let res = self
-                .get_transcription_job(transcription_job_name.to_string())
-                .await?;
+            let res = self.get_transcription_job(transcription_job_name).await?;
 
             match res.transcription_job.transcription_job_status.as_str() {
                 "COMPLETED" => {
@@ -2091,6 +2202,79 @@ mod tests {
             actual_request, expected_request,
             "Request with identify_language should ignore vocabulary and model settings"
         );
+    }
+
+    #[wstd::test]
+    async fn test_transcribe_delete_transcription_job_request() {
+        let access_key = "AKIAIOSFODNN7EXAMPLE";
+        let secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        let region = "us-east-1";
+
+        let mock_client = MockHttpClient::new();
+        mock_client.expect_response(
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(vec![])
+                .unwrap(),
+        );
+
+        let mock_runtime = MockRuntime::new();
+
+        let transcribe_client = TranscribeClient::new(
+            access_key.to_string(),
+            secret_key.to_string(),
+            region.to_string(),
+            mock_client,
+            mock_runtime,
+        );
+
+        let transcription_job_name = "test-job-name".to_string();
+        let result = transcribe_client
+            .delete_transcription_job(&transcription_job_name)
+            .await;
+
+        assert!(result.is_ok());
+
+        let request = transcribe_client
+            .http_client
+            .last_captured_request()
+            .unwrap();
+        assert_eq!(request.method(), "POST");
+        assert_eq!(
+            request.uri().to_string(),
+            format!("https://transcribe.{}.amazonaws.com/", region)
+        );
+        assert_eq!(
+            request.headers().get("content-type").unwrap(),
+            "application/x-amz-json-1.1"
+        );
+        assert_eq!(
+            request.headers().get("x-amz-target").unwrap(),
+            "com.amazonaws.transcribe.Transcribe.DeleteTranscriptionJob"
+        );
+
+        let expected_request = DeleteTranscriptionJobRequest {
+            transcription_job_name,
+        };
+
+        let actual_request: DeleteTranscriptionJobRequest =
+            serde_json::from_slice(request.body()).unwrap();
+        assert_eq!(actual_request, expected_request);
+
+        assert!(request.headers().contains_key("x-amz-date"));
+        assert!(request.headers().contains_key("x-amz-content-sha256"));
+        assert!(request.headers().contains_key("authorization"));
+
+        let auth_header = request
+            .headers()
+            .get("authorization")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(auth_header.starts_with("AWS4-HMAC-SHA256"));
+        assert!(auth_header.contains("Credential="));
+        assert!(auth_header.contains("SignedHeaders="));
+        assert!(auth_header.contains("Signature="));
     }
 
     #[wstd::test]
