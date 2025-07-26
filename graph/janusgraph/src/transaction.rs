@@ -1075,32 +1075,48 @@ impl GuestTransaction for Transaction {
             return Ok(vec![]);
         }
 
-        let mut gremlin = "g".to_string();
+        if vertices.len() == 1 {
+            let spec = &vertices[0];
+            let vertex = self.create_vertex(spec.vertex_type.clone(), spec.properties.clone())?;
+            return Ok(vec![vertex]);
+        }
+
+        let mut gremlin = "g.union(".to_string();
         let mut bindings = serde_json::Map::new();
+        let mut union_parts = Vec::new();
 
         for (i, spec) in vertices.iter().enumerate() {
             let label_binding = format!("l{i}");
-            gremlin.push_str(&format!(".addV({label_binding})"));
+            let mut part = format!("addV({label_binding})");
             bindings.insert(label_binding, json!(spec.vertex_type));
 
             for (j, (key, value)) in spec.properties.iter().enumerate() {
                 let key_binding = format!("k_{i}_{j}");
                 let val_binding = format!("v_{i}_{j}");
-                gremlin.push_str(&format!(".property({key_binding}, {val_binding})"));
+                part.push_str(&format!(".property({key_binding}, {val_binding})"));
                 bindings.insert(key_binding, json!(key));
                 bindings.insert(val_binding, conversions::to_json_value(value.clone())?);
             }
+            
+            union_parts.push(part);
         }
 
-        gremlin.push_str(".elementMap()");
+        gremlin.push_str(&union_parts.join(", "));
+        gremlin.push_str(").elementMap()");
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
-        let result_data = response["result"]["data"].as_array().ok_or_else(|| {
-            GraphError::InternalError(
+        // Handle GraphSON g:List structure
+        let data = &response["result"]["data"];
+        let result_data = if let Some(arr) = data.as_array() {
+            arr.clone()
+        } else if let Some(inner) = data.get("@value").and_then(Value::as_array) {
+            inner.clone()
+        } else {
+            return Err(GraphError::InternalError(
                 "Invalid response from Gremlin for create_vertices".to_string(),
-            )
-        })?;
+            ));
+        };
 
         result_data
             .iter()
@@ -1113,9 +1129,20 @@ impl GuestTransaction for Transaction {
             return Ok(vec![]);
         }
 
-        let mut gremlin = String::new();
+        if edges.len() == 1 {
+            let spec = &edges[0];
+            let edge = self.create_edge(
+                spec.edge_type.clone(),
+                spec.from_vertex.clone(),
+                spec.to_vertex.clone(),
+                spec.properties.clone(),
+            )?;
+            return Ok(vec![edge]);
+        }
+
+        let mut gremlin = "g.union(".to_string();
         let mut bindings = serde_json::Map::new();
-        let mut edge_queries = Vec::new();
+        let mut union_parts = Vec::new();
 
         for (i, edge_spec) in edges.iter().enumerate() {
             let from_binding = format!("from_{i}");
@@ -1137,28 +1164,35 @@ impl GuestTransaction for Transaction {
             bindings.insert(to_binding.clone(), to_id_json);
             bindings.insert(label_binding.clone(), json!(edge_spec.edge_type));
 
-            let mut edge_query =
-                format!("g.V({from_binding}).addE({label_binding}).to(g.V({to_binding}))");
+            let mut part = format!("V({from_binding}).addE({label_binding}).to(__.V({to_binding}))");
 
             for (j, (key, value)) in edge_spec.properties.iter().enumerate() {
                 let key_binding = format!("k_{i}_{j}");
                 let val_binding = format!("v_{i}_{j}");
-                edge_query.push_str(&format!(".property({key_binding}, {val_binding})"));
+                part.push_str(&format!(".property({key_binding}, {val_binding})"));
                 bindings.insert(key_binding, json!(key));
                 bindings.insert(val_binding, conversions::to_json_value(value.clone())?);
             }
 
-            edge_queries.push(edge_query);
+            union_parts.push(part);
         }
 
-        gremlin.push_str(&edge_queries.join(".next();"));
-        gremlin.push_str(".elementMap().toList()");
+        gremlin.push_str(&union_parts.join(", "));
+        gremlin.push_str(").elementMap()");
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
-        let result_data = response["result"]["data"].as_array().ok_or_else(|| {
-            GraphError::InternalError("Invalid response from Gremlin for create_edges".to_string())
-        })?;
+        // Handle GraphSON g:List structure
+        let data = &response["result"]["data"];
+        let result_data = if let Some(arr) = data.as_array() {
+            arr.clone()
+        } else if let Some(inner) = data.get("@value").and_then(Value::as_array) {
+            inner.clone()
+        } else {
+            return Err(GraphError::InternalError(
+                "Invalid response from Gremlin for create_edges".to_string(),
+            ));
+        };
 
         result_data
             .iter()

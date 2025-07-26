@@ -33,9 +33,17 @@ fn build_traversal_step(
     };
     if let Some(labels) = edge_types {
         if !labels.is_empty() {
-            let key = format!("edge_labels_{}", bindings.len());
-            bindings.insert(key.clone(), json!(labels));
-            return format!("{base}({key}).otherV()");
+            let label_bindings: Vec<String> = labels
+                .iter()
+                .enumerate()
+                .map(|(i, label)| {
+                    let key = format!("edge_label_{}_{}", bindings.len(), i);
+                    bindings.insert(key.clone(), json!(label));
+                    key
+                })
+                .collect();
+            let labels_str = label_bindings.join(", ");
+            return format!("{base}({labels_str}).otherV()");
         }
     }
     format!("{base}().otherV()")
@@ -216,20 +224,26 @@ impl Transaction {
             Direction::Both => "both",
         }
         .to_string();
-        let label_key = if let Some(labels) = &edge_types {
+        
+        let gremlin = if let Some(labels) = &edge_types {
             if !labels.is_empty() {
-                bindings.insert("edge_labels".to_string(), json!(labels));
-                "edge_labels".to_string()
+                let label_bindings: Vec<String> = labels
+                    .iter()
+                    .enumerate()
+                    .map(|(i, label)| {
+                        let key = format!("edge_label_{i}");
+                        bindings.insert(key.clone(), json!(label));
+                        key
+                    })
+                    .collect();
+                let labels_str = label_bindings.join(", ");
+                format!("g.V(source_id).repeat({step}({labels_str})).times({distance}).dedup().elementMap()")
             } else {
-                "".to_string()
+                format!("g.V(source_id).repeat({step}()).times({distance}).dedup().elementMap()")
             }
         } else {
-            "".to_string()
+            format!("g.V(source_id).repeat({step}()).times({distance}).dedup().elementMap()")
         };
-
-        let gremlin = format!(
-            "g.V(source_id).repeat({step}({label_key})).times({distance}).dedup().elementMap()"
-        );
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
