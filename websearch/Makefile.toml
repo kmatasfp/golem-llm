@@ -145,7 +145,7 @@ end
 
 # Copy WIT files for integration tests
 rm -r ../test/websearch/wit
-mkdir ../test/websearch/wit/deps/golem-websearch
+mkdir ../test/websearch/wit/deps/golem-web-search
 mkdir ../test/websearch/wit/deps/io
 cp wit/golem-web-search.wit ../test/websearch/wit/deps/golem-web-search/golem-web-search.wit
 cp wit/deps/wasi:io/error.wit ../test/websearch/wit/deps/io/error.wit
