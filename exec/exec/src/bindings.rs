@@ -37,7 +37,7 @@ thod]session.download\x01\x1a\x01j\x01\x11\x01\x09\x01@\x02\x04self\x0e\x03dirs\
 ippets\x07modules\x0b\x05stdin\x12\x04args\x11\x03env\x14\x0bconstraints\x15\0\x16\
 \x04\0\x03run\x01\x1e\x04\0\x19golem:exec/executor@1.0.0\x05\x06\x04\0\"golem:ex\
 ec-full/exec-library@1.0.0\x04\0\x0b\x12\x01\0\x0cexec-library\x03\0\0\0G\x09pro\
-ducers\x01\x0cprocessed-by\x02\x0dwit-component\x070.220.0\x10wit-bindgen-rust\x06\
+ducers\x01\x0cprocessed-by\x02\x0dwit-component\x070.220.1\x10wit-bindgen-rust\x06\
 0.36.0";
 #[inline(never)]
 #[doc(hidden)]
