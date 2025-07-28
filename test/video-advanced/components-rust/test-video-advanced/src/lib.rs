@@ -134,7 +134,7 @@ impl Guest for Component {
         poll_job_until_complete(&job_id, "test2")
     }
 
-    /// Test3 - Image to video generation with static and dynamic mask (URL input, save job-id for test9)
+    /// Test3 - Image to video generation with static and dynamic mask (URL input)
     fn test3() -> String {
         println!("Test3: Image to video with static and dynamic mask");
 
@@ -277,7 +277,7 @@ impl Guest for Component {
         poll_job_until_complete(&job_id, "test6")
     }
 
-    /// Test7 - Video effects with single input image (inline raw bytes) amd effect boom
+    /// Test7 - Video effects with single input image (inline raw bytes) amd effect fuzzyfuzzy
     fn test7() -> String {
         println!("Test7: Video effects with single image");
 
