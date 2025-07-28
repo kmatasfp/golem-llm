@@ -129,9 +129,9 @@ for module in ${modules}
 end
 
 # Copy WIT files for integration tests
-rm -r ../test-exec/wit
-mkdir ../test-exec/wit/deps/golem-exec
-cp wit/golem-exec.wit ../test-exec/wit/deps/golem-exec/golem-exec.wit
+rm -r ../test/exec/wit
+mkdir ../test/exec/wit/deps/golem-exec
+cp wit/golem-exec.wit ../test/exec/wit/deps/golem-exec/golem-exec.wit
 
 echo "Copied WIT for module test"
 """
@@ -139,11 +139,11 @@ echo "Copied WIT for module test"
 [tasks.build-test-components]
 dependencies = ["build"]
 install_crate = "cargo-binstall"
-description = "Builds llm test components with golem-cli"
+description = "Builds exec test components with golem-cli"
 script = '''
 cargo-binstall golem-cli@1.2.5 --locked --no-confirm
 cargo-binstall wac-cli --locked --no-confirm
-cd ../test
+cd ../test/exec
 
 golem-cli --version
 golem-cli app clean

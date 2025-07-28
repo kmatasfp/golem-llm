@@ -13,4 +13,4 @@ components:
 dependencies:
   test:exec-js:
     - type: wasm
-      path: ../target/debug/golem_exec_javascript.wasm
+      path: ../../target/debug/golem_exec_javascript.wasm
