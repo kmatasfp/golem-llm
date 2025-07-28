@@ -1,9 +1,11 @@
 #[allow(static_mut_refs)]
 mod bindings;
 
+use golem_rust::atomically;
 use crate::bindings::exports::test::video_advanced_exports::test_video_api::*;
 use crate::bindings::golem::video_generation::types;
 use crate::bindings::golem::video_generation::{video_generation, advanced, lip_sync};
+use crate::bindings::test::helper_client::test_helper_client::TestHelperApi;
 use std::fs::File;
 use std::io::Read;
 use std::thread;
@@ -70,7 +72,7 @@ impl Guest for Component {
             Err(error) => return format!("ERROR: Failed to generate video: {:?}", error),
         };
 
-        poll_job_until_complete(&job_id, "test1")
+        poll_job_until_complete_with_durability(&job_id, "test1")
     }
 
     /// Test2 - Image to video generation with advancedcamera control enum
@@ -687,6 +689,62 @@ fn poll_job_until_complete(job_id: &str, test_name: &str) -> String {
             }
         }
         
+        // Wait 5 seconds before polling again
+        thread::sleep(Duration::from_secs(5));
+    }
+}
+
+fn poll_job_until_complete_with_durability(job_id: &str, test_name: &str) -> String {
+    println!("Polling for {} results with job ID: {} (with durability test)", test_name, job_id);
+
+    // Wait 5 seconds after job creation before starting polling
+    println!("Waiting 5 seconds for job initialization...");
+    thread::sleep(Duration::from_secs(5));
+
+    let name = std::env::var("GOLEM_WORKER_NAME").unwrap();
+    let mut round = 0;
+   
+    // Poll every 5 seconds until completion
+    loop {
+        match video_generation::poll(&job_id) {
+            Ok(video_result) => {
+                match video_result.status {
+                    types::JobStatus::Pending => {
+                        println!("{} is pending... (round {})", test_name, round);
+                    }
+                    types::JobStatus::Running => {
+                        println!("{} is running... (round {})", test_name, round);
+                    }
+                    types::JobStatus::Succeeded => {
+                        println!("{} completed successfully after {} rounds!", test_name, round);
+                        let file_path = save_video_result(&video_result, test_name);
+                        return format!("{} generated successfully. Saved to: {} (durability test passed)", test_name, file_path);
+                    }
+                    types::JobStatus::Failed(error_msg) => {
+                        return format!("{} failed: {}", test_name, error_msg);
+                    }
+                }
+            }
+            Err(error) => {
+                return format!("Error polling {}: {:?}", test_name, error);
+            }
+        }
+        
+        // Durability test simulation: simulate a crash during polling, but only first time
+        // After automatic recovery it will continue and finish the request successfully
+        if round == 1 {
+            atomically(|| {
+                let client = TestHelperApi::new(&name);
+                let answer = client.blocking_inc_and_get();
+                if answer == 1 {
+                    panic!("Simulating crash during durability test")
+                }
+            });
+        }
+
+        round += 1;
+        
+        println!("Sleeping for 5 seconds");
         // Wait 5 seconds before polling again
         thread::sleep(Duration::from_secs(5));
     }

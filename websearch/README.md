@@ -1,6 +1,6 @@
-# golem-ai
+# golem-llm
 
-WebAssembly Components providing API for modules LLM, WebSearch, Video and Search for various providers.
+WebAssembly Components providing a unified API for various LLM providers.
 
 ## Versions
 
