@@ -30,7 +30,7 @@ fn py_exception_error(vm: &vm::VirtualMachine, err: &PyBaseExceptionRef) -> Erro
 }
 
 fn io_error(error: std::io::Error) -> Error {
-    Error::Internal(format!("IO error: {}", error))
+    Error::Internal(format!("IO error: {error}"))
 }
 
 struct PythonComponent;
@@ -136,7 +136,7 @@ impl PythonSession {
                         return Err(io_error(err));
                     }
                 }
-                if let Some(content) = get_contents_as_string(&file) {
+                if let Some(content) = get_contents_as_string(file) {
                     if let Err(err) = std::fs::write(&path, content) {
                         return Err(io_error(err));
                     }

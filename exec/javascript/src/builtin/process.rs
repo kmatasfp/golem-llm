@@ -1,4 +1,3 @@
-
 pub const PROCESS_JS: &str = include_str!("process.js");
 
 pub const WIRE_JS: &str = r#"

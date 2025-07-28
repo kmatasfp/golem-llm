@@ -22,7 +22,7 @@ pub mod native_module {
                     let decoded_string = decoded.into_owned();
                     List((Some(decoded_string), None))
                 }
-                None => List((None, Some(format!("Unsupported encoding: {}", encoding)))),
+                None => List((None, Some(format!("Unsupported encoding: {encoding}")))),
             },
             Err(err) => {
                 let error_message = format!("Failed to read file {path:?}: {err}");

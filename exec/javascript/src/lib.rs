@@ -18,7 +18,7 @@ fn js_engine_error(err: rquickjs::Error) -> Error {
 }
 
 fn io_error(error: std::io::Error) -> Error {
-    Error::Internal(format!("IO error: {}", error))
+    Error::Internal(format!("IO error: {error}"))
 }
 
 static TEMP_DIR_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -130,7 +130,7 @@ impl JavaScriptSession {
 
         for file in &self.modules {
             let name = file.name.clone();
-            let contents = get_contents_as_string(&file).ok_or_else(|| {
+            let contents = get_contents_as_string(file).ok_or_else(|| {
                 Error::CompilationFailed(stage_result_failure(format!(
                     "File {name} has invalid content encoding"
                 )))
