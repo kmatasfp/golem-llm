@@ -387,12 +387,6 @@ dependencies = [
 
 [[package]]
 name = "base64"
-version = "0.21.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
-
-[[package]]
-name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
@@ -916,7 +910,7 @@ dependencies = [
 name = "golem-llm-anthropic"
 version = "0.0.0"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "golem-llm",
  "golem-rust",
  "log",
@@ -936,7 +930,7 @@ dependencies = [
  "aws-smithy-types",
  "aws-smithy-wasm",
  "aws-types",
- "base64 0.22.1",
+ "base64",
  "bytes",
  "golem-llm",
  "golem-rust",
@@ -953,7 +947,7 @@ dependencies = [
 name = "golem-llm-grok"
 version = "0.0.0"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "golem-llm",
  "golem-rust",
  "log",
@@ -967,7 +961,7 @@ dependencies = [
 name = "golem-llm-ollama"
 version = "0.0.0"
 dependencies = [
- "base64 0.21.7",
+ "base64",
  "golem-llm",
  "golem-rust",
  "log",
@@ -983,7 +977,7 @@ dependencies = [
 name = "golem-llm-openai"
 version = "0.0.0"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "golem-llm",
  "golem-rust",
  "log",
@@ -997,7 +991,7 @@ dependencies = [
 name = "golem-llm-openrouter"
 version = "0.0.0"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "golem-llm",
  "golem-rust",
  "log",
@@ -1051,7 +1045,7 @@ dependencies = [
 name = "golem-search-algolia"
 version = "0.0.0"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "chrono",
  "golem-rust",
  "golem-search",
@@ -1066,7 +1060,7 @@ dependencies = [
 name = "golem-search-elasticsearch"
 version = "0.0.0"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "chrono",
  "golem-rust",
  "golem-search",
@@ -1081,7 +1075,7 @@ dependencies = [
 name = "golem-search-meilisearch"
 version = "0.0.0"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "chrono",
  "golem-rust",
  "golem-search",
@@ -1096,7 +1090,7 @@ dependencies = [
 name = "golem-search-opensearch"
 version = "0.0.0"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "chrono",
  "golem-rust",
  "golem-search",
@@ -1111,7 +1105,7 @@ dependencies = [
 name = "golem-search-typesense"
 version = "0.0.0"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "chrono",
  "golem-rust",
  "golem-search",
@@ -1142,7 +1136,7 @@ dependencies = [
 name = "golem-video-kling"
 version = "0.0.0"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "golem-rust",
  "golem-video",
  "hmac-sha256",
@@ -1157,7 +1151,7 @@ dependencies = [
 name = "golem-video-runway"
 version = "0.0.0"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "golem-rust",
  "golem-video",
  "log",
@@ -1171,7 +1165,7 @@ dependencies = [
 name = "golem-video-stability"
 version = "0.0.0"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "golem-rust",
  "golem-video",
  "image",
@@ -1186,7 +1180,7 @@ dependencies = [
 name = "golem-video-veo"
 version = "0.0.0"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "data-encoding",
  "golem-rust",
  "golem-video",
@@ -1231,7 +1225,7 @@ dependencies = [
 name = "golem-web-search-brave"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "golem-rust",
  "golem-web-search",
  "log",
@@ -1248,7 +1242,7 @@ dependencies = [
 name = "golem-web-search-google"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "golem-rust",
  "golem-web-search",
  "log",
@@ -1265,7 +1259,7 @@ dependencies = [
 name = "golem-web-search-serper"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "golem-rust",
  "golem-web-search",
  "log",
@@ -1281,7 +1275,7 @@ dependencies = [
 name = "golem-web-search-tavily"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "golem-rust",
  "golem-web-search",
  "log",
@@ -1990,7 +1984,7 @@ name = "reqwest"
 version = "0.12.15"
 source = "git+https://github.com/golemcloud/reqwest?branch=update-may-2025#c916d796a87bdace112d24b862142597d1074305"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "bytes",
  "encoding_rs",
  "futures-core",
