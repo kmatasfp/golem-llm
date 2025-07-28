@@ -1,8 +1,6 @@
-use golem_exec::golem::exec::executor::{
-    Error, ExecResult, File, Guest, GuestSession, Language, Limits,
-};
-use golem_exec::golem::exec::types::{LanguageKind, StageResult};
-use golem_exec::{get_contents, get_contents_as_string, stage_result_failure};
+use crate::golem::exec::executor::{Error, ExecResult, File, Language, Limits};
+use crate::golem::exec::types::{LanguageKind, StageResult};
+use crate::{get_contents_as_string, io_error, stage_result_failure};
 use indoc::indoc;
 use rustpython::vm::builtins::{PyBaseException, PyBaseExceptionRef, PyStr, PyStrRef};
 use rustpython::vm::{
@@ -10,13 +8,13 @@ use rustpython::vm::{
 };
 use rustpython::{vm, InterpreterConfig};
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU32;
 use wstd::time::Instant;
 
 static TEMP_DIR_COUNTER: AtomicU32 = AtomicU32::new(0);
 
-fn py_exception_error(vm: &vm::VirtualMachine, err: &PyBaseExceptionRef) -> Error {
+fn py_exception_error(vm: &VirtualMachine, err: &PyBaseExceptionRef) -> Error {
     let mut output = String::new();
     match vm.write_exception(&mut output, err) {
         Ok(_) => Error::RuntimeFailed(StageResult {
@@ -29,26 +27,10 @@ fn py_exception_error(vm: &vm::VirtualMachine, err: &PyBaseExceptionRef) -> Erro
     }
 }
 
-fn io_error(error: std::io::Error) -> Error {
-    Error::Internal(format!("IO error: {error}"))
-}
-
-struct PythonComponent;
+pub struct PythonComponent;
 
 impl PythonComponent {
-    fn ensure_language_is_supported(lang: &Language) -> Result<(), Error> {
-        if lang.kind != LanguageKind::Python {
-            Err(Error::UnsupportedLanguage)
-        } else {
-            Ok(())
-        }
-    }
-}
-
-impl Guest for PythonComponent {
-    type Session = PythonSession;
-
-    fn run(
+    pub fn run(
         lang: Language,
         snippet: String,
         files: Vec<File>,
@@ -59,6 +41,14 @@ impl Guest for PythonComponent {
     ) -> Result<ExecResult, Error> {
         let session = PythonSession::new(lang, files);
         session.run(snippet, args, stdin, env, constraints)
+    }
+}
+
+fn ensure_language_is_supported(lang: &Language) -> Result<(), Error> {
+    if lang.kind != LanguageKind::Python {
+        Err(Error::UnsupportedLanguage)
+    } else {
+        Ok(())
     }
 }
 
@@ -94,7 +84,7 @@ struct PythonSessionState {
     cwd: String,
 }
 
-struct PythonSession {
+pub struct PythonSession {
     lang: Language,
     modules: Vec<File>,
     data_root: PathBuf,
@@ -103,63 +93,18 @@ struct PythonSession {
 }
 
 impl PythonSession {
-    fn ensure_initialized(&self) -> Result<(), Error> {
-        let state = self.state.borrow_mut().take();
-        match state {
-            None => {
-                let state = self.initialize()?;
-                *self.state.borrow_mut() = Some(state);
-            }
-            Some(state) => {
-                *self.state.borrow_mut() = Some(state);
-            }
+    pub fn data_root(&self) -> &Path {
+        &self.data_root
+    }
+
+    pub fn set_cwd(&self, path: String) -> Result<(), Error> {
+        if let Some(state) = self.state.borrow_mut().as_mut() {
+            state.cwd = path;
         }
         Ok(())
     }
 
-    fn initialize(&self) -> Result<PythonSessionState, Error> {
-        std::fs::create_dir_all(&self.module_root).map_err(io_error)?;
-
-        let mut settings =
-            Settings::default().with_path(self.module_root.to_string_lossy().to_string());
-        settings.ignore_environment = true;
-
-        let config = InterpreterConfig::new().settings(settings).init_stdlib();
-        let interpreter = config.interpreter();
-
-        interpreter.enter(|vm| {
-            for file in &self.modules {
-                let name = &file.name;
-                let path = self.module_root.join(name);
-                if let Some(parent) = path.parent() {
-                    if let Err(err) = std::fs::create_dir_all(parent) {
-                        return Err(io_error(err));
-                    }
-                }
-                if let Some(content) = get_contents_as_string(file) {
-                    if let Err(err) = std::fs::write(&path, content) {
-                        return Err(io_error(err));
-                    }
-                } else {
-                    return Err(Error::CompilationFailed(stage_result_failure(format!(
-                        "Invalid file encoding for {}",
-                        file.name
-                    ))));
-                }
-            }
-            Ok(())
-        })?;
-
-        Ok(PythonSessionState {
-            interpreter,
-            last_error: None,
-            cwd: "/".to_string(),
-        })
-    }
-}
-
-impl GuestSession for PythonSession {
-    fn new(lang: Language, modules: Vec<File>) -> Self {
+    pub fn new(lang: Language, modules: Vec<File>) -> Self {
         let id = TEMP_DIR_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let module_root = PathBuf::from("/tmp")
             .join("py")
@@ -178,32 +123,16 @@ impl GuestSession for PythonSession {
         }
     }
 
-    fn upload(&self, file: File) -> Result<(), Error> {
-        let path = self.data_root.join(&file.name);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|err| Error::Internal(err.to_string()))?;
-        }
-        let contents = get_contents(&file).ok_or_else(|| {
-            Error::CompilationFailed(stage_result_failure("Invalid file encoding"))
-        })?;
-
-        std::fs::write(&path, contents).map_err(|err| {
-            Error::Internal(format!("Failed to write file {}: {}", file.name, err))
-        })?;
-
-        Ok(())
-    }
-
-    fn run(
+    pub fn run(
         &self,
         snippet: String,
         args: Vec<String>,
         stdin: Option<String>,
         env: Vec<(String, String)>,
-        constraints: Option<Limits>,
+        _constraints: Option<Limits>,
     ) -> Result<ExecResult, Error> {
         self.ensure_initialized()?;
-        PythonComponent::ensure_language_is_supported(&self.lang)?;
+        ensure_language_is_supported(&self.lang)?;
 
         let start = Instant::now();
 
@@ -211,7 +140,7 @@ impl GuestSession for PythonSession {
         let state = maybe_state.as_ref().unwrap();
         let mut result = None;
 
-        let vm_res: Result<(), PyRef<PyBaseException>> = state.interpreter.enter(|vm| {
+        let _vm_res: Result<(), PyRef<PyBaseException>> = state.interpreter.enter(|vm| {
             let code_obj = vm
                 .compile(&snippet, vm::compiler::Mode::Exec, "<snippet>".to_string())
                 .map_err(|err| vm.new_syntax_error(&err, Some(&snippet)))?;
@@ -393,35 +322,55 @@ impl GuestSession for PythonSession {
         result.unwrap()
     }
 
-    fn download(&self, path: String) -> Result<Vec<u8>, Error> {
-        let full_path = self.data_root.join(&path);
-        if !full_path.exists() {
-            return Err(Error::Internal(format!(
-                "File {} does not exist",
-                full_path.display()
-            )));
-        }
-        std::fs::read(&full_path)
-            .map_err(|err| Error::Internal(format!("Failed to read file {path}: {err}")))
-    }
-
-    fn list_files(&self, dir: String) -> Result<Vec<String>, Error> {
-        let path = self.data_root.join(&dir);
-        let mut result = Vec::new();
-        for entry in std::fs::read_dir(path).map_err(io_error)? {
-            let entry = entry.map_err(io_error)?;
-            if entry.metadata().map_err(io_error)?.is_file() {
-                result.push(entry.file_name().to_string_lossy().to_string());
+    fn ensure_initialized(&self) -> Result<(), Error> {
+        let state = self.state.borrow_mut().take();
+        match state {
+            None => {
+                let state = self.initialize()?;
+                *self.state.borrow_mut() = Some(state);
+            }
+            Some(state) => {
+                *self.state.borrow_mut() = Some(state);
             }
         }
-        Ok(result)
+        Ok(())
     }
 
-    fn set_working_dir(&self, path: String) -> Result<(), Error> {
-        if let Some(state) = self.state.borrow_mut().as_mut() {
-            state.cwd = path;
+    fn initialize(&self) -> Result<PythonSessionState, Error> {
+        std::fs::create_dir_all(&self.module_root).map_err(io_error)?;
+
+        let mut settings =
+            Settings::default().with_path(self.module_root.to_string_lossy().to_string());
+        settings.ignore_environment = true;
+
+        let config = InterpreterConfig::new().settings(settings).init_stdlib();
+        let interpreter = config.interpreter();
+
+        for file in &self.modules {
+            let name = &file.name;
+            let path = self.module_root.join(name);
+            if let Some(parent) = path.parent() {
+                if let Err(err) = std::fs::create_dir_all(parent) {
+                    return Err(io_error(err));
+                }
+            }
+            if let Some(content) = get_contents_as_string(file) {
+                if let Err(err) = std::fs::write(&path, content) {
+                    return Err(io_error(err));
+                }
+            } else {
+                return Err(Error::CompilationFailed(stage_result_failure(format!(
+                    "Invalid file encoding for {}",
+                    file.name
+                ))));
+            }
         }
-        Ok(())
+
+        Ok(PythonSessionState {
+            interpreter,
+            last_error: None,
+            cwd: "/".to_string(),
+        })
     }
 }
 
@@ -435,7 +384,3 @@ impl Drop for PythonSession {
         let _ = std::fs::remove_dir_all(&self.module_root);
     }
 }
-
-type DurablePythonComponent = PythonComponent; // TODO
-
-golem_exec::export_exec!(DurablePythonComponent with_types_in golem_exec);

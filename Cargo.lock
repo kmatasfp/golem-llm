@@ -1317,43 +1317,17 @@ name = "golem-exec"
 version = "0.0.0"
 dependencies = [
  "base64 0.22.1",
- "golem-rust",
- "hex",
- "log",
- "reqwest 0.12.15 (git+https://github.com/golemcloud/reqwest?branch=update-may-2025)",
- "thiserror 2.0.12",
- "wasi-logger",
- "wit-bindgen 0.40.0",
-]
-
-[[package]]
-name = "golem-exec-javascript"
-version = "0.0.0"
-dependencies = [
  "encoding_rs",
  "futures",
- "golem-exec",
  "golem-rust",
- "log",
- "reqwest 0.12.15 (git+https://github.com/golemcloud/reqwest?branch=update-may-2025)",
- "rquickjs",
- "wasi 0.14.2+wasi-0.2.4",
- "wit-bindgen-rt 0.40.0",
- "wstd",
-]
-
-[[package]]
-name = "golem-exec-python"
-version = "0.0.0"
-dependencies = [
- "futures",
- "golem-exec",
- "golem-rust",
+ "hex",
  "indoc",
  "log",
- "reqwest 0.12.15 (git+https://github.com/golemcloud/reqwest?branch=update-may-2025)",
+ "rquickjs",
  "rustpython",
  "wasi 0.14.2+wasi-0.2.4",
+ "wasi-logger",
+ "wit-bindgen 0.40.0",
  "wit-bindgen-rt 0.40.0",
  "wstd",
 ]
@@ -3022,7 +2996,7 @@ dependencies = [
 [[package]]
 name = "rustpython"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#bd8e557b703555694652ac13850d982637f76c1a"
+source = "git+https://github.com/RustPython/RustPython?rev=d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3#d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3"
 dependencies = [
  "cfg-if",
  "dirs-next",
@@ -3042,7 +3016,7 @@ dependencies = [
 [[package]]
 name = "rustpython-codegen"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#bd8e557b703555694652ac13850d982637f76c1a"
+source = "git+https://github.com/RustPython/RustPython?rev=d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3#d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3"
 dependencies = [
  "ahash",
  "bitflags",
@@ -3054,10 +3028,8 @@ dependencies = [
  "num-complex",
  "num-traits",
  "ruff_python_ast",
- "ruff_source_file",
  "ruff_text_size",
  "rustpython-compiler-core",
- "rustpython-compiler-source",
  "rustpython-literal",
  "rustpython-wtf8",
  "thiserror 2.0.12",
@@ -3067,7 +3039,7 @@ dependencies = [
 [[package]]
 name = "rustpython-common"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#bd8e557b703555694652ac13850d982637f76c1a"
+source = "git+https://github.com/RustPython/RustPython?rev=d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3#d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3"
 dependencies = [
  "ascii",
  "bitflags",
@@ -3096,7 +3068,7 @@ dependencies = [
 [[package]]
 name = "rustpython-compiler"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#bd8e557b703555694652ac13850d982637f76c1a"
+source = "git+https://github.com/RustPython/RustPython?rev=d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3#d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3"
 dependencies = [
  "ruff_python_ast",
  "ruff_python_parser",
@@ -3104,14 +3076,13 @@ dependencies = [
  "ruff_text_size",
  "rustpython-codegen",
  "rustpython-compiler-core",
- "rustpython-compiler-source",
  "thiserror 2.0.12",
 ]
 
 [[package]]
 name = "rustpython-compiler-core"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#bd8e557b703555694652ac13850d982637f76c1a"
+source = "git+https://github.com/RustPython/RustPython?rev=d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3#d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3"
 dependencies = [
  "bitflags",
  "itertools 0.14.0",
@@ -3123,18 +3094,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "rustpython-compiler-source"
-version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#bd8e557b703555694652ac13850d982637f76c1a"
-dependencies = [
- "ruff_source_file",
- "ruff_text_size",
-]
-
-[[package]]
 name = "rustpython-derive"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#bd8e557b703555694652ac13850d982637f76c1a"
+source = "git+https://github.com/RustPython/RustPython?rev=d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3#d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3"
 dependencies = [
  "proc-macro2",
  "rustpython-compiler",
@@ -3145,7 +3107,7 @@ dependencies = [
 [[package]]
 name = "rustpython-derive-impl"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#bd8e557b703555694652ac13850d982637f76c1a"
+source = "git+https://github.com/RustPython/RustPython?rev=d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3#d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3"
 dependencies = [
  "itertools 0.14.0",
  "maplit",
@@ -3169,7 +3131,7 @@ dependencies = [
 [[package]]
 name = "rustpython-literal"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#bd8e557b703555694652ac13850d982637f76c1a"
+source = "git+https://github.com/RustPython/RustPython?rev=d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3#d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3"
 dependencies = [
  "hexf-parse",
  "is-macro",
@@ -3182,7 +3144,7 @@ dependencies = [
 [[package]]
 name = "rustpython-pylib"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#bd8e557b703555694652ac13850d982637f76c1a"
+source = "git+https://github.com/RustPython/RustPython?rev=d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3#d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3"
 dependencies = [
  "glob",
  "rustpython-compiler-core",
@@ -3192,7 +3154,7 @@ dependencies = [
 [[package]]
 name = "rustpython-sre_engine"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#bd8e557b703555694652ac13850d982637f76c1a"
+source = "git+https://github.com/RustPython/RustPython?rev=d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3#d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3"
 dependencies = [
  "bitflags",
  "num_enum",
@@ -3203,7 +3165,7 @@ dependencies = [
 [[package]]
 name = "rustpython-stdlib"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#bd8e557b703555694652ac13850d982637f76c1a"
+source = "git+https://github.com/RustPython/RustPython?rev=d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3#d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3"
 dependencies = [
  "adler32",
  "ahash",
@@ -3274,7 +3236,7 @@ dependencies = [
 [[package]]
 name = "rustpython-vm"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#bd8e557b703555694652ac13850d982637f76c1a"
+source = "git+https://github.com/RustPython/RustPython?rev=d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3#d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3"
 dependencies = [
  "ahash",
  "ascii",
@@ -3315,14 +3277,12 @@ dependencies = [
  "result-like",
  "ruff_python_ast",
  "ruff_python_parser",
- "ruff_source_file",
  "ruff_text_size",
  "rustix 1.0.8",
  "rustpython-codegen",
  "rustpython-common",
  "rustpython-compiler",
  "rustpython-compiler-core",
- "rustpython-compiler-source",
  "rustpython-derive",
  "rustpython-literal",
  "rustpython-sre_engine",
@@ -3350,7 +3310,7 @@ dependencies = [
 [[package]]
 name = "rustpython-wtf8"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#bd8e557b703555694652ac13850d982637f76c1a"
+source = "git+https://github.com/RustPython/RustPython?rev=d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3#d8f1d188c394eb2d970d3ebe95f0d3d7658f31a3"
 dependencies = [
  "ascii",
  "bstr",

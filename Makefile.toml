@@ -137,13 +137,23 @@ script = '''
 
 is_portable = eq ${1} "--portable"
 
-targets = array llm_openai llm_anthropic llm_grok llm_openrouter llm_ollama llm_bedrock exec_javascript exec_python
+targets = array llm_openai llm_anthropic llm_grok llm_openrouter llm_ollama llm_bedrock
 for target in ${targets}
     if is_portable
         cp target/wasm32-wasip1/debug/golem_${target}.wasm components/debug/golem_${target}-portable.wasm
     else
         cp target/wasm32-wasip1/debug/golem_${target}.wasm components/debug/golem_${target}.wasm
     end
+end
+
+if is_portable
+    cp target/debug/golem_exec_portable.wasm components/debug/golem_exec_portable.wasm
+    cp target/debug/golem_exec_python_portable.wasm components/debug/golem_exec_python_portable.wasm
+    cp target/debug/golem_exec_javascript_portable.wasm components/debug/golem_exec_javascript_portable.wasm
+else
+    cp target/debug/golem_exec.wasm components/debug/golem_exec.wasm
+    cp target/debug/golem_exec_python.wasm components/debug/golem_exec_python.wasm
+    cp target/debug/golem_exec_javascript.wasm components/debug/golem_exec_javascript.wasm
 end
 '''
 
@@ -153,13 +163,23 @@ script = '''
 
 is_portable = eq ${1} "--portable"
 
-targets = array llm_openai llm_anthropic llm_grok llm_openrouter llm_ollama llm_bedrock exec_javascript exec_python
+targets = array llm_openai llm_anthropic llm_grok llm_openrouter llm_ollama llm_bedrock exec
 for target in ${targets}
     if is_portable
         cp target/wasm32-wasip1/release/golem_${target}.wasm components/release/golem_${target}-portable.wasm
     else
         cp target/wasm32-wasip1/release/golem_${target}.wasm components/release/golem_${target}.wasm
     end
+end
+
+if is_portable
+    cp target/release/golem_exec_portable.wasm components/release/golem_exec_portable.wasm
+    cp target/release/golem_exec_python_portable.wasm components/release/golem_exec_python_portable.wasm
+    cp target/release/golem_exec_javascript_portable.wasm components/release/golem_exec_javascript_portable.wasm
+else
+    cp target/release/golem_exec.wasm components/release/golem_exec.wasm
+    cp target/release/golem_exec_python.wasm components/release/golem_exec_python.wasm
+    cp target/release/golem_exec_javascript.wasm components/release/golem_exec_javascript.wasm
 end
 '''
 

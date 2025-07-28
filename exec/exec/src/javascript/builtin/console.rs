@@ -1,4 +1,4 @@
-use golem_exec::golem::exec::types::Error;
+use crate::golem::exec::types::Error;
 use rquickjs::{Ctx, JsLifetime};
 use std::cell::RefCell;
 

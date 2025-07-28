@@ -6,78 +6,119 @@ skip_core_tasks = true
 run_task = { name = [
     "build-javascript",
     "build-python",
+    "build-full"
 ] }
 
 [tasks.build-portable]
 run_task = { name = [
     "build-javascript-portable",
     "build-python-portable",
+    "build-full-portable",
 ] }
 
 [tasks.release-build]
 run_task = { name = [
     "release-build-javascript",
     "release-build-python",
+    "release-build-full",
 ] }
 
 [tasks.release-build-portable]
 run_task = { name = [
     "release-build-javascript-portable",
     "release-build-python-portable",
+    "release-build-full-portable",
 ] }
 
 [tasks.build-javascript]
-install_crate = { crate_name = "cargo-component", version = "0.20.0" }
-command = "cargo-component"
-args = ["build", "-p", "golem-exec-javascript"]
+script_runner = "@duckscript"
+script = '''
+exec cargo-component build -p golem-exec --no-default-features --features javascript --features durability
+cp ../target/wasm32-wasip1/debug/golem_exec.wasm ../target/debug/golem_exec_javascript.wasm
+'''
 
 
 [tasks.build-javascript-portable]
-install_crate = { crate_name = "cargo-component", version = "0.20.0" }
-command = "cargo-component"
-args = ["build", "-p", "golem-exec-javascript", "--no-default-features"]
+script_runner = "@duckscript"
+script = '''
+exec cargo-component build -p golem-exec --no-default-features --features javascript
+cp ../target/wasm32-wasip1/debug/golem_exec.wasm ../target/debug/golem_exec_javascript_portable.wasm
+'''
 
 [tasks.build-python]
-install_crate = { crate_name = "cargo-component", version = "0.20.0" }
-command = "cargo-component"
-args = ["build", "-p", "golem-exec-python"]
-
+script_runner = "@duckscript"
+script = '''
+exec cargo-component build -p golem-exec --no-default-features --features python --features durability
+cp ../target/wasm32-wasip1/debug/golem_exec.wasm ../target/debug/golem_exec_python.wasm
+'''
 
 [tasks.build-python-portable]
-install_crate = { crate_name = "cargo-component", version = "0.20.0" }
-command = "cargo-component"
-args = ["build", "-p", "golem-exec-python", "--no-default-features"]
+script_runner = "@duckscript"
+script = '''
+exec cargo-component build -p golem-exec --no-default-features --features python
+cp ../target/wasm32-wasip1/debug/golem_exec.wasm ../target/debug/golem_exec_python_portable.wasm
+'''
+
+[tasks.build-full]
+script_runner = "@duckscript"
+script = '''
+exec cargo-component build -p golem-exec
+cp ../target/wasm32-wasip1/debug/golem_exec.wasm ../target/debug/golem_exec.wasm
+'''
+
+[tasks.build-full-portable]
+script_runner = "@duckscript"
+script = '''
+exec cargo-component build -p golem-exec --no-default-features --features python --features javascript
+cp ../target/wasm32-wasip1/debug/golem_exec.wasm ../target/debug/golem_exec_portable.wasm
+'''
 
 [tasks.release-build-javascript]
-install_crate = { crate_name = "cargo-component", version = "0.20.0" }
-command = "cargo-component"
-args = ["build", "-p", "golem-exec-javascript", "--release"]
+script_runner = "@duckscript"
+script = '''
+exec cargo-component build -p golem-exec --release --no-default-features --features javascript --features durability
+cp ../target/wasm32-wasip1/release/golem_exec.wasm ../target/release/golem_exec_javascript.wasm
+'''
 
 [tasks.release-build-javascript-portable]
-install_crate = { crate_name = "cargo-component", version = "0.20.0" }
-command = "cargo-component"
-args = ["build", "-p", "golem-exec-javascript", "--release", "--no-default-features"]
+script_runner = "@duckscript"
+script = '''
+exec cargo-component build -p golem-exec --release --no-default-features --features javascript
+cp ../target/wasm32-wasip1/release/golem_exec.wasm ../target/release/golem_exec_javascript_portable.wasm
+'''
 
 [tasks.release-build-python]
-install_crate = { crate_name = "cargo-component", version = "0.20.0" }
-command = "cargo-component"
-args = ["build", "-p", "golem-exec-python", "--release"]
+script_runner = "@duckscript"
+script = '''
+exec cargo-component build -p golem-exec --release --no-default-features --features python --features durability
+cp ../target/wasm32-wasip1/release/golem_exec.wasm ../target/release/golem_exec_python.wasm
+'''
 
 [tasks.release-build-python-portable]
-install_crate = { crate_name = "cargo-component", version = "0.20.0" }
-command = "cargo-component"
-args = [
-    "build",
-    "-p",
-    "golem-exec-python",
-    "--release",
-    "--no-default-features",
-]
+script_runner = "@duckscript"
+script = '''
+exec cargo-component build -p golem-exec --release --no-default-features --features python
+cp ../target/wasm32-wasip1/release/golem_exec.wasm ../target/release/golem_exec_python_portable.wasm
+'''
+
+[tasks.release-build-full]
+script_runner = "@duckscript"
+script = '''
+exec cargo-component build -p golem-exec --release
+cp ../target/wasm32-wasip1/release/golem_exec.wasm ../target/release/golem_exec.wasm
+'''
+
+[tasks.release-build-full-portable]
+script_runner = "@duckscript"
+script = '''
+exec cargo-component build -p golem-exec --release --no-default-features --features python --features javascript
+cp ../target/wasm32-wasip1/release/golem_exec.wasm ../target/release/golem_exec_portable.wasm
+'''
 
 [tasks.wit]
 script_runner = "@duckscript"
 script = """
-modules = array exec javascript python
+modules = array exec
 
 for module in ${modules}
     rm -r ${module}/wit/deps

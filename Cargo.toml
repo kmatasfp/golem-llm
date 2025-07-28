@@ -10,8 +10,6 @@ members = [
     "llm/openai",
     "llm/openrouter",
     "exec/exec",
-    "exec/javascript",
-    "exec/python",
 ]
 
 [profile.release]
@@ -21,7 +19,6 @@ opt-level = 's'
 
 [workspace.dependencies]
 golem-llm = { path = "llm/llm", version = "0.0.0", default-features = false }
-golem-exec = { path = "exec/exec", version = "0.0.0", default-features = false }
 
 futures = "0.3.31"
 golem-rust = "1.6.0"

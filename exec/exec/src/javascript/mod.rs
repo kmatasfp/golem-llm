@@ -1,10 +1,8 @@
 mod builtin;
 
-use golem_exec::golem::exec::executor::{
-    Error, ExecResult, File, Guest, GuestSession, Language, Limits,
-};
-use golem_exec::golem::exec::types::{LanguageKind, StageResult};
-use golem_exec::{get_contents, get_contents_as_string, stage_result_failure};
+use crate::golem::exec::executor::{Error, ExecResult, File, Language, Limits};
+use crate::golem::exec::types::{LanguageKind, StageResult};
+use crate::{get_contents_as_string, stage_result_failure};
 use rquickjs::loader::{BuiltinLoader, BuiltinResolver};
 use rquickjs::{async_with, AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Module, Object};
 use std::cell::RefCell;
@@ -17,28 +15,12 @@ fn js_engine_error(err: rquickjs::Error) -> Error {
     Error::Internal(err.to_string())
 }
 
-fn io_error(error: std::io::Error) -> Error {
-    Error::Internal(format!("IO error: {error}"))
-}
-
 static TEMP_DIR_COUNTER: AtomicU32 = AtomicU32::new(0);
 
-struct JavascriptComponent;
+pub struct JavascriptComponent;
 
 impl JavascriptComponent {
-    fn ensure_language_is_supported(lang: &Language) -> Result<(), Error> {
-        if lang.kind != LanguageKind::Javascript {
-            Err(Error::UnsupportedLanguage)
-        } else {
-            Ok(())
-        }
-    }
-}
-
-impl Guest for JavascriptComponent {
-    type Session = JavaScriptSession;
-
-    fn run(
+    pub fn run(
         lang: Language,
         snippet: String,
         files: Vec<File>,
@@ -49,6 +31,14 @@ impl Guest for JavascriptComponent {
     ) -> Result<ExecResult, Error> {
         let session = JavaScriptSession::new(lang, files);
         session.run(snippet, args, stdin, env, constraints)
+    }
+}
+
+fn ensure_language_is_supported(lang: &Language) -> Result<(), Error> {
+    if lang.kind != LanguageKind::Javascript {
+        Err(Error::UnsupportedLanguage)
+    } else {
+        Ok(())
     }
 }
 
@@ -98,7 +88,7 @@ struct JavaScriptSessionState {
     cwd: String,
 }
 
-struct JavaScriptSession {
+pub struct JavaScriptSession {
     lang: Language,
     modules: Vec<File>,
     data_root: PathBuf,
@@ -106,6 +96,44 @@ struct JavaScriptSession {
 }
 
 impl JavaScriptSession {
+    pub fn data_root(&self) -> &Path {
+        &self.data_root
+    }
+
+    pub fn set_cwd(&self, path: String) -> Result<(), Error> {
+        if let Some(state) = self.state.borrow_mut().as_mut() {
+            state.cwd = path;
+        }
+        Ok(())
+    }
+
+    pub fn new(lang: Language, modules: Vec<File>) -> Self {
+        let data_root = Path::new("tmp")
+            .join("js")
+            .join("data")
+            .join(TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed).to_string());
+        Self {
+            lang,
+            modules,
+            data_root,
+            state: RefCell::new(None),
+        }
+    }
+
+    pub fn run(
+        &self,
+        snippet: String,
+        args: Vec<String>,
+        stdin: Option<String>,
+        env: Vec<(String, String)>,
+        constraints: Option<Limits>,
+    ) -> Result<ExecResult, Error> {
+        ensure_language_is_supported(&self.lang)?;
+        self.ensure_initialized()?;
+
+        block_on(async { self.run_async(snippet, args, stdin, env, constraints).await })
+    }
+
     fn ensure_initialized(&self) -> Result<(), Error> {
         let state = self.state.borrow_mut().take();
         match state {
@@ -207,88 +235,8 @@ impl JavaScriptSession {
     }
 }
 
-impl GuestSession for JavaScriptSession {
-    fn new(lang: Language, modules: Vec<File>) -> Self {
-        let data_root = Path::new("tmp")
-            .join("js")
-            .join("data")
-            .join(TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed).to_string());
-        Self {
-            lang,
-            modules,
-            data_root,
-            state: RefCell::new(None),
-        }
-    }
-
-    fn upload(&self, file: File) -> Result<(), Error> {
-        let path = self.data_root.join(&file.name);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|err| Error::Internal(err.to_string()))?;
-        }
-        let contents = get_contents(&file).ok_or_else(|| {
-            Error::CompilationFailed(stage_result_failure("Invalid file encoding"))
-        })?;
-
-        std::fs::write(&path, contents).map_err(|err| {
-            Error::Internal(format!("Failed to write file {}: {}", file.name, err))
-        })?;
-
-        Ok(())
-    }
-
-    fn run(
-        &self,
-        snippet: String,
-        args: Vec<String>,
-        stdin: Option<String>,
-        env: Vec<(String, String)>,
-        constraints: Option<Limits>,
-    ) -> Result<ExecResult, Error> {
-        JavascriptComponent::ensure_language_is_supported(&self.lang)?;
-        self.ensure_initialized()?;
-
-        block_on(async { self.run_async(snippet, args, stdin, env, constraints).await })
-    }
-
-    fn download(&self, path: String) -> Result<Vec<u8>, Error> {
-        let full_path = self.data_root.join(&path);
-        if !full_path.exists() {
-            return Err(Error::Internal(format!(
-                "File {} does not exist",
-                full_path.display()
-            )));
-        }
-        std::fs::read(&full_path)
-            .map_err(|err| Error::Internal(format!("Failed to read file {path}: {err}")))
-    }
-
-    fn list_files(&self, dir: String) -> Result<Vec<String>, Error> {
-        let path = self.data_root.join(&dir);
-        let mut result = Vec::new();
-        for entry in std::fs::read_dir(path).map_err(io_error)? {
-            let entry = entry.map_err(io_error)?;
-            if entry.metadata().map_err(io_error)?.is_file() {
-                result.push(entry.file_name().to_string_lossy().to_string());
-            }
-        }
-        Ok(result)
-    }
-
-    fn set_working_dir(&self, path: String) -> Result<(), Error> {
-        if let Some(state) = self.state.borrow_mut().as_mut() {
-            state.cwd = path;
-        }
-        Ok(())
-    }
-}
-
 impl Drop for JavaScriptSession {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.data_root);
     }
 }
-
-type DurableJavascriptComponent = JavascriptComponent; // TODO
-
-golem_exec::export_exec!(DurableJavascriptComponent with_types_in golem_exec);

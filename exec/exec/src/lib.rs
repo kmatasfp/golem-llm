@@ -1,3 +1,12 @@
+
+#[cfg(feature = "javascript")]
+pub mod javascript;
+
+#[cfg(feature = "python")]
+pub mod python;
+
+mod component;
+
 wit_bindgen::generate!({
     path: "../wit",
     world: "exec-library",
@@ -11,12 +20,13 @@ pub use crate::exports::golem;
 use crate::golem::exec::types::{Encoding, File, StageResult};
 pub use __export_exec_library_impl as export_exec;
 use base64::Engine;
+use crate::golem::exec::executor::Error;
 
-pub fn get_contents_as_string(file: &File) -> Option<String> {
+pub(crate) fn get_contents_as_string(file: &File) -> Option<String> {
     get_contents(file).and_then(|bytes| String::from_utf8(bytes).ok())
 }
 
-pub fn get_contents(file: &File) -> Option<Vec<u8>> {
+pub(crate) fn get_contents(file: &File) -> Option<Vec<u8>> {
     match file.encoding.unwrap_or(Encoding::Utf8) {
         Encoding::Base64 => base64::prelude::BASE64_STANDARD
             .decode(file.content.clone())
@@ -26,7 +36,7 @@ pub fn get_contents(file: &File) -> Option<Vec<u8>> {
     }
 }
 
-pub fn stage_result_failure(message: impl AsRef<str>) -> StageResult {
+pub(crate) fn stage_result_failure(message: impl AsRef<str>) -> StageResult {
     StageResult {
         stdout: "".to_string(),
         stderr: message.as_ref().to_string(),
@@ -35,9 +45,12 @@ pub fn stage_result_failure(message: impl AsRef<str>) -> StageResult {
     }
 }
 
+#[allow(dead_code)]
+pub(crate) fn io_error(error: std::io::Error) -> Error {
+    Error::Internal(format!("IO error: {error}"))
+}
+
 // TODO STEPS
 
-// - cleanup error handling
-// - move all implementation to this crate, with feature flags to have a js/py/both variant
 // - enforce constraints (at least timeout, more if possible)
 // - durability wrapper

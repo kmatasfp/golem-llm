@@ -13,4 +13,4 @@ components:
 dependencies:
   test:exec-py:
     - type: wasm
-      path: ../target/wasm32-wasip1/debug/golem_exec_python.wasm
+      path: ../target/debug/golem_exec.wasm
