@@ -175,18 +175,19 @@ golem worker invoke test:llm/debug test1 --stream
 This repository uses [cargo-make](https://github.com/sagiegurari/cargo-make) to automate build tasks.
 Some of the important tasks are:
 
-| Command                             | Description                                                                                            |
-|-------------------------------------|--------------------------------------------------------------------------------------------------------|
-| `cargo make build`                  | Build all components with Golem bindings in Debug                                                      |
-| `cargo make release-build`          | Build all components with Golem bindings in Release                                                    |
-| `cargo make build-portable`         | Build all components with no Golem bindings in Debug                                                   |
-| `cargo make release-build-portable` | Build all components with no Golem bindings in Release                                                 |
-| `cargo make unit-tests`             | Run all unit tests                                                                                     |
-| `cargo make check`                  | Checks formatting and Clippy rules                                                                     |
-| `cargo make fix`                    | Fixes formatting and Clippy rules                                                                      |
-| `cargo make wit`                    | To be used after editing the `wit/golem-llm.wit` file - distributes the changes to all wit directories |
+| Command                             | Description                                                                                                    |
+|-------------------------------------|----------------------------------------------------------------------------------------------------------------|
+| `cargo make build`                  | Build all components with Golem bindings in Debug                                                              |
+| `cargo make release-build`          | Build all components with Golem bindings in Release                                                            |
+| `cargo make build-portable`         | Build all components with no Golem bindings in Debug                                                           |
+| `cargo make release-build-portable` | Build all components with no Golem bindings in Release                                                         |
+| `cargo make unit-tests`             | Run all unit tests                                                                                             |
+| `cargo make check`                  | Checks formatting and Clippy rules                                                                             |
+| `cargo make fix`                    | Fixes formatting and Clippy rules                                                                              |
+| `cargo make wit`                    | Used after editing the `<module>/wit/golem-<module>.wit` file - distributes the changes to all wit directories |
+| `cargo make build-test-components`  | Builds all test apps in `/test`, with all provider build-options using `golem-cli app build -b <provider>`     |
 
-The `test` directory contains a **Golem application** for testing various features of the LLM components.
+The `test` directory contains a **Golem application** for testing various features of the LLM, WebSearch, Video and Search components.
 Check [the Golem documentation](https://learn.golem.cloud/quickstart) to learn how to install Golem and `golem-cli` to
 run these tests.
 
