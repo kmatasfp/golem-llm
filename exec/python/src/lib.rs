@@ -10,9 +10,8 @@ use rustpython::vm::{
 };
 use rustpython::{vm, InterpreterConfig};
 use std::cell::RefCell;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
-use wstd::runtime::block_on;
+use std::path::PathBuf;
+use std::sync::atomic::AtomicU32;
 use wstd::time::Instant;
 
 static TEMP_DIR_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -28,6 +27,10 @@ fn py_exception_error(vm: &vm::VirtualMachine, err: &PyBaseExceptionRef) -> Erro
         }),
         Err(err) => Error::Internal(format!("Failed to render Python exception: {err}")),
     }
+}
+
+fn io_error(error: std::io::Error) -> Error {
+    Error::Internal(format!("IO error: {}", error))
 }
 
 struct PythonComponent;
@@ -56,127 +59,6 @@ impl Guest for PythonComponent {
     ) -> Result<ExecResult, Error> {
         let session = PythonSession::new(lang, files);
         session.run(snippet, args, stdin, env, constraints)
-
-        // PythonComponent::ensure_language_is_supported(&lang)?;
-        //
-        // let start = Instant::now();
-        //
-        // let module_root =
-        //     Path::new("/tmp").join(TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed).to_string());
-        // std::fs::create_dir_all(&module_root).unwrap(); // TODO
-        //
-        // let mut settings = Settings::default().with_path(module_root.to_string_lossy().to_string());
-        // settings.argv = args;
-        // settings.ignore_environment = true;
-        //
-        // let config = InterpreterConfig::new().settings(settings).init_stdlib();
-        // let interpreter = config.interpreter();
-        //
-        // let mut result = None;
-        //
-        // let vm_res = interpreter.enter(|vm| {
-        //     for file in files {
-        //         let name = &file.name;
-        //         let path = module_root.join(name);
-        //         if let Some(parent) = path.parent() {
-        //             std::fs::create_dir_all(parent).unwrap(); // TODO
-        //         }
-        //         let content = get_contents(&file).unwrap(); // TODO
-        //         std::fs::write(&path, content).unwrap(); // TODO
-        //     }
-        //
-        //     let code_obj = vm
-        //         .compile(&snippet, vm::compiler::Mode::Exec, "<snippet>".to_string())
-        //         .map_err(|err| vm.new_syntax_error(&err, Some(&snippet)))?;
-        //
-        //     let scope = vm.new_scope_with_builtins();
-        //     scope.globals.set_item(
-        //         "__external_stdin",
-        //         vm.new_pyobj(stdin.unwrap_or_default()),
-        //         vm,
-        //     )?;
-        //
-        //     let env_pairs = env
-        //         .iter()
-        //         .map(|(k, v)| vm.new_pyobj((k, v)))
-        //         .collect::<Vec<_>>();
-        //     scope
-        //         .globals
-        //         .set_item("__env", vm.new_pyobj(env_pairs), vm)?;
-        //
-        //     scope.globals.set_item(
-        //         "__argv",
-        //         vm.new_pyobj(args.iter().map(|s| vm.new_pyobj(s)).collect::<Vec<_>>()),
-        //         vm,
-        //     )?;
-        //
-        //     scope.globals.set_item(
-        //         "__module_root",
-        //         vm.new_pyobj(module_root.to_string_lossy().to_string()),
-        //         vm,
-        //     )?;
-        //
-        //     let init_script = indoc!(
-        //         r#"import io
-        //         import os
-        //         import sys
-        //
-        //         __stdout = io.StringIO('')
-        //         __stderr = io.StringIO('')
-        //         __stdin = io.StringIO(__external_stdin)
-        //         sys.stdout = __stdout
-        //         sys.stderr = __stderr
-        //         sys.stdin = __stdin
-        //
-        //         sys.argv = __argv
-        //         os.environ = dict(__env)
-        //         "#
-        //     );
-        //     vm.run_code_string(scope.clone(), init_script, "<init>".to_string())?;
-        //
-        //     match vm.run_code_obj(code_obj, scope.clone()) {
-        //         Ok(_) => {
-        //             let stdout = vm.sys_module.get_attr("stdout", vm)?;
-        //             let stderr = vm.sys_module.get_attr("stderr", vm)?;
-        //
-        //             let stdout_getvalue = stdout.get_attr("getvalue", vm)?;
-        //             let stderr_getvalue = stderr.get_attr("getvalue", vm)?;
-        //
-        //             let stdout =
-        //                 unsafe { stdout_getvalue.call((), vm)?.downcast_unchecked::<PyStr>() };
-        //             let stderr =
-        //                 unsafe { stderr_getvalue.call((), vm)?.downcast_unchecked::<PyStr>() };
-        //
-        //             let stdout = stdout.as_str();
-        //             let stderr = stderr.as_str();
-        //
-        //             result = Some(Ok(ExecResult {
-        //                 compile: None,
-        //                 run: StageResult {
-        //                     stdout: stdout.to_string(),
-        //                     stderr: stderr.to_string(),
-        //                     exit_code: Some(0),
-        //                     signal: None,
-        //                 },
-        //                 time_ms: Some(start.elapsed().as_millis() as u64),
-        //                 memory_bytes: None,
-        //             }));
-        //         }
-        //         Err(err) => {
-        //             let err = py_exception_error(vm, &err);
-        //             result = Some(Err(err));
-        //         }
-        //     }
-        //
-        //     Ok(())
-        // });
-        // let exit_code = interpreter.finalize(vm_res.err());
-        //
-        // if let Some(Ok(ref mut result)) = result {
-        //     result.run.exit_code = Some(exit_code as i32);
-        // }
-        //
-        // result.unwrap()
     }
 }
 
@@ -236,7 +118,7 @@ impl PythonSession {
     }
 
     fn initialize(&self) -> Result<PythonSessionState, Error> {
-        std::fs::create_dir_all(&self.module_root).unwrap(); // TODO
+        std::fs::create_dir_all(&self.module_root).map_err(io_error)?;
 
         let mut settings =
             Settings::default().with_path(self.module_root.to_string_lossy().to_string());
@@ -245,22 +127,33 @@ impl PythonSession {
         let config = InterpreterConfig::new().settings(settings).init_stdlib();
         let interpreter = config.interpreter();
 
-        let vm_res = interpreter.enter(|vm| {
+        interpreter.enter(|vm| {
             for file in &self.modules {
                 let name = &file.name;
                 let path = self.module_root.join(name);
                 if let Some(parent) = path.parent() {
-                    std::fs::create_dir_all(parent).unwrap(); // TODO
+                    if let Err(err) = std::fs::create_dir_all(parent) {
+                        return Err(io_error(err));
+                    }
                 }
-                let content = get_contents_as_string(&file).unwrap(); // TODO
-                std::fs::write(&path, content).unwrap(); // TODO
+                if let Some(content) = get_contents_as_string(&file) {
+                    if let Err(err) = std::fs::write(&path, content) {
+                        return Err(io_error(err));
+                    }
+                } else {
+                    return Err(Error::CompilationFailed(stage_result_failure(format!(
+                        "Invalid file encoding for {}",
+                        file.name
+                    ))));
+                }
             }
-        });
+            Ok(())
+        })?;
 
         Ok(PythonSessionState {
             interpreter,
             last_error: None,
-            cwd: "/".to_string()
+            cwd: "/".to_string(),
         })
     }
 }
@@ -356,11 +249,9 @@ impl GuestSession for PythonSession {
                 vm,
             )?;
 
-            scope.globals.set_item(
-                "__cwd",
-                vm.new_pyobj(state.cwd.clone()),
-                vm,
-            )?;
+            scope
+                .globals
+                .set_item("__cwd", vm.new_pyobj(state.cwd.clone()), vm)?;
 
             let init_script = indoc!(
                 r#"import io
@@ -515,7 +406,15 @@ impl GuestSession for PythonSession {
     }
 
     fn list_files(&self, dir: String) -> Result<Vec<String>, Error> {
-        todo!()
+        let path = self.data_root.join(&dir);
+        let mut result = Vec::new();
+        for entry in std::fs::read_dir(path).map_err(io_error)? {
+            let entry = entry.map_err(io_error)?;
+            if entry.metadata().map_err(io_error)?.is_file() {
+                result.push(entry.file_name().to_string_lossy().to_string());
+            }
+        }
+        Ok(result)
     }
 
     fn set_working_dir(&self, path: String) -> Result<(), Error> {

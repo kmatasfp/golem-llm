@@ -37,7 +37,6 @@ pub fn stage_result_failure(message: impl AsRef<str>) -> StageResult {
 
 // TODO STEPS
 
-// - FS support in JS and Python with test
 // - cleanup error handling
 // - move all implementation to this crate, with feature flags to have a js/py/both variant
 // - enforce constraints (at least timeout, more if possible)

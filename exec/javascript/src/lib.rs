@@ -17,6 +17,10 @@ fn js_engine_error(err: rquickjs::Error) -> Error {
     Error::Internal(err.to_string())
 }
 
+fn io_error(error: std::io::Error) -> Error {
+    Error::Internal(format!("IO error: {}", error))
+}
+
 static TEMP_DIR_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 struct JavascriptComponent;
@@ -260,7 +264,15 @@ impl GuestSession for JavaScriptSession {
     }
 
     fn list_files(&self, dir: String) -> Result<Vec<String>, Error> {
-        todo!()
+        let path = self.data_root.join(&dir);
+        let mut result = Vec::new();
+        for entry in std::fs::read_dir(path).map_err(io_error)? {
+            let entry = entry.map_err(io_error)?;
+            if entry.metadata().map_err(io_error)?.is_file() {
+                result.push(entry.file_name().to_string_lossy().to_string());
+            }
+        }
+        Ok(result)
     }
 
     fn set_working_dir(&self, path: String) -> Result<(), Error> {
