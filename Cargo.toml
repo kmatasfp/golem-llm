@@ -9,6 +9,22 @@ members = [
     "llm/ollama",
     "llm/openai",
     "llm/openrouter",
+    "websearch/websearch",
+    "websearch/brave",
+    "websearch/google",
+    "websearch/serper",
+    "websearch/tavily",
+    "search/search",
+    "search/elasticsearch",
+    "search/algolia",
+    "search/meilisearch",
+    "search/opensearch",
+    "search/typesense",
+    "video/video",
+    "video/kling",
+    "video/runway",
+    "video/veo",
+    "video/stability",
     "exec/exec",
 ]
 
@@ -19,6 +35,8 @@ opt-level = 's'
 
 [workspace.dependencies]
 golem-llm = { path = "llm/llm", version = "0.0.0", default-features = false }
+golem-search = { path = "search/search", version = "0.0.0", default-features = false}
+golem-video = { path = "video/video", version = "0.0.0", default-features = false}
 
 futures = "0.3.31"
 golem-rust = "1.6.0"
