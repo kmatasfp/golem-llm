@@ -194,6 +194,9 @@ Some of the important tasks are:
 | `cargo make wit`                    | Used after editing the `<module>/wit/golem-<module>.wit` file - distributes the changes to all wit directories |
 | `cargo make build-test-components`  | Builds all test apps in `/test`, with all provider build-options using `golem-cli app build -b <provider>`     |
 
+**Note**: `cargo make` command build, release-build, build-portable, release-build-portable, wit, build-test-components, can be used with 
+`cargo make <command> <module>` to target only the selected module. (e.g. `cargo make build llm`, `cargo make wit video`)
+
 The `test` directory contains a **Golem application** for testing various features of the LLM, WebSearch, Video and Search components.
 Check [the Golem documentation](https://learn.golem.cloud/quickstart) to learn how to install Golem and `golem-cli` to
 run these tests.
