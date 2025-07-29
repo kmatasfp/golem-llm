@@ -1318,6 +1318,6 @@ impl GuestTransaction for Transaction {
     }
 
     fn is_active(&self) -> bool {
-        true
+        self.api.is_session_active()
     }
 }

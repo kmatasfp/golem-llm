@@ -164,6 +164,17 @@ impl JanusGraphApi {
         &self.session_id
     }
 
+    pub fn is_session_active(&self) -> bool {
+        trace!("Check session active status: {}", self.session_id);
+        match self.execute("1", None) {
+            Ok(_) => true,
+            Err(e) => {
+                trace!("Session {} appears inactive: {}", self.session_id, e);
+                false
+            }
+        }
+    }
+
     fn handle_janusgraph_reqwest_error(&self, details: &str, err: reqwest::Error) -> GraphError {
         if err.is_timeout() {
             return GraphError::Timeout;
