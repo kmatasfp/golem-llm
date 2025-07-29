@@ -67,13 +67,7 @@ impl GcpAuth {
     }
 
     fn parse_private_key(pem_key: &str) -> Result<RsaPrivateKey, Error> {
-        // Try PKCS#8 format first (newer format)
-        if let Ok(key) = RsaPrivateKey::from_pkcs8_pem(pem_key) {
-            return Ok(key);
-        }
-
-        // Fall back to PKCS#1 format (older format)
-        RsaPrivateKey::from_pkcs1_pem(pem_key)
+        RsaPrivateKey::from_pkcs8_pem(pem_key)
             .map_err(|e| Error::CryptoError(format!("Failed to parse private key: {}", e)))
     }
 
