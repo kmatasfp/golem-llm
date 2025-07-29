@@ -1,4 +1,5 @@
 use base64::{engine::general_purpose, Engine as _};
+use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
 use golem_graph::golem::graph::{
     errors::GraphError,
     types::{Date, Datetime, Point, PropertyValue, Time},
@@ -150,51 +151,47 @@ fn parse_wkt_point(s: &str) -> Result<Point, ()> {
 }
 
 fn parse_iso_date(s: &str) -> Result<Date, ()> {
-    if s.len() != 10 {
-        return Err(());
+    match NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        Ok(date) => Ok(Date {
+            year: date.year() as u32,
+            month: date.month() as u8,
+            day: date.day() as u8,
+        }),
+        Err(_) => Err(()),
     }
-    if s.chars().nth(4) != Some('-') || s.chars().nth(7) != Some('-') {
-        return Err(());
-    }
-
-    let year = s[0..4].parse().map_err(|_| ())?;
-    let month = s[5..7].parse().map_err(|_| ())?;
-    let day = s[8..10].parse().map_err(|_| ())?;
-
-    Ok(Date { year, month, day })
 }
 
 fn parse_iso_datetime(s: &str) -> Result<Datetime, ()> {
-    if s.len() < 19 {
-        return Err(());
+    // Try multiple datetime formats commonly used by Gremlin/JanusGraph
+    let formats = [
+        "%Y-%m-%dT%H:%M:%S%.fZ",      // ISO format with milliseconds and Z
+        "%Y-%m-%dT%H:%M:%SZ",         // ISO format without milliseconds and Z
+        "%Y-%m-%dT%H:%M:%S%.f",       // ISO format with milliseconds, no Z
+        "%Y-%m-%dT%H:%M:%S",          // ISO format without milliseconds, no Z
+    ];
+
+    for format in &formats {
+        if let Ok(datetime) = NaiveDateTime::parse_from_str(s, format) {
+            let date = Date {
+                year: datetime.year() as u32,
+                month: datetime.month() as u8,
+                day: datetime.day() as u8,
+            };
+            let time = Time {
+                hour: datetime.hour() as u8,
+                minute: datetime.minute() as u8,
+                second: datetime.second() as u8,
+                nanosecond: datetime.nanosecond(),
+            };
+            return Ok(Datetime {
+                date,
+                time,
+                timezone_offset_minutes: Some(0), // Gremlin dates are timezone-aware
+            });
+        }
     }
-    let date_part = &s[0..10];
-    let time_part = &s[11..];
-
-    let date = parse_iso_date(date_part)?;
-
-    let hour = time_part[0..2].parse().map_err(|_| ())?;
-    let minute = time_part[3..5].parse().map_err(|_| ())?;
-    let second = time_part[6..8].parse().map_err(|_| ())?;
-
-    let nanosecond = if time_part.len() > 9 && time_part.chars().nth(8) == Some('.') {
-        let nano_str = &time_part[9..];
-        let nano_str_padded = format!("{nano_str:0<9}");
-        nano_str_padded[0..9].parse().map_err(|_| ())?
-    } else {
-        0
-    };
-
-    Ok(Datetime {
-        date,
-        time: Time {
-            hour,
-            minute,
-            second,
-            nanosecond,
-        },
-        timezone_offset_minutes: Some(0), // Gremlin dates are timezone-aware
-    })
+    
+    Err(())
 }
 
 #[cfg(test)]
