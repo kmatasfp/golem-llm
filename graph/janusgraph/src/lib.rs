@@ -24,6 +24,14 @@ pub struct Graph {
 
 pub struct Transaction {
     api: Arc<JanusGraphApi>,
+    state: std::sync::RwLock<TransactionState>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum TransactionState {
+    Active,
+    Committed,
+    RolledBack,
 }
 
 pub struct SchemaManager {
@@ -66,7 +74,10 @@ impl Graph {
 
 impl Transaction {
     fn new(api: Arc<JanusGraphApi>) -> Self {
-        Self { api }
+        Self { 
+            api,
+            state: std::sync::RwLock::new(TransactionState::Active),
+        }
     }
 }
 

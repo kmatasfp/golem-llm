@@ -59,11 +59,49 @@ fn first_list_item(data: &Value) -> Result<&Value, GraphError> {
 
 impl GuestTransaction for Transaction {
     fn commit(&self) -> Result<(), GraphError> {
-        Ok(())
+        {
+            let state = self.state.read().unwrap();
+            match *state {
+                crate::TransactionState::Committed => return Ok(()),
+                crate::TransactionState::RolledBack => {
+                    return Err(GraphError::TransactionFailed(
+                        "Cannot commit a transaction that has been rolled back".to_string()
+                    ));
+                }
+                crate::TransactionState::Active => {}
+            }
+        }
+
+        let result = self.api.commit();
+        
+        if result.is_ok() {
+            let mut state = self.state.write().unwrap();
+            *state = crate::TransactionState::Committed;
+        }
+        result
     }
 
     fn rollback(&self) -> Result<(), GraphError> {
-        Ok(())
+        {
+            let state = self.state.read().unwrap();
+            match *state {
+                crate::TransactionState::RolledBack => return Ok(()), 
+                crate::TransactionState::Committed => {
+                    return Err(GraphError::TransactionFailed(
+                        "Cannot rollback a transaction that has been committed".to_string()
+                    ));
+                }
+                crate::TransactionState::Active => {} 
+            }
+        }
+
+        let result = self.api.rollback();
+        
+        if result.is_ok() {
+            let mut state = self.state.write().unwrap();
+            *state = crate::TransactionState::RolledBack;
+        }
+        result
     }
 
     fn create_vertex(
@@ -1318,6 +1356,14 @@ impl GuestTransaction for Transaction {
     }
 
     fn is_active(&self) -> bool {
-        self.api.is_session_active()
+        // Check the transaction state first
+        let state = self.state.read().unwrap();
+        match *state {
+            crate::TransactionState::Active => {
+                // If transaction state is active, also check if the session is still active
+                self.api.is_session_active()
+            }
+            crate::TransactionState::Committed | crate::TransactionState::RolledBack => false,
+        }
     }
 }

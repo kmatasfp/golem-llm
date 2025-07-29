@@ -59,6 +59,13 @@ impl JanusGraphApi {
         Ok(())
     }
 
+    pub fn rollback(&self) -> Result<(), GraphError> {
+        trace!("Rollback transaction");
+        self.execute("g.tx().rollback()", None)?;
+        self.execute("g.tx().open()", None)?;
+        Ok(())
+    }
+
     pub fn execute(&self, gremlin: &str, bindings: Option<Value>) -> Result<Value, GraphError> {
         trace!("Execute Gremlin query: {gremlin}");
         let bindings = bindings.unwrap_or_else(|| json!({}));
