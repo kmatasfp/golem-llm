@@ -3,13 +3,13 @@ mod bindings;
 
 use crate::bindings::exports::test::exec_js_exports::test_exec_js_api::*;
 use crate::bindings::golem::exec::executor::run;
-use crate::bindings::golem::exec::types::{Encoding, File, Language, LanguageKind};
+use crate::bindings::golem::exec::types::{Encoding, Error, File, Language, LanguageKind, Limits};
 use indoc::indoc;
 
 struct Component;
 
 impl Guest for Component {
-    fn test1() -> bool {
+    fn test01() -> bool {
         match run(
             &Language {
                 kind: LanguageKind::Javascript,
@@ -39,7 +39,7 @@ impl Guest for Component {
         }
     }
 
-    fn test2() -> bool {
+    fn test02() -> bool {
         match run(
             &Language {
                 kind: LanguageKind::Javascript,
@@ -85,7 +85,7 @@ impl Guest for Component {
         }
     }
 
-    fn test3() -> bool {
+    fn test03() -> bool {
         match run(
             &Language {
                 kind: LanguageKind::Javascript,
@@ -132,7 +132,7 @@ impl Guest for Component {
         }
     }
 
-    fn test4() -> bool {
+    fn test04() -> bool {
         match run(
             &Language {
                 kind: LanguageKind::Javascript,
@@ -161,7 +161,7 @@ impl Guest for Component {
         }
     }
 
-    fn test5() -> bool {
+    fn test05() -> bool {
         match run(
             &Language {
                 kind: LanguageKind::Javascript,
@@ -190,7 +190,7 @@ impl Guest for Component {
         }
     }
 
-    fn test6() -> bool {
+    fn test06() -> bool {
         match run(
             &Language {
                 kind: LanguageKind::Javascript,
@@ -230,7 +230,7 @@ impl Guest for Component {
         }
     }
 
-    fn test7() -> bool {
+    fn test07() -> bool {
         let session = bindings::golem::exec::executor::Session::new(
             &Language {
                 kind: LanguageKind::Javascript,
@@ -375,7 +375,7 @@ impl Guest for Component {
         r1 && r2 && r3 && r4 && r5
     }
 
-    fn test8() -> bool {
+    fn test08() -> bool {
         let session = bindings::golem::exec::executor::Session::new(
             &Language {
                 kind: LanguageKind::Javascript,
@@ -439,7 +439,7 @@ impl Guest for Component {
         r1 && r2 && r3
     }
 
-    fn test9() -> bool {
+    fn test09() -> bool {
         let session = bindings::golem::exec::executor::Session::new(
             &Language {
                 kind: LanguageKind::Javascript,
@@ -570,6 +570,118 @@ impl Guest for Component {
         );
 
         r1 && r2 && r3 && r4 && r5 && r6
+    }
+
+    fn test10() -> bool {
+        match run(
+            &Language {
+                kind: LanguageKind::Javascript,
+                version: None,
+            },
+            indoc!(
+                r#"
+            let x = 0;
+            setInterval(() => {
+                x += 1;
+                console.log(x);
+            }, 250);
+            "#
+            ),
+            &[],
+            None,
+            &[],
+            &[],
+            Some(Limits {
+                time_ms: Some(1000),
+                memory_bytes: None,
+                file_size_bytes: None,
+                max_processes: None,
+            }),
+        ) {
+            Ok(result) => {
+                println!("Result: {:?}", result);
+                false
+            }
+            Err(err) => {
+                println!("Error: {}", err);
+                matches!(err, Error::Timeout)
+            }
+        }
+    }
+
+    fn test11() -> bool {
+        let session = bindings::golem::exec::executor::Session::new(
+            &Language {
+                kind: LanguageKind::Javascript,
+                version: None,
+            },
+            &[],
+        );
+
+        let r1 = session
+            .run(
+                indoc!(
+                    r#"
+                import { writeFileSync } from "node:fs";
+                const content = new Array(1024).fill(0);
+                writeFileSync("output.bin", content);
+                "#
+                ),
+                &[],
+                None,
+                &[],
+                None,
+            )
+            .map_or_else(
+                |err| {
+                    println!("Error running script: {}", err);
+                    false
+                },
+                |result| {
+                    println!("Result: {:?}", result);
+                    result.run.exit_code == Some(0)
+                },
+            );
+
+        let r2 = session
+            .run(
+                indoc!(
+                    r#"
+                import { writeFileSync } from "node:fs";
+                const content = new Array(1024).fill(0);
+                writeFileSync("output2.bin", content);
+                "#
+                ),
+                &[],
+                None,
+                &[],
+                Some(Limits {
+                    time_ms: None,
+                    memory_bytes: None,
+                    file_size_bytes: Some(512),
+                    max_processes: None,
+                }),
+            )
+            .map_or_else(
+                |err| {
+                    println!("Error running script: {}", err);
+                    true
+                },
+                |_result| false,
+            );
+
+        let r3 = session.list_files("").map_or_else(
+            |err| {
+                println!("Error listing files: {}", err);
+                false
+            },
+            |files| {
+                println!("List of files: {files:?}");
+                files == vec!["output.bin".to_string()]
+            },
+        );
+
+        r1 && r2 && r3
     }
 }
 

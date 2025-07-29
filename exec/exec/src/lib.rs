@@ -1,4 +1,3 @@
-
 #[cfg(feature = "javascript")]
 pub mod javascript;
 
@@ -17,10 +16,10 @@ wit_bindgen::generate!({
 });
 
 pub use crate::exports::golem;
+use crate::golem::exec::executor::Error;
 use crate::golem::exec::types::{Encoding, File, StageResult};
 pub use __export_exec_library_impl as export_exec;
 use base64::Engine;
-use crate::golem::exec::executor::Error;
 
 pub(crate) fn get_contents_as_string(file: &File) -> Option<String> {
     get_contents(file).and_then(|bytes| String::from_utf8(bytes).ok())
@@ -52,5 +51,5 @@ pub(crate) fn io_error(error: std::io::Error) -> Error {
 
 // TODO STEPS
 
-// - enforce constraints (at least timeout, more if possible)
 // - durability wrapper
+// - run the tests on CI

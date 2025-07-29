@@ -47,6 +47,7 @@ impl Guest for Component {
 }
 
 #[allow(dead_code)]
+#[allow(clippy::large_enum_variant)]
 enum Session {
     #[cfg(feature = "javascript")]
     Javascript(crate::javascript::JavaScriptSession),

@@ -8,7 +8,7 @@ pub mod fs;
 mod ieee754;
 mod process;
 mod readline;
-mod timeout;
+pub mod timeout;
 
 pub fn add_module_resolvers(
     resolver: rquickjs::loader::BuiltinResolver,

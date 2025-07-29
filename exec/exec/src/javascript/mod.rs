@@ -3,13 +3,16 @@ mod builtin;
 use crate::golem::exec::executor::{Error, ExecResult, File, Language, Limits};
 use crate::golem::exec::types::{LanguageKind, StageResult};
 use crate::{get_contents_as_string, stage_result_failure};
+use futures::TryFutureExt;
 use rquickjs::loader::{BuiltinLoader, BuiltinResolver};
 use rquickjs::{async_with, AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Module, Object};
 use std::cell::RefCell;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
+use wstd::future::FutureExt;
 use wstd::runtime::block_on;
-use wstd::time::Instant;
+use wstd::time::{Duration, Instant};
 
 fn js_engine_error(err: rquickjs::Error) -> Error {
     Error::Internal(err.to_string())
@@ -48,6 +51,7 @@ fn set_globals(
     args: Vec<String>,
     env: Vec<(String, String)>,
     cwd: String,
+    file_size_limit: Option<u64>,
 ) -> Result<(), rquickjs::Error> {
     ctx.globals()
         .set("__golem_exec_js_stdin", stdin.unwrap_or_default())?;
@@ -60,6 +64,8 @@ fn set_globals(
 
     ctx.globals().set("__golem_exec_js_env", env_obj)?;
     ctx.globals().set("__golem_exec_js_cwd", cwd)?;
+    ctx.globals()
+        .set("__golem_exec_js_file_size_limit", file_size_limit)?;
 
     Ok(())
 }
@@ -180,6 +186,7 @@ impl JavaScriptSession {
         })
     }
 
+    #[allow(clippy::await_holding_refcell_ref)]
     async fn run_async(
         &self,
         snippet: String,
@@ -198,8 +205,9 @@ impl JavaScriptSession {
             }
         }
 
-        async_with!(state.ctx => |ctx| {
-           set_globals(ctx, stdin, args, env, state.cwd.clone()).map_err(js_engine_error)
+        let abort_state = async_with!(state.ctx => |ctx| {
+           set_globals(ctx.clone(), stdin, args, env, state.cwd.clone(), constraints.and_then(|c| c.file_size_bytes) ).map_err(js_engine_error)?;
+            builtin::timeout::init_abort(ctx)
         })
         .await?;
         state.rt.idle().await;
@@ -209,16 +217,36 @@ impl JavaScriptSession {
         let main_name = "main";
         let main_content = format!("{wiring}\n{snippet}");
 
-        async_with!(state.ctx => |ctx| {
-            run_snippet(ctx, main_name.to_string(), main_content, &self.data_root)
-        })
-        .await?;
-        state.rt.idle().await;
-        let (stdout, stderr) = async_with!(state.ctx => |ctx| {
-                builtin::console::get_captured_output(ctx).map(|(stdout, stderr)| (stdout.join("\n"), stderr.join("\n")))
+        let future = async {
+            async_with!(state.ctx => |ctx| {
+                run_snippet(ctx, main_name.to_string(), main_content, &self.data_root)
             })
             .await?;
+            state.rt.idle().await;
+            async_with!(state.ctx => |ctx| {
+                    builtin::console::get_captured_output(ctx).map(|(stdout, stderr)| (stdout.join("\n"), stderr.join("\n")))
+                })
+                .await
+        };
+        let result = if let Some(timeout_ms) = constraints.and_then(|c| c.time_ms) {
+            future
+                .timeout(Duration::from_millis(timeout_ms))
+                .map_err(|err| match err.kind() {
+                    ErrorKind::TimedOut => Error::Timeout,
+                    _ => Error::RuntimeFailed(stage_result_failure(format!("{err}"))),
+                })
+                .await
+                .unwrap_or_else(Err)
+        } else {
+            future.await
+        };
 
+        for (_, abort_handle) in abort_state.abort_handles.borrow_mut().drain() {
+            abort_handle.abort();
+        }
+        state.rt.idle().await;
+
+        let (stdout, stderr) = result?;
         let memory_usage = state.rt.memory_usage().await;
 
         Ok(ExecResult {

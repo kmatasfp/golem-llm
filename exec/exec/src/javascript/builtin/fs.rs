@@ -61,6 +61,20 @@ pub mod native_module {
             Some("Only 'utf8' encoding is supported".to_string())
         } else {
             let bytes = content.as_bytes();
+
+            if let Ok(Some(limit)) = ctx
+                .globals()
+                .get::<&str, Option<u64>>("__golem_exec_js_file_size_limit")
+            {
+                if bytes.len() as u64 > limit {
+                    return Some(format!(
+                        "File size {} exceeds the limit of {} bytes",
+                        bytes.len(),
+                        limit
+                    ));
+                }
+            }
+
             let path = super::resolve_path(&ctx, &path);
             if let Some(parent) = path.parent() {
                 if let Err(err) = std::fs::create_dir_all(parent) {
@@ -82,6 +96,19 @@ pub mod native_module {
     #[rquickjs::function]
     pub fn write_file(path: String, content: TypedArray<'_, u8>, ctx: Ctx<'_>) -> Option<String> {
         if let Some(bytes) = content.as_bytes() {
+            if let Ok(Some(limit)) = ctx
+                .globals()
+                .get::<&str, Option<u64>>("__golem_exec_js_file_size_limit")
+            {
+                if bytes.len() as u64 > limit {
+                    return Some(format!(
+                        "File size {} exceeds the limit of {} bytes",
+                        bytes.len(),
+                        limit
+                    ));
+                }
+            }
+
             let path = super::resolve_path(&ctx, &path);
             if let Some(parent) = path.parent() {
                 if let Err(err) = std::fs::create_dir_all(parent) {
@@ -115,8 +142,8 @@ fn get_data_root(ctx: &Ctx<'_>) -> PathBuf {
 
 fn resolve_path(ctx: &Ctx<'_>, path: &str) -> PathBuf {
     let data_root = get_data_root(ctx);
-    let resolved_path = if path.starts_with('/') {
-        data_root.join(&path[1..])
+    let resolved_path = if let Some(stripped) = path.strip_prefix('/') {
+        data_root.join(stripped)
     } else {
         let cwd: String = ctx
             .globals()

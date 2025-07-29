@@ -1,11 +1,19 @@
+use crate::golem::exec::types::Error;
+use futures::future::AbortHandle;
 use rquickjs::function::Args;
-use rquickjs::{CatchResultExt, Ctx, Persistent, Value};
+use rquickjs::{CatchResultExt, Ctx, JsLifetime, Persistent, Value};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::sync::atomic::AtomicUsize;
 
 // Native functions for the timeout implementation (based on wasm-rquickjs)
 #[rquickjs::module]
 pub mod native_module {
+    use crate::javascript::builtin::timeout::get_abort_state;
     use futures::future::abortable;
     use rquickjs::{Ctx, Persistent, Value};
+    use std::sync::atomic::Ordering;
 
     #[rquickjs::function]
     pub fn schedule(
@@ -17,7 +25,7 @@ pub mod native_module {
     ) -> usize {
         let delay = delay.unwrap_or(0);
 
-        let (task, _abort_handle) = abortable(super::scheduled_task(
+        let (task, abort_handle) = abortable(super::scheduled_task(
             ctx.clone(),
             code_or_fn,
             delay,
@@ -25,10 +33,44 @@ pub mod native_module {
             args,
         ));
 
+        let state = get_abort_state(ctx.clone()).unwrap();
+        let key = state.last_abort_id.fetch_add(1, Ordering::Relaxed);
         ctx.spawn(async move {
             let _ = task.await;
         });
-        0
+        state.abort_handles.borrow_mut().insert(key, abort_handle);
+        key
+    }
+
+    #[rquickjs::function]
+    pub fn clear_schedule(ctx: Ctx<'_>, timeout_id: usize) {
+        let state = get_abort_state(ctx).unwrap();
+        let mut abort_handles = state.abort_handles.borrow_mut();
+        let handle = abort_handles
+            .remove(&timeout_id)
+            .expect("No such timeout ID");
+        handle.abort();
+    }
+}
+
+#[derive(Default, JsLifetime)]
+pub struct AbortState {
+    pub abort_handles: RefCell<HashMap<usize, AbortHandle>>,
+    pub last_abort_id: AtomicUsize,
+}
+
+pub fn init_abort(ctx: Ctx<'_>) -> Result<Rc<AbortState>, Error> {
+    let state = Rc::new(AbortState::default());
+    ctx.store_userdata(state.clone())
+        .map_err(|err| Error::Internal(err.to_string()))?;
+    Ok(state)
+}
+
+pub fn get_abort_state(ctx: Ctx<'_>) -> Result<Rc<AbortState>, Error> {
+    if let Some(abort_state) = ctx.userdata::<Rc<AbortState>>() {
+        Ok(abort_state.clone())
+    } else {
+        Err(Error::Internal("Abort is not initialized".to_string()))
     }
 }
 
@@ -41,6 +83,8 @@ pub const WIRE_JS: &str = r#"
         globalThis.setTimeout = __golem_exec_js_timeout.setTimeout;
         globalThis.setImmediate = __golem_exec_js_timeout.setImmediate;
         globalThis.setInterval = __golem_exec_js_timeout.setInterval;
+        globalThis.clearTimeout = __golem_exec_js_timeout.clearTimeout;
+        globalThis.clearInterval = __golem_exec_js_timeout.clearTimeout;
     "#;
 
 async fn scheduled_task(
