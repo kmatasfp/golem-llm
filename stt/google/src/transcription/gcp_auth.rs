@@ -3,7 +3,7 @@ use chrono::{DateTime, Duration, Utc};
 use golem_stt::http::HttpClient;
 use http::Request;
 use rsa::Pkcs1v15Sign;
-use rsa::{pkcs1::DecodeRsaPrivateKey, pkcs8::DecodePrivateKey, RsaPrivateKey};
+use rsa::{pkcs8::DecodePrivateKey, RsaPrivateKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -46,7 +46,8 @@ struct TokenResponse {
 }
 
 #[derive(Clone)]
-pub struct GcpAuth {
+pub struct GcpAuth<HC: HttpClient> {
+    http_client: HC,
     client_email: String,
     private_key: RsaPrivateKey,
     access_token: Option<String>,
@@ -54,11 +55,12 @@ pub struct GcpAuth {
 }
 
 // based on https://developers.google.com/identity/protocols/oauth2/service-account#httprest
-impl GcpAuth {
-    pub fn new(client_email: String, private_key: String) -> Result<Self, Error> {
+impl<HC: HttpClient> GcpAuth<HC> {
+    pub fn new(client_email: String, private_key: String, http_client: HC) -> Result<Self, Error> {
         let private_key = Self::parse_private_key(&private_key)?;
 
         Ok(Self {
+            http_client,
             client_email,
             private_key,
             access_token: None,
@@ -71,10 +73,7 @@ impl GcpAuth {
             .map_err(|e| Error::CryptoError(format!("Failed to parse private key: {}", e)))
     }
 
-    pub async fn get_access_token<HC: HttpClient>(
-        &mut self,
-        http_client: &HC,
-    ) -> Result<String, Error> {
+    pub async fn get_access_token(&mut self) -> Result<String, Error> {
         // Check if we have a valid token
         if let (Some(token), Some(expires_at)) = (&self.access_token, &self.token_expires_at) {
             if Utc::now() < *expires_at - Duration::minutes(5) {
@@ -83,7 +82,7 @@ impl GcpAuth {
         }
 
         let jwt = self.create_signed_jwt()?;
-        let access_token = self.exchange_jwt_for_token(jwt, http_client).await?;
+        let access_token = self.exchange_jwt_for_oauth_token(jwt).await?;
 
         self.access_token = Some(access_token.clone());
         self.token_expires_at = Some(Utc::now() + Duration::minutes(55)); // 5 min buffer
@@ -139,11 +138,7 @@ impl GcpAuth {
         Ok(signature)
     }
 
-    async fn exchange_jwt_for_token<HC: HttpClient>(
-        &self,
-        jwt: String,
-        http_client: &HC,
-    ) -> Result<String, Error> {
+    async fn exchange_jwt_for_oauth_token(&self, jwt: String) -> Result<String, Error> {
         let form_data = format!(
             "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion={}",
             urlencoding::encode(&jwt)
@@ -157,7 +152,8 @@ impl GcpAuth {
             .body(form_data.into_bytes())
             .map_err(|e| Error::HttpError(format!("Failed to build token request: {}", e)))?;
 
-        let response = http_client
+        let response = self
+            .http_client
             .execute(request)
             .await
             .map_err(|e| Error::HttpError(format!("Token request failed: {:?}", e)))?;
@@ -248,10 +244,14 @@ mod tests {
         let private_key = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKB\nTc/ZGpGZqpONTEOZ+H+qz3F8qY7jNz5NpGOB8v3rQq2+j3F8qY7jNz5NpGOB8v3r\n-----END PRIVATE KEY-----";
         let client_email = "test-service-account@test-project-123.iam.gserviceaccount.com";
 
-        if let Ok(mut auth) = GcpAuth::new(client_email.to_string(), private_key.to_string()) {
-            let _result = auth.get_access_token(&mock_client).await;
+        if let Ok(mut auth) = GcpAuth::new(
+            client_email.to_string(),
+            private_key.to_string(),
+            mock_client,
+        ) {
+            let _result = auth.get_access_token().await;
 
-            let request = mock_client.last_captured_request().unwrap();
+            let request = auth.http_client.last_captured_request().unwrap();
             assert_eq!(request.method(), "POST");
             assert_eq!(request.uri(), "https://oauth2.googleapis.com/token");
 
