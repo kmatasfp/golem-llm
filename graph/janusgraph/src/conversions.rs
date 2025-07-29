@@ -164,10 +164,10 @@ fn parse_iso_date(s: &str) -> Result<Date, ()> {
 fn parse_iso_datetime(s: &str) -> Result<Datetime, ()> {
     // Try multiple datetime formats commonly used by Gremlin/JanusGraph
     let formats = [
-        "%Y-%m-%dT%H:%M:%S%.fZ",      // ISO format with milliseconds and Z
-        "%Y-%m-%dT%H:%M:%SZ",         // ISO format without milliseconds and Z
-        "%Y-%m-%dT%H:%M:%S%.f",       // ISO format with milliseconds, no Z
-        "%Y-%m-%dT%H:%M:%S",          // ISO format without milliseconds, no Z
+        "%Y-%m-%dT%H:%M:%S%.fZ", // ISO format with milliseconds and Z
+        "%Y-%m-%dT%H:%M:%SZ",    // ISO format without milliseconds and Z
+        "%Y-%m-%dT%H:%M:%S%.f",  // ISO format with milliseconds, no Z
+        "%Y-%m-%dT%H:%M:%S",     // ISO format without milliseconds, no Z
     ];
 
     for format in &formats {
@@ -190,7 +190,7 @@ fn parse_iso_datetime(s: &str) -> Result<Datetime, ()> {
             });
         }
     }
-    
+
     Err(())
 }
 
