@@ -1,6 +1,6 @@
 [package]
-name = "test_exec_py"
-version = "0.0.1"
+name = "test_helper"
+version = "0.0.0"
 edition = "2021"
 
 [lib]
@@ -12,7 +12,6 @@ required-features = []
 # To use common shared libs, use the following:
 # common-lib = { path = "../../common-rust/common-lib" }
 
-indoc = "2.0.6"
 golem-rust = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
@@ -25,17 +24,7 @@ path = "wit-generated"
 [package.metadata.component.bindings.with]
 
 [package.metadata.component.target.dependencies]
-"golem:api" = { path = "wit-generated/deps/golem_api" }
-"golem:rpc" = { path = "wit-generated/deps/golem_rpc" }
-"wasi:io" = { path = "wit-generated/deps/wasi_io" }
-"wasi:clocks" = { path = "wit-generated/deps/wasi_clocks" }
-"golem:durability" = { path = "wit-generated/deps/golem_durability" }
-"golem:exec" = { path = "wit-generated/deps/golem-exec" }
-"wasi:filesystem" = { path = "wit-generated/deps/wasi_filesystem" }
-"wasi:cli" = { path = "wit-generated/deps/wasi_cli" }
-"wasi:random" = { path = "wit-generated/deps/wasi_random" }
-"root:component" = { path = "wit-generated/deps/root_component" }
-"test:exec-py-exports" = { path = "wit-generated/deps/test_exec-py-exports" }
+"test:helper-exports" = { path = "wit-generated/deps/test_helper-exports" }
 
 [package.metadata.component.bindings]
 # See https://github.com/bytecodealliance/cargo-component/blob/main/src/metadata.rs#L62

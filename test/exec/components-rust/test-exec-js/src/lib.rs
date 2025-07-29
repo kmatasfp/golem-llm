@@ -4,13 +4,17 @@ mod bindings;
 use crate::bindings::exports::test::exec_js_exports::test_exec_js_api::*;
 use crate::bindings::golem::exec::executor::run;
 use crate::bindings::golem::exec::types::{Encoding, Error, File, Language, LanguageKind, Limits};
+use crate::bindings::test::helper_client::test_helper_client::TestHelperApi;
+use golem_rust::{atomically, generate_idempotency_key};
 use indoc::indoc;
 
 struct Component;
 
 impl Guest for Component {
     fn test01() -> bool {
-        match run(
+        let restart = Restart::new();
+
+        let result = run(
             &Language {
                 kind: LanguageKind::Javascript,
                 version: None,
@@ -27,7 +31,11 @@ impl Guest for Component {
             &[],
             &[],
             None,
-        ) {
+        );
+
+        restart.here();
+
+        match result {
             Ok(result) => {
                 println!("Result: {:?}", result);
                 result.run.stdout == "Hello, world! 42" && result.run.exit_code == Some(0)
@@ -40,7 +48,9 @@ impl Guest for Component {
     }
 
     fn test02() -> bool {
-        match run(
+        let restart = Restart::new();
+
+        let result = run(
             &Language {
                 kind: LanguageKind::Javascript,
                 version: None,
@@ -73,7 +83,11 @@ impl Guest for Component {
             &[],
             &[],
             None,
-        ) {
+        );
+
+        restart.here();
+
+        match result {
             Ok(result) => {
                 println!("Result: {:?}", result);
                 result.run.stdout == "Total Sum: 6" && result.run.exit_code == Some(0)
@@ -86,7 +100,9 @@ impl Guest for Component {
     }
 
     fn test03() -> bool {
-        match run(
+        let restart = Restart::new();
+
+        let result = run(
             &Language {
                 kind: LanguageKind::Javascript,
                 version: None,
@@ -120,7 +136,11 @@ impl Guest for Component {
             &[],
             &[],
             None,
-        ) {
+        );
+
+        restart.here();
+
+        match result {
             Ok(result) => {
                 println!("Result: {:?}", result);
                 result.run.stdout == "Total Sum: 6" && result.run.exit_code == Some(0)
@@ -133,7 +153,9 @@ impl Guest for Component {
     }
 
     fn test04() -> bool {
-        match run(
+        let restart = Restart::new();
+
+        let result = run(
             &Language {
                 kind: LanguageKind::Javascript,
                 version: None,
@@ -149,7 +171,11 @@ impl Guest for Component {
             &["arg1".to_string(), "arg2".to_string()],
             &[],
             None,
-        ) {
+        );
+
+        restart.here();
+
+        match result {
             Ok(result) => {
                 println!("Result: {:?}", result);
                 result.run.stdout == "arg1 arg2" && result.run.exit_code == Some(0)
@@ -162,7 +188,9 @@ impl Guest for Component {
     }
 
     fn test05() -> bool {
-        match run(
+        let restart = Restart::new();
+
+        let result = run(
             &Language {
                 kind: LanguageKind::Javascript,
                 version: None,
@@ -178,7 +206,11 @@ impl Guest for Component {
             &[],
             &[("INPUT".to_string(), "test_value".to_string())],
             None,
-        ) {
+        );
+
+        restart.here();
+
+        match result {
             Ok(result) => {
                 println!("Result: {:?}", result);
                 result.run.stdout == "test_value" && result.run.exit_code == Some(0)
@@ -191,7 +223,8 @@ impl Guest for Component {
     }
 
     fn test06() -> bool {
-        match run(
+        let restart = Restart::new();
+        let result = run(
             &Language {
                 kind: LanguageKind::Javascript,
                 version: None,
@@ -218,7 +251,11 @@ impl Guest for Component {
             &[],
             &[],
             None,
-        ) {
+        );
+
+        restart.here();
+
+        match result {
             Ok(result) => {
                 println!("Result: {:?}", result);
                 result.run.stdout == "Hello, world! 42" && result.run.exit_code == Some(0)
@@ -231,6 +268,8 @@ impl Guest for Component {
     }
 
     fn test07() -> bool {
+        let restart = Restart::new();
+
         let session = bindings::golem::exec::executor::Session::new(
             &Language {
                 kind: LanguageKind::Javascript,
@@ -297,6 +336,8 @@ impl Guest for Component {
                     result.run.stdout == "arg1 arg2" && result.run.exit_code == Some(0)
                 },
             );
+
+        restart.here();
 
         let r3 = session
             .run(
@@ -376,6 +417,8 @@ impl Guest for Component {
     }
 
     fn test08() -> bool {
+        let restart = Restart::new();
+
         let session = bindings::golem::exec::executor::Session::new(
             &Language {
                 kind: LanguageKind::Javascript,
@@ -424,6 +467,8 @@ impl Guest for Component {
                 },
             );
 
+        restart.here();
+
         let r3 = session.download("test/output.txt").map_or_else(
             |err| {
                 println!("Error downloading file: {}", err);
@@ -440,6 +485,8 @@ impl Guest for Component {
     }
 
     fn test09() -> bool {
+        let restart = Restart::new();
+
         let session = bindings::golem::exec::executor::Session::new(
             &Language {
                 kind: LanguageKind::Javascript,
@@ -497,6 +544,8 @@ impl Guest for Component {
                     result.run.stdout == "Hello, Golem!" && result.run.exit_code == Some(0)
                 },
             );
+
+        restart.here();
 
         let r3 = session.download("test/output.txt").map_or_else(
             |err| {
@@ -682,6 +731,30 @@ impl Guest for Component {
         );
 
         r1 && r2 && r3
+    }
+}
+
+struct Restart {
+    name: String,
+}
+
+impl Restart {
+    pub fn new() -> Self {
+        let name = std::env::var("GOLEM_WORKER_NAME").unwrap();
+        let key = generate_idempotency_key();
+        Self {
+            name: format!("{name}-{key}"),
+        }
+    }
+
+    pub fn here(&self) {
+        atomically(|| {
+            let client = TestHelperApi::new(&self.name);
+            let answer = client.blocking_inc_and_get();
+            if answer == 1 {
+                panic!("Simulating crash")
+            }
+        });
     }
 }
 

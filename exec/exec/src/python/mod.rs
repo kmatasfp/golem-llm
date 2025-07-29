@@ -1,3 +1,4 @@
+use crate::durability::{EmptySnapshot, SessionSnapshot};
 use crate::golem::exec::executor::{Error, ExecResult, File, Language, Limits};
 use crate::golem::exec::types::{LanguageKind, StageResult};
 use crate::{get_contents_as_string, io_error, stage_result_failure};
@@ -372,6 +373,20 @@ impl PythonSession {
             cwd: "/".to_string(),
         })
     }
+}
+
+impl SessionSnapshot<PythonSession> for PythonSession {
+    type Snapshot = EmptySnapshot;
+
+    fn supports_snapshot(_session: &PythonSession) -> bool {
+        false
+    }
+
+    fn take_snapshot(_session: &PythonSession) -> Self::Snapshot {
+        EmptySnapshot {}
+    }
+
+    fn restore_snapshot(_session: &PythonSession, _snapshot: Self::Snapshot) {}
 }
 
 impl Drop for PythonSession {

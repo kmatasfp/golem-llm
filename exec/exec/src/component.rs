@@ -1,3 +1,4 @@
+use crate::durability::{DurableExec, EmptySnapshot, SessionSnapshot};
 use crate::golem::exec::executor::{
     Error, ExecResult, File, Guest, GuestSession, Language, Limits,
 };
@@ -167,6 +168,48 @@ impl GuestSession for Session {
     }
 }
 
-type DurableComponent = Component; // TODO
+impl SessionSnapshot<Session> for Component {
+    type Snapshot = EmptySnapshot;
+
+    fn supports_snapshot(session: &Session) -> bool {
+        match session {
+            #[cfg(feature = "javascript")]
+            Session::Javascript(session) => {
+                crate::javascript::JavaScriptSession::supports_snapshot(session)
+            }
+            #[cfg(feature = "python")]
+            Session::Python(session) => crate::python::PythonSession::supports_snapshot(session),
+            Session::Unsupported => false,
+        }
+    }
+
+    fn take_snapshot(session: &Session) -> Self::Snapshot {
+        match session {
+            #[cfg(feature = "javascript")]
+            Session::Javascript(session) => {
+                crate::javascript::JavaScriptSession::take_snapshot(session)
+            }
+            #[cfg(feature = "python")]
+            Session::Python(session) => crate::python::PythonSession::take_snapshot(session),
+            Session::Unsupported => EmptySnapshot {},
+        }
+    }
+
+    fn restore_snapshot(session: &Session, snapshot: Self::Snapshot) {
+        match session {
+            #[cfg(feature = "javascript")]
+            Session::Javascript(session) => {
+                crate::javascript::JavaScriptSession::restore_snapshot(session, snapshot)
+            }
+            #[cfg(feature = "python")]
+            Session::Python(session) => {
+                crate::python::PythonSession::restore_snapshot(session, snapshot)
+            }
+            Session::Unsupported => {}
+        }
+    }
+}
+
+type DurableComponent = DurableExec<Component>;
 
 crate::export_exec!(DurableComponent with_types_in crate);

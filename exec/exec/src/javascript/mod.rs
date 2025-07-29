@@ -1,5 +1,6 @@
 mod builtin;
 
+use crate::durability::{EmptySnapshot, SessionSnapshot};
 use crate::golem::exec::executor::{Error, ExecResult, File, Language, Limits};
 use crate::golem::exec::types::{LanguageKind, StageResult};
 use crate::{get_contents_as_string, stage_result_failure};
@@ -261,6 +262,20 @@ impl JavaScriptSession {
             memory_bytes: Some(memory_usage.memory_used_size as u64),
         })
     }
+}
+
+impl SessionSnapshot<JavaScriptSession> for JavaScriptSession {
+    type Snapshot = EmptySnapshot;
+
+    fn supports_snapshot(_session: &JavaScriptSession) -> bool {
+        false
+    }
+
+    fn take_snapshot(_session: &JavaScriptSession) -> Self::Snapshot {
+        EmptySnapshot {}
+    }
+
+    fn restore_snapshot(_session: &JavaScriptSession, _snapshot: Self::Snapshot) {}
 }
 
 impl Drop for JavaScriptSession {

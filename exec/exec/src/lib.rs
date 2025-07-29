@@ -5,13 +5,14 @@ pub mod javascript;
 pub mod python;
 
 mod component;
+mod durability;
 
 wit_bindgen::generate!({
     path: "../wit",
     world: "exec-library",
     generate_all,
     generate_unused_types: true,
-    //additional_derives: [PartialEq, golem_rust::FromValueAndType, golem_rust::IntoValue],
+    additional_derives: [PartialEq, golem_rust::FromValueAndType, golem_rust::IntoValue],
     pub_export_macro: true,
 });
 
@@ -51,5 +52,4 @@ pub(crate) fn io_error(error: std::io::Error) -> Error {
 
 // TODO STEPS
 
-// - durability wrapper
 // - run the tests on CI
