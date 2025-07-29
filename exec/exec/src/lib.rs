@@ -49,7 +49,3 @@ pub(crate) fn stage_result_failure(message: impl AsRef<str>) -> StageResult {
 pub(crate) fn io_error(error: std::io::Error) -> Error {
     Error::Internal(format!("IO error: {error}"))
 }
-
-// TODO STEPS
-
-// - run the tests on CI
