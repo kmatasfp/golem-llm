@@ -65,7 +65,7 @@ impl GuestTransaction for Transaction {
                 crate::TransactionState::Committed => return Ok(()),
                 crate::TransactionState::RolledBack => {
                     return Err(GraphError::TransactionFailed(
-                        "Cannot commit a transaction that has been rolled back".to_string()
+                        "Cannot commit a transaction that has been rolled back".to_string(),
                     ));
                 }
                 crate::TransactionState::Active => {}
@@ -73,7 +73,7 @@ impl GuestTransaction for Transaction {
         }
 
         let result = self.api.commit();
-        
+
         if result.is_ok() {
             let mut state = self.state.write().unwrap();
             *state = crate::TransactionState::Committed;
@@ -85,18 +85,18 @@ impl GuestTransaction for Transaction {
         {
             let state = self.state.read().unwrap();
             match *state {
-                crate::TransactionState::RolledBack => return Ok(()), 
+                crate::TransactionState::RolledBack => return Ok(()),
                 crate::TransactionState::Committed => {
                     return Err(GraphError::TransactionFailed(
-                        "Cannot rollback a transaction that has been committed".to_string()
+                        "Cannot rollback a transaction that has been committed".to_string(),
                     ));
                 }
-                crate::TransactionState::Active => {} 
+                crate::TransactionState::Active => {}
             }
         }
 
         let result = self.api.rollback();
-        
+
         if result.is_ok() {
             let mut state = self.state.write().unwrap();
             *state = crate::TransactionState::RolledBack;

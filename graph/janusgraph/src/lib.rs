@@ -74,7 +74,7 @@ impl Graph {
 
 impl Transaction {
     fn new(api: Arc<JanusGraphApi>) -> Self {
-        Self { 
+        Self {
             api,
             state: std::sync::RwLock::new(TransactionState::Active),
         }
