@@ -1278,7 +1278,7 @@ checksum = "a8d1add55171497b4705a648c6b583acafb01d58050a51727785f0b2c8e0a2b2"
 name = "golem-exec"
 version = "0.0.0"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "encoding_rs",
  "futures",
  "golem-rust",
@@ -3390,7 +3390,7 @@ dependencies = [
  "adler32",
  "ahash",
  "ascii",
- "base64 0.22.1",
+ "base64",
  "blake2",
  "bzip2",
  "cfg-if",

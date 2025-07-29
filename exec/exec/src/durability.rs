@@ -83,7 +83,7 @@ mod durable_impl {
                         stdin.clone(),
                         args.clone(),
                         env.clone(),
-                        constraints.clone(),
+                        constraints,
                     )
                 });
                 durability.persist_serializable(
@@ -144,7 +144,7 @@ mod durable_impl {
                 args: args.clone(),
                 stdin: stdin.clone(),
                 env: env.clone(),
-                constraints: constraints.clone(),
+                constraints,
             };
             if Impl::supports_snapshot(&self.inner) {
                 // We can take a snapshot of the session and restore it during replay without
@@ -244,7 +244,7 @@ mod durable_impl {
                         .ok_or_else(|| "Missing result field".to_string())?,
                 )?,
                 snapshot: Option::<Snapshot>::from_extractor(
-                    &extractor.field(1).ok_or_else(|| "Missing snapshot field")?,
+                    &extractor.field(1).ok_or("Missing snapshot field")?,
                 )?,
             })
         }
