@@ -133,41 +133,6 @@ impl Neo4jApi {
         Self::ensure_success(resp).map(|_| ())
     }
 
-    pub(crate) fn get_transaction_status(&self, tx_url: &str) -> Result<String, GraphError> {
-        trace!("Get Neo4j transaction status: {tx_url}");
-        let resp = self
-            .client
-            .get(tx_url)
-            .header("Authorization", &self.auth_header)
-            .send()
-            .map_err(|e| {
-                self.handle_neo4j_reqwest_error("Neo4j get transaction status failed", e)
-            })?;
-
-        if resp.status().is_success() {
-            Ok("running".to_string())
-        } else {
-            let status_code = resp.status().as_u16();
-            let text = resp.text().map_err(|e| {
-                GraphError::InternalError(format!("Failed to read Neo4j response body: {e}"))
-            })?;
-            let error_body: Value = serde_json::from_str(&text)
-                .unwrap_or_else(|_| serde_json::json!({"message": text, "raw_body": text}));
-
-            let error_msg = error_body
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Unknown Neo4j error");
-
-            // For 404 status, transaction is likely closed/expired
-            if status_code == 404 {
-                Ok("closed".to_string())
-            } else {
-                Err(Self::map_neo4j_error(status_code, error_msg, &error_body))
-            }
-        }
-    }
-
     // Helpers
 
     fn ensure_success(response: Response) -> Result<Response, GraphError> {

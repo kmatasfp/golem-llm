@@ -33,11 +33,51 @@ fn cypher_syntax() -> QuerySyntax {
 
 impl GuestTransaction for Transaction {
     fn commit(&self) -> Result<(), GraphError> {
-        self.api.commit_transaction(&self.transaction_url)
+        {
+            let state = self.state.read().unwrap();
+            match *state {
+                crate::TransactionState::Committed => return Ok(()),
+                crate::TransactionState::RolledBack => {
+                    return Err(GraphError::TransactionFailed(
+                        "Cannot commit a transaction that has been rolled back".to_string(),
+                    ));
+                }
+                crate::TransactionState::Active => {}
+            }
+        }
+
+        let result = self.api.commit_transaction(&self.transaction_url);
+
+        if result.is_ok() {
+            let mut state = self.state.write().unwrap();
+            *state = crate::TransactionState::Committed;
+        }
+
+        result
     }
 
     fn rollback(&self) -> Result<(), GraphError> {
-        self.api.rollback_transaction(&self.transaction_url)
+        {
+            let state = self.state.read().unwrap();
+            match *state {
+                crate::TransactionState::RolledBack => return Ok(()), // Already rolled back
+                crate::TransactionState::Committed => {
+                    return Err(GraphError::TransactionFailed(
+                        "Cannot rollback a transaction that has been committed".to_string(),
+                    ));
+                }
+                crate::TransactionState::Active => {}
+            }
+        }
+
+        let result = self.api.rollback_transaction(&self.transaction_url);
+
+        if result.is_ok() {
+            let mut state = self.state.write().unwrap();
+            *state = crate::TransactionState::RolledBack;
+        }
+
+        result
     }
 
     fn create_vertex(
@@ -1127,9 +1167,10 @@ impl GuestTransaction for Transaction {
     }
 
     fn is_active(&self) -> bool {
-        self.api
-            .get_transaction_status(&self.transaction_url)
-            .map(|status| status == "running")
-            .unwrap_or(false)
+        let state = self.state.read().unwrap();
+        match *state {
+            crate::TransactionState::Active => true,
+            crate::TransactionState::Committed | crate::TransactionState::RolledBack => false,
+        }
     }
 }

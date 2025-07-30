@@ -24,6 +24,14 @@ pub struct Graph {
 pub struct Transaction {
     api: Arc<Neo4jApi>,
     transaction_url: String,
+    state: std::sync::RwLock<TransactionState>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum TransactionState {
+    Active,
+    Committed,
+    RolledBack,
 }
 
 pub struct SchemaManager {
@@ -75,6 +83,7 @@ impl Transaction {
         Self {
             api,
             transaction_url,
+            state: std::sync::RwLock::new(TransactionState::Active),
         }
     }
 }
