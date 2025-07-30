@@ -50,11 +50,12 @@ impl GuestSchemaManager for SchemaManager {
                     json!({ "statements": [ { "statement": q } ] }),
                 ) {
                     Err(e) => {
-                        let msg = e.to_string();
-                        if msg.contains("Enterprise Edition")
-                            || msg.contains("ConstraintCreationFailed")
-                        {
-                            trace!("[WARN] Skipping property existence constraint: requires Neo4j Enterprise Edition. Error: {msg}");
+                        let is_enterprise_error = matches!(
+                            &e,
+                            GraphError::SchemaViolation(_) | GraphError::UnsupportedOperation(_)
+                        );
+                        if is_enterprise_error {
+                            trace!("[WARN] Skipping property existence constraint: requires Neo4j Enterprise Edition. Error: {e}");
                             tx.commit()?;
                         } else {
                             return Err(e);

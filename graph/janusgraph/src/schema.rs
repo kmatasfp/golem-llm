@@ -173,7 +173,7 @@ impl GuestSchemaManager for SchemaManager {
 
         index_builder.push_str(".indexOnly(label).buildCompositeIndex();");
 
-        let wrapped_index_builder = format!("try {{ {index_builder} }} catch (Exception e) {{ if (!e.message.contains('already been defined')) throw e; }}");
+        let wrapped_index_builder = format!("try {{ {index_builder} }} catch (Exception e) {{ if (e instanceof org.janusgraph.core.SchemaViolationException || e.getClass().getSimpleName().equals('SchemaViolationException')) {{ /* Index already exists, ignore */ }} else {{ throw e; }} }}");
         script_parts.push(wrapped_index_builder);
 
         let script = script_parts.join("; ");
@@ -294,8 +294,14 @@ impl SchemaManager {
                     let result = response["result"]["data"].clone();
                     return Ok(result);
                 }
-                Err(e) if e.to_string().contains("transaction is closed") => {
-                    last_error = Some(e);
+                Err(GraphError::TransactionFailed(_)) => {
+                    last_error = Some(GraphError::TransactionFailed(
+                        "Management transaction closed, retrying".to_string(),
+                    ));
+                    std::thread::sleep(std::time::Duration::from_millis(1000));
+                }
+                Err(GraphError::TransactionTimeout) => {
+                    last_error = Some(GraphError::TransactionTimeout);
                     std::thread::sleep(std::time::Duration::from_millis(1000));
                 }
                 Err(e) => {

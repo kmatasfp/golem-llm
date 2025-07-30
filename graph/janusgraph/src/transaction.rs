@@ -394,16 +394,28 @@ impl GuestTransaction for Transaction {
                     log::info!("[delete_vertex] dropped vertex {id:?} (attempt {attempt})");
                     return Ok(());
                 }
-                Err(GraphError::InvalidQuery(msg))
-                    if msg.contains("Lock expired") && attempt == 1 =>
-                {
+                Err(GraphError::TransactionTimeout) if attempt == 1 => {
                     log::warn!(
-                        "[delete_vertex] Lock expired on vertex {id:?}, retrying drop (1/2)"
+                        "[delete_vertex] Transaction timeout on vertex {id:?}, retrying drop (1/2)"
                     );
                     continue;
                 }
-                Err(GraphError::InvalidQuery(msg)) if msg.contains("Lock expired") => {
-                    log::warn!("[delete_vertex] Lock expired again on {id:?}, ignoring cleanup");
+                Err(GraphError::TransactionTimeout) => {
+                    log::warn!(
+                        "[delete_vertex] Transaction timeout again on {id:?}, ignoring cleanup"
+                    );
+                    return Ok(());
+                }
+                Err(GraphError::DeadlockDetected) if attempt == 1 => {
+                    log::warn!(
+                        "[delete_vertex] Deadlock detected on vertex {id:?}, retrying drop (1/2)"
+                    );
+                    continue;
+                }
+                Err(GraphError::DeadlockDetected) => {
+                    log::warn!(
+                        "[delete_vertex] Deadlock detected again on {id:?}, ignoring cleanup"
+                    );
                     return Ok(());
                 }
                 Err(e) => {
