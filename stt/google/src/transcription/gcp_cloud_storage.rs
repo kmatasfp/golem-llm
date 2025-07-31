@@ -1,9 +1,9 @@
 use std::rc::Rc;
 
 use golem_stt::{error::Error as SttError, http::HttpClient};
-use http::Request;
+use http::{Request, StatusCode};
 
-use super::gcp_auth::{GcpAuth, ServiceAccountKey};
+use super::gcp_auth::GcpAuth;
 
 #[allow(async_fn_in_trait)]
 pub trait CloudStorageService {
@@ -87,34 +87,34 @@ impl<HC: HttpClient> CloudStorageService for CloudStorageClient<HC> {
             let status = response.status();
             let request_id = request_id.to_string();
 
-            match status.as_u16() {
-                400 => Err(SttError::APIBadRequest {
+            match status {
+                StatusCode::BAD_REQUEST => Err(SttError::APIBadRequest {
                     request_id,
                     provider_error: format!("Cloud Storage upload bad request: {}", error_body),
                 }),
-                401 => Err(SttError::APIForbidden {
+                StatusCode::UNAUTHORIZED => Err(SttError::APIForbidden {
                     request_id,
                     provider_error: format!("Cloud Storage upload forbidden error: {}", error_body),
                 }),
-                403 => Err(SttError::APIUnauthorized {
+                StatusCode::FORBIDDEN => Err(SttError::APIUnauthorized {
                     request_id,
                     provider_error: format!(
                         "Cloud Storage upload unauthorized error: {}",
                         error_body
                     ),
                 }),
-                409 => Err(SttError::APIConflict {
+                StatusCode::NOT_FOUND => Err(SttError::APIConflict {
                     request_id,
                     provider_error: format!("Cloud Storage upload conflict error: {}", error_body),
                 }),
-                429 => Err(SttError::APIRateLimit {
+                StatusCode::TOO_MANY_REQUESTS => Err(SttError::APIRateLimit {
                     request_id,
                     provider_error: format!(
                         "Cloud Storage upload rate limit error: {}",
                         error_body
                     ),
                 }),
-                500..=599 => Err(SttError::APIInternalServerError {
+                s if s.is_server_error() => Err(SttError::APIInternalServerError {
                     request_id,
                     provider_error: format!(
                         "Cloud Storage upload server error ({}): {}",
@@ -175,34 +175,34 @@ impl<HC: HttpClient> CloudStorageService for CloudStorageClient<HC> {
             let status = response.status();
             let request_id = request_id.to_string();
 
-            match status.as_u16() {
-                400 => Err(SttError::APIBadRequest {
+            match status {
+                StatusCode::BAD_REQUEST => Err(SttError::APIBadRequest {
                     request_id,
                     provider_error: format!("Cloud Storage delete bad request: {}", error_body),
                 }),
-                401 => Err(SttError::APIForbidden {
+                StatusCode::FORBIDDEN => Err(SttError::APIForbidden {
                     request_id,
                     provider_error: format!("Cloud Storage delete forbidden error: {}", error_body),
                 }),
-                403 => Err(SttError::APIUnauthorized {
+                StatusCode::UNAUTHORIZED => Err(SttError::APIUnauthorized {
                     request_id,
                     provider_error: format!(
                         "Cloud Storage delete unauthorized error: {}",
                         error_body
                     ),
                 }),
-                409 => Err(SttError::APIConflict {
+                StatusCode::CONFLICT => Err(SttError::APIConflict {
                     request_id,
                     provider_error: format!("Cloud Storage delete conflict error: {}", error_body),
                 }),
-                429 => Err(SttError::APIRateLimit {
+                StatusCode::TOO_MANY_REQUESTS => Err(SttError::APIRateLimit {
                     request_id,
                     provider_error: format!(
                         "Cloud Storage delete rate limit error: {}",
                         error_body
                     ),
                 }),
-                500..=599 => Err(SttError::APIInternalServerError {
+                s if s.is_server_error() => Err(SttError::APIInternalServerError {
                     request_id,
                     provider_error: format!(
                         "Cloud Storage delete server error ({}): {}",
@@ -229,6 +229,8 @@ mod tests {
     };
 
     use http::{Response, StatusCode};
+
+    use crate::transcription::gcp_auth::ServiceAccountKey;
 
     use super::*;
 

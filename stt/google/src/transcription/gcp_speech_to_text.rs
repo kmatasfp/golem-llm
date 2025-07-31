@@ -414,7 +414,7 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextClient<HC, RT> {
                     request_id,
                     provider_error: error_body,
                 }),
-                StatusCode::INTERNAL_SERVER_ERROR => Err(SttError::APIInternalServerError {
+                s if s.is_server_error() => Err(SttError::APIInternalServerError {
                     request_id,
                     provider_error: error_body,
                 }),

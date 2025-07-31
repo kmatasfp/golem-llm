@@ -1,6 +1,6 @@
 use chrono::Utc;
 use golem_stt::{error::Error, http::HttpClient};
-use http::Request;
+use http::{Request, StatusCode};
 
 use super::aws_signer::AwsSignatureV4;
 
@@ -84,12 +84,12 @@ impl<HC: HttpClient> S3Service for S3Client<HC> {
             let status = response.status();
             let request_id = request_id.to_string();
 
-            match status.as_u16() {
-                400 => Err(golem_stt::error::Error::APIBadRequest {
+            match status {
+                StatusCode::BAD_REQUEST => Err(golem_stt::error::Error::APIBadRequest {
                     request_id,
                     provider_error: format!("S3 PutObject bad request: {}", error_body),
                 }),
-                500..=599 => Err(golem_stt::error::Error::APIInternalServerError {
+                s if s.is_server_error() => Err(golem_stt::error::Error::APIInternalServerError {
                     request_id,
                     provider_error: format!(
                         "S3 PutObject server error ({}): {}",
@@ -147,12 +147,12 @@ impl<HC: HttpClient> S3Service for S3Client<HC> {
             let status = response.status();
             let request_id = request_id.to_string();
 
-            match status.as_u16() {
-                400 => Err(golem_stt::error::Error::APIBadRequest {
+            match status {
+                StatusCode::BAD_REQUEST => Err(golem_stt::error::Error::APIBadRequest {
                     request_id,
                     provider_error: format!("S3 DeleteObject bad request: {}", error_body),
                 }),
-                500..=599 => Err(golem_stt::error::Error::APIInternalServerError {
+                s if s.is_server_error() => Err(golem_stt::error::Error::APIInternalServerError {
                     request_id,
                     provider_error: format!(
                         "S3 DeleteObject server error ({}): {}",

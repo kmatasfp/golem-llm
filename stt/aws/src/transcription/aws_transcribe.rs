@@ -1,7 +1,7 @@
 use chrono::Utc;
 use golem_stt::runtime::AsyncRuntime;
 
-use http::Request;
+use http::{Request, StatusCode};
 use log::trace;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -414,6 +414,19 @@ pub struct TranscribeClient<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> {
     runtime: RT,
 }
 
+// marker trait to handle empty http response body in case of Delete requests
+#[derive(Debug, Clone, PartialEq)]
+pub struct EmptyResponse;
+
+impl<'de> serde::Deserialize<'de> for EmptyResponse {
+    fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(EmptyResponse)
+    }
+}
+
 impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeClient<HC, RT> {
     pub fn new(
         access_key: String,
@@ -428,6 +441,118 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeClient<HC, RT>
             runtime,
         }
     }
+
+    async fn make_authenticated_request<R, T>(
+        &self,
+        target: &str,
+        request_body: &R,
+        request_id: String,
+        operation_name: &str,
+    ) -> Result<T, golem_stt::error::Error>
+    where
+        T: for<'de> serde::Deserialize<'de>,
+        R: serde::Serialize,
+    {
+        let timestamp = Utc::now();
+        let uri = format!(
+            "https://transcribe.{}.amazonaws.com/",
+            self.signer.get_region()
+        );
+
+        let json_body = serde_json::to_string(request_body).map_err(|e| {
+            (
+                request_id.clone(),
+                golem_stt::http::Error::Generic(format!("Failed to serialize request: {}", e)),
+            )
+        })?;
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(&uri)
+            .header("Content-Type", "application/x-amz-json-1.1")
+            .header("X-Amz-Target", target)
+            .body(json_body.into_bytes())
+            .map_err(|e| (request_id.clone(), golem_stt::http::Error::HttpError(e)))?;
+
+        let signed_request = self
+            .signer
+            .sign_request(request, timestamp)
+            .map_err(|err| {
+                (
+                    request_id.clone(),
+                    golem_stt::http::Error::Generic(format!("Failed to sign request: {}", err)),
+                )
+            })?;
+
+        trace!("Sending request to AWS Transcribe API: {}", uri);
+
+        let response = self
+            .http_client
+            .execute(signed_request)
+            .await
+            .map_err(|err| (request_id.clone(), err))?;
+
+        if response.status().is_success() {
+            let transcribe_response: T = serde_json::from_slice(response.body()).map_err(|e| {
+                (
+                    request_id.clone(),
+                    golem_stt::http::Error::Generic(format!(
+                        "Failed to deserialize response: {}",
+                        e
+                    )),
+                )
+            })?;
+
+            Ok(transcribe_response)
+        } else {
+            let error_body = String::from_utf8(response.body().to_vec())
+                .unwrap_or_else(|_| "Unknown error".to_string());
+
+            let status = response.status();
+
+            match status {
+                StatusCode::BAD_REQUEST => Err(golem_stt::error::Error::APIBadRequest {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe {} bad request: {}",
+                        operation_name, error_body
+                    ),
+                }),
+                StatusCode::FORBIDDEN => Err(golem_stt::error::Error::APIForbidden {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe {} forbidden: {}",
+                        operation_name, error_body
+                    ),
+                }),
+                StatusCode::INTERNAL_SERVER_ERROR => {
+                    Err(golem_stt::error::Error::APIInternalServerError {
+                        request_id,
+                        provider_error: format!(
+                            "Transcribe {} server error: {}",
+                            operation_name, error_body
+                        ),
+                    })
+                }
+                StatusCode::SERVICE_UNAVAILABLE => {
+                    Err(golem_stt::error::Error::APIInternalServerError {
+                        request_id,
+                        provider_error: format!(
+                            "Transcribe {} service unavailable: {}",
+                            operation_name, error_body
+                        ),
+                    })
+                }
+                _ => Err(golem_stt::error::Error::APIUnknown {
+                    request_id,
+                    provider_error: format!(
+                        "Transcribe {} unknown error ({}): {}",
+                        operation_name, status, error_body
+                    ),
+                }),
+            }
+        }
+    }
 }
 impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
     for TranscribeClient<HC, RT>
@@ -438,12 +563,6 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
         language_code: String,
         phrases: Vec<String>,
     ) -> Result<CreateVocabularyResponse, golem_stt::error::Error> {
-        let timestamp = Utc::now();
-        let uri = format!(
-            "https://transcribe.{}.amazonaws.com/",
-            self.signer.get_region()
-        );
-
         let request_body = CreateVocabularyRequest {
             vocabulary_name: vocabulary_name.clone(),
             language_code,
@@ -453,210 +572,30 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
             tags: None,
         };
 
-        let json_body = serde_json::to_string(&request_body).map_err(|e| {
-            (
-                vocabulary_name.clone(),
-                golem_stt::http::Error::Generic(format!("Failed to serialize request: {}", e)),
-            )
-        })?;
-
-        let request = Request::builder()
-            .method("POST")
-            .uri(&uri)
-            .header("Content-Type", "application/x-amz-json-1.1")
-            .header(
-                "X-Amz-Target",
-                "com.amazonaws.transcribe.Transcribe.CreateVocabulary",
-            )
-            .body(json_body.into_bytes())
-            .map_err(|e| {
-                (
-                    vocabulary_name.clone(),
-                    golem_stt::http::Error::HttpError(e),
-                )
-            })?;
-
-        let signed_request = self
-            .signer
-            .sign_request(request, timestamp)
-            .map_err(|err| {
-                (
-                    vocabulary_name.clone(),
-                    golem_stt::http::Error::Generic(format!("Failed to sign request: {}", err)),
-                )
-            })?;
-
-        let response = self
-            .http_client
-            .execute(signed_request)
-            .await
-            .map_err(|err| (vocabulary_name.clone(), err))?;
-
-        if response.status().is_success() {
-            let vocabulary_response: CreateVocabularyResponse =
-                serde_json::from_slice(response.body()).map_err(|e| {
-                    (
-                        vocabulary_name.clone(),
-                        golem_stt::http::Error::Generic(format!(
-                            "Failed to deserialize response: {}",
-                            e
-                        )),
-                    )
-                })?;
-
-            Ok(vocabulary_response)
-        } else {
-            let error_body = String::from_utf8(response.body().to_vec())
-                .unwrap_or_else(|_| "Unknown error".to_string());
-
-            let status = response.status();
-            let request_id = vocabulary_name.clone();
-
-            match status.as_u16() {
-                400 => Err(golem_stt::error::Error::APIBadRequest {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe CreateVocabulary bad request: {}",
-                        error_body
-                    ),
-                }),
-                403 => Err(golem_stt::error::Error::APIForbidden {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe CreateVocabulary forbidden: {}",
-                        error_body
-                    ),
-                }),
-                500 => Err(golem_stt::error::Error::APIInternalServerError {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe CreateVocabulary server error: {}",
-                        error_body
-                    ),
-                }),
-                503 => Err(golem_stt::error::Error::APIInternalServerError {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe CreateVocabulary service unavailable: {}",
-                        error_body
-                    ),
-                }),
-                _ => Err(golem_stt::error::Error::APIUnknown {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe CreateVocabulary unknown error ({}): {}",
-                        status, error_body
-                    ),
-                }),
-            }
-        }
+        self.make_authenticated_request(
+            "com.amazonaws.transcribe.Transcribe.CreateVocabulary",
+            &request_body,
+            vocabulary_name,
+            "CreateVocabulary",
+        )
+        .await
     }
 
     async fn get_vocabulary(
         &self,
         vocabulary_name: &str,
     ) -> Result<GetVocabularyResponse, golem_stt::error::Error> {
-        let timestamp = Utc::now();
-        let uri = format!(
-            "https://transcribe.{}.amazonaws.com/",
-            self.signer.get_region()
-        );
-
         let request_body = GetVocabularyRequest {
             vocabulary_name: vocabulary_name.to_string(),
         };
 
-        let json_body = serde_json::to_string(&request_body).map_err(|e| {
-            (
-                vocabulary_name.to_string(),
-                golem_stt::http::Error::Generic(format!("Failed to serialize request: {}", e)),
-            )
-        })?;
-
-        let request = Request::builder()
-            .method("POST")
-            .uri(&uri)
-            .header("Content-Type", "application/x-amz-json-1.1")
-            .header(
-                "X-Amz-Target",
-                "com.amazonaws.transcribe.Transcribe.GetVocabulary",
-            )
-            .body(json_body.into_bytes())
-            .map_err(|e| {
-                (
-                    vocabulary_name.to_string(),
-                    golem_stt::http::Error::HttpError(e),
-                )
-            })?;
-
-        let signed_request = self
-            .signer
-            .sign_request(request, timestamp)
-            .map_err(|err| {
-                (
-                    vocabulary_name.to_string(),
-                    golem_stt::http::Error::Generic(format!("Failed to sign request: {}", err)),
-                )
-            })?;
-
-        let response = self
-            .http_client
-            .execute(signed_request)
-            .await
-            .map_err(|err| (vocabulary_name.to_string(), err))?;
-
-        if response.status().is_success() {
-            let vocabulary_response: GetVocabularyResponse =
-                serde_json::from_slice(response.body()).map_err(|e| {
-                    (
-                        vocabulary_name.to_string(),
-                        golem_stt::http::Error::Generic(format!(
-                            "Failed to deserialize response: {}",
-                            e
-                        )),
-                    )
-                })?;
-
-            Ok(vocabulary_response)
-        } else {
-            let error_body = String::from_utf8(response.body().to_vec())
-                .unwrap_or_else(|_| "Unknown error".to_string());
-
-            let status = response.status();
-            let request_id = vocabulary_name.to_string();
-
-            match status.as_u16() {
-                400 => Err(golem_stt::error::Error::APIBadRequest {
-                    request_id,
-                    provider_error: format!("Transcribe GetVocabulary bad request: {}", error_body),
-                }),
-                403 => Err(golem_stt::error::Error::APIForbidden {
-                    request_id,
-                    provider_error: format!("Transcribe GetVocabulary forbidden: {}", error_body),
-                }),
-                500 => Err(golem_stt::error::Error::APIInternalServerError {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe GetVocabulary server error: {}",
-                        error_body
-                    ),
-                }),
-                503 => Err(golem_stt::error::Error::APIInternalServerError {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe GetVocabulary service unavailable: {}",
-                        error_body
-                    ),
-                }),
-                _ => Err(golem_stt::error::Error::APIUnknown {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe GetVocabulary unknown error ({}): {}",
-                        status, error_body
-                    ),
-                }),
-            }
-        }
+        self.make_authenticated_request(
+            "com.amazonaws.transcribe.Transcribe.GetVocabulary",
+            &request_body,
+            vocabulary_name.to_string(),
+            "GetVocabulary",
+        )
+        .await
     }
 
     async fn wait_for_vocabulary_ready(
@@ -712,102 +651,20 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
         &self,
         vocabulary_name: &str,
     ) -> Result<(), golem_stt::error::Error> {
-        let timestamp = Utc::now();
-        let uri = format!(
-            "https://transcribe.{}.amazonaws.com/",
-            self.signer.get_region()
-        );
-
         let request_body = DeleteVocabularyRequest {
             vocabulary_name: vocabulary_name.to_string(),
         };
 
-        let json_body = serde_json::to_string(&request_body).map_err(|e| {
-            (
-                vocabulary_name.to_string(),
-                golem_stt::http::Error::Generic(format!("Failed to serialize request: {}", e)),
-            )
-        })?;
-
-        let request = Request::builder()
-            .method("POST")
-            .uri(&uri)
-            .header("Content-Type", "application/x-amz-json-1.1")
-            .header(
-                "X-Amz-Target",
+        let _: EmptyResponse = self
+            .make_authenticated_request(
                 "com.amazonaws.transcribe.Transcribe.DeleteVocabulary",
+                &request_body,
+                vocabulary_name.to_string(),
+                "DeleteVocabulary",
             )
-            .body(json_body.into_bytes())
-            .map_err(|e| {
-                (
-                    vocabulary_name.to_string(),
-                    golem_stt::http::Error::HttpError(e),
-                )
-            })?;
+            .await?;
 
-        let signed_request = self
-            .signer
-            .sign_request(request, timestamp)
-            .map_err(|err| {
-                (
-                    vocabulary_name.to_string(),
-                    golem_stt::http::Error::Generic(format!("Failed to sign request: {}", err)),
-                )
-            })?;
-
-        let response = self
-            .http_client
-            .execute(signed_request)
-            .await
-            .map_err(|err| (vocabulary_name.to_string(), err))?;
-
-        if response.status().is_success() {
-            Ok(())
-        } else {
-            let error_body = String::from_utf8(response.body().to_vec())
-                .unwrap_or_else(|_| "Unknown error".to_string());
-
-            let status = response.status();
-            let request_id = vocabulary_name.to_string();
-
-            match status.as_u16() {
-                400 => Err(golem_stt::error::Error::APIBadRequest {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe DeleteVocabulary bad request: {}",
-                        error_body
-                    ),
-                }),
-                403 => Err(golem_stt::error::Error::APIForbidden {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe DeleteVocabulary forbidden: {}",
-                        error_body
-                    ),
-                }),
-                500 => Err(golem_stt::error::Error::APIInternalServerError {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe DeleteVocabulary server error: {}",
-                        error_body
-                    ),
-                }),
-                503 => Err(golem_stt::error::Error::APIInternalServerError {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe DeleteVocabulary service unavailable: {}",
-                        error_body
-                    ),
-                }),
-                _ => Err(golem_stt::error::Error::APIUnknown {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe DeleteVocabulary unknown error ({}): {}",
-                        status, error_body
-                    ),
-                }),
-            }
-        }
+        Ok(())
     }
 
     async fn start_transcription_job(
@@ -818,12 +675,6 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
         transcription_config: Option<&TranscriptionConfig>,
         vocabulary_name: Option<&str>,
     ) -> Result<StartTranscriptionJobResponse, golem_stt::error::Error> {
-        let timestamp = Utc::now();
-        let uri = format!(
-            "https://transcribe.{}.amazonaws.com/",
-            self.signer.get_region()
-        );
-
         let language_code = transcription_config
             .and_then(|config| config.language.as_ref().map(|lang| lang.to_string()));
         let use_identify_language = language_code.is_none();
@@ -906,319 +757,50 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
             transcription_job_name: transcription_job_name.to_string(),
         };
 
-        let json_body = serde_json::to_string(&request_body).map_err(|e| {
-            (
-                transcription_job_name.to_string(),
-                golem_stt::http::Error::Generic(format!("Failed to serialize request: {}", e)),
-            )
-        })?;
-
-        let request = Request::builder()
-            .method("POST")
-            .uri(&uri)
-            .header("Content-Type", "application/x-amz-json-1.1")
-            .header(
-                "X-Amz-Target",
-                "com.amazonaws.transcribe.Transcribe.StartTranscriptionJob",
-            )
-            .body(json_body.into_bytes())
-            .map_err(|e| {
-                (
-                    transcription_job_name.to_string(),
-                    golem_stt::http::Error::HttpError(e),
-                )
-            })?;
-
-        let signed_request = self
-            .signer
-            .sign_request(request, timestamp)
-            .map_err(|err| {
-                (
-                    transcription_job_name.to_string(),
-                    golem_stt::http::Error::Generic(format!("Failed to sign request: {}", err)),
-                )
-            })?;
-
-        let response = self
-            .http_client
-            .execute(signed_request)
-            .await
-            .map_err(|err| (transcription_job_name.to_string(), err))?;
-
-        if response.status().is_success() {
-            let transcription_response: StartTranscriptionJobResponse =
-                serde_json::from_slice(response.body()).map_err(|e| {
-                    (
-                        transcription_job_name.to_string(),
-                        golem_stt::http::Error::Generic(format!(
-                            "Failed to deserialize response: {}",
-                            e
-                        )),
-                    )
-                })?;
-
-            Ok(transcription_response)
-        } else {
-            let error_body = String::from_utf8(response.body().to_vec())
-                .unwrap_or_else(|_| "Unknown error".to_string());
-
-            let status = response.status();
-            let request_id = transcription_job_name.to_string();
-
-            match status.as_u16() {
-                400 => Err(golem_stt::error::Error::APIBadRequest {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe StartTranscriptionJob bad request: {}",
-                        error_body
-                    ),
-                }),
-                403 => Err(golem_stt::error::Error::APIForbidden {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe StartTranscriptionJob forbidden: {}",
-                        error_body
-                    ),
-                }),
-                500 => Err(golem_stt::error::Error::APIInternalServerError {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe StartTranscriptionJob server error: {}",
-                        error_body
-                    ),
-                }),
-                503 => Err(golem_stt::error::Error::APIInternalServerError {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe StartTranscriptionJob service unavailable: {}",
-                        error_body
-                    ),
-                }),
-                _ => Err(golem_stt::error::Error::APIUnknown {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe StartTranscriptionJob unknown error ({}): {}",
-                        status, error_body
-                    ),
-                }),
-            }
-        }
+        self.make_authenticated_request(
+            "com.amazonaws.transcribe.Transcribe.StartTranscriptionJob",
+            &request_body,
+            transcription_job_name.to_string(),
+            "StartTranscriptionJob",
+        )
+        .await
     }
 
     async fn delete_transcription_job(
         &self,
         transcription_job_name: &str,
     ) -> Result<(), golem_stt::error::Error> {
-        let timestamp = Utc::now();
-        let uri = format!(
-            "https://transcribe.{}.amazonaws.com/",
-            self.signer.get_region()
-        );
-
         let request_body = DeleteTranscriptionJobRequest {
             transcription_job_name: transcription_job_name.to_string(),
         };
 
-        let json_body = serde_json::to_string(&request_body).map_err(|e| {
-            (
-                transcription_job_name.to_string(),
-                golem_stt::http::Error::Generic(format!("Failed to serialize request: {}", e)),
-            )
-        })?;
-
-        let request = Request::builder()
-            .method("POST")
-            .uri(&uri)
-            .header("Content-Type", "application/x-amz-json-1.1")
-            .header(
-                "X-Amz-Target",
+        let _: EmptyResponse = self
+            .make_authenticated_request(
                 "com.amazonaws.transcribe.Transcribe.DeleteTranscriptionJob",
+                &request_body,
+                transcription_job_name.to_string(),
+                "DeleteTranscriptionJob",
             )
-            .body(json_body.into_bytes())
-            .map_err(|e| {
-                (
-                    transcription_job_name.to_string(),
-                    golem_stt::http::Error::HttpError(e),
-                )
-            })?;
+            .await?;
 
-        let signed_request = self
-            .signer
-            .sign_request(request, timestamp)
-            .map_err(|err| {
-                (
-                    transcription_job_name.to_string(),
-                    golem_stt::http::Error::Generic(format!("Failed to sign request: {}", err)),
-                )
-            })?;
-
-        let response = self
-            .http_client
-            .execute(signed_request)
-            .await
-            .map_err(|err| (transcription_job_name.to_string(), err))?;
-
-        if response.status().is_success() {
-            Ok(())
-        } else {
-            let error_body = String::from_utf8(response.body().to_vec())
-                .unwrap_or_else(|_| "Unknown error".to_string());
-
-            let status = response.status();
-            let request_id = transcription_job_name.to_string();
-
-            match status.as_u16() {
-                400 => Err(golem_stt::error::Error::APIBadRequest {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe DeleteTranscriptionJob bad request: {}",
-                        error_body
-                    ),
-                }),
-                403 => Err(golem_stt::error::Error::APIForbidden {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe DeleteTranscriptionJob forbidden: {}",
-                        error_body
-                    ),
-                }),
-                500 => Err(golem_stt::error::Error::APIInternalServerError {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe DeleteTranscriptionJob server error: {}",
-                        error_body
-                    ),
-                }),
-                503 => Err(golem_stt::error::Error::APIInternalServerError {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe DeleteTranscriptionJob service unavailable: {}",
-                        error_body
-                    ),
-                }),
-                _ => Err(golem_stt::error::Error::APIUnknown {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe DeleteTranscriptionJob unknown error ({}): {}",
-                        status, error_body
-                    ),
-                }),
-            }
-        }
+        Ok(())
     }
 
     async fn get_transcription_job(
         &self,
         transcription_job_name: &str,
     ) -> Result<GetTranscriptionJobResponse, golem_stt::error::Error> {
-        let timestamp = Utc::now();
-        let uri = format!(
-            "https://transcribe.{}.amazonaws.com/",
-            self.signer.get_region()
-        );
-
         let request_body = GetTranscriptionJobRequest {
             transcription_job_name: transcription_job_name.to_string(),
         };
 
-        let json_body = serde_json::to_string(&request_body).map_err(|e| {
-            (
-                transcription_job_name.to_string(),
-                golem_stt::http::Error::Generic(format!("Failed to serialize request: {}", e)),
-            )
-        })?;
-
-        let request = Request::builder()
-            .method("POST")
-            .uri(&uri)
-            .header("Content-Type", "application/x-amz-json-1.1")
-            .header(
-                "X-Amz-Target",
-                "com.amazonaws.transcribe.Transcribe.GetTranscriptionJob",
-            )
-            .body(json_body.into_bytes())
-            .map_err(|e| {
-                (
-                    transcription_job_name.to_string(),
-                    golem_stt::http::Error::HttpError(e),
-                )
-            })?;
-
-        let signed_request = self
-            .signer
-            .sign_request(request, timestamp)
-            .map_err(|err| {
-                (
-                    transcription_job_name.to_string(),
-                    golem_stt::http::Error::Generic(format!("Failed to sign request: {}", err)),
-                )
-            })?;
-
-        let response = self
-            .http_client
-            .execute(signed_request)
-            .await
-            .map_err(|err| (transcription_job_name.to_string(), err))?;
-
-        if response.status().is_success() {
-            let transcription_response: GetTranscriptionJobResponse =
-                serde_json::from_slice(response.body()).map_err(|e| {
-                    (
-                        transcription_job_name.to_string(),
-                        golem_stt::http::Error::Generic(format!(
-                            "Failed to deserialize response: {}",
-                            e
-                        )),
-                    )
-                })?;
-
-            Ok(transcription_response)
-        } else {
-            let error_body = String::from_utf8(response.body().to_vec())
-                .unwrap_or_else(|_| "Unknown error".to_string());
-
-            let status = response.status();
-            let request_id = transcription_job_name.to_string();
-
-            // Map HTTP status codes based on AWS Transcribe GetTranscriptionJob API spec
-            match status.as_u16() {
-                400 => Err(golem_stt::error::Error::APIBadRequest {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe GetTranscriptionJob bad request: {}",
-                        error_body
-                    ),
-                }),
-                403 => Err(golem_stt::error::Error::APIForbidden {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe GetTranscriptionJob forbidden: {}",
-                        error_body
-                    ),
-                }),
-                500 => Err(golem_stt::error::Error::APIInternalServerError {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe GetTranscriptionJob server error: {}",
-                        error_body
-                    ),
-                }),
-                503 => Err(golem_stt::error::Error::APIInternalServerError {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe GetTranscriptionJob service unavailable: {}",
-                        error_body
-                    ),
-                }),
-                _ => Err(golem_stt::error::Error::APIUnknown {
-                    request_id,
-                    provider_error: format!(
-                        "Transcribe GetTranscriptionJob unknown error ({}): {}",
-                        status, error_body
-                    ),
-                }),
-            }
-        }
+        self.make_authenticated_request(
+            "com.amazonaws.transcribe.Transcribe.GetTranscriptionJob",
+            &request_body,
+            transcription_job_name.to_string(),
+            "GetTranscriptionJob",
+        )
+        .await
     }
 
     async fn wait_for_transcription_job_completion(
@@ -1325,20 +907,20 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
             let request_id = transcription_job_name.to_string();
 
             // Map HTTP status codes based on S3 GET object behavior for transcript download
-            match status.as_u16() {
-                400 => Err(golem_stt::error::Error::APIBadRequest {
+            match status {
+                StatusCode::BAD_REQUEST => Err(golem_stt::error::Error::APIBadRequest {
                     request_id,
                     provider_error: format!("Transcript download bad request: {}", error_body),
                 }),
-                403 => Err(golem_stt::error::Error::APIForbidden {
+                StatusCode::FORBIDDEN => Err(golem_stt::error::Error::APIForbidden {
                     request_id,
                     provider_error: format!("Transcript download forbidden (expired URL or insufficient permissions): {}", error_body),
                 }),
-                404 => Err(golem_stt::error::Error::APINotFound {
+                StatusCode::NOT_FOUND => Err(golem_stt::error::Error::APINotFound {
                     request_id,
                     provider_error: format!("Transcript file not found: {}", error_body),
                 }),
-                500..=599 => Err(golem_stt::error::Error::APIInternalServerError {
+                s if s.is_server_error() => Err(golem_stt::error::Error::APIInternalServerError {
                     request_id,
                     provider_error: format!("Transcript download server error ({}): {}", status, error_body),
                 }),
