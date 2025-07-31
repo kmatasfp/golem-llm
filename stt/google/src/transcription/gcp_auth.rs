@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Duration, Utc};
 use golem_stt::http::HttpClient;
@@ -6,6 +8,38 @@ use rsa::Pkcs1v15Sign;
 use rsa::{pkcs8::DecodePrivateKey, RsaPrivateKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ServiceAccountKey {
+    #[serde(rename = "type")]
+    pub key_type: String,
+    pub project_id: String,
+    pub private_key_id: String,
+    pub private_key: String,
+    pub client_email: String,
+    pub client_id: String,
+    pub auth_uri: String,
+    pub token_uri: String,
+    pub auth_provider_x509_cert_url: String,
+    pub client_x509_cert_url: String,
+}
+
+impl ServiceAccountKey {
+    pub fn new(project_id: String, client_email: String, private_key: String) -> Self {
+        Self {
+            key_type: "".to_string(),
+            project_id,
+            private_key_id: "".to_string(),
+            private_key,
+            client_email,
+            client_id: "".to_string(),
+            auth_uri: "".to_string(),
+            token_uri: "".to_string(),
+            auth_provider_x509_cert_url: "".to_string(),
+            client_x509_cert_url: "".to_string(),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum Error {
@@ -47,7 +81,8 @@ struct TokenResponse {
 
 #[derive(Clone)]
 pub struct GcpAuth<HC: HttpClient> {
-    http_client: HC,
+    http_client: Rc<HC>,
+    project_id: String,
     client_email: String,
     private_key: RsaPrivateKey,
     access_token: Option<String>,
@@ -56,16 +91,21 @@ pub struct GcpAuth<HC: HttpClient> {
 
 // based on https://developers.google.com/identity/protocols/oauth2/service-account#httprest
 impl<HC: HttpClient> GcpAuth<HC> {
-    pub fn new(client_email: String, private_key: String, http_client: HC) -> Result<Self, Error> {
-        let private_key = Self::parse_private_key(&private_key)?;
+    pub fn new(serivce_account_key: ServiceAccountKey, http_client: Rc<HC>) -> Result<Self, Error> {
+        let private_key = Self::parse_private_key(&serivce_account_key.private_key)?;
 
         Ok(Self {
             http_client,
-            client_email,
+            project_id: serivce_account_key.project_id,
+            client_email: serivce_account_key.client_email,
             private_key,
             access_token: None,
             token_expires_at: None,
         })
+    }
+
+    pub fn project_id(&self) -> &str {
+        &self.project_id
     }
 
     fn parse_private_key(pem_key: &str) -> Result<RsaPrivateKey, Error> {
@@ -241,93 +281,96 @@ mod tests {
                 .unwrap(),
         );
 
-        let private_key = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKB\nTc/ZGpGZqpONTEOZ+H+qz3F8qY7jNz5NpGOB8v3rQq2+j3F8qY7jNz5NpGOB8v3r\n-----END PRIVATE KEY-----";
+        let project_id = "test-project-123";
         let client_email = "test-service-account@test-project-123.iam.gserviceaccount.com";
+        let private_key = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC3nmCgsAlob5Fb\n8J81FCw+80nAilI2soaayyr7nYUPQJORtu4mNEOSdnLBTk4RFvaH8UAJ7h21fcF2\nUEn3YOB0yUYIKBDS3uB60oplwJOnbis3lAlsT0VZ/UtngF6zNhJBVpz/RrwSJ1Po\nTnOrlkrrRXgPK6t5AxuR0n+h4P3YMU7hLZ46A5m/7YLJdWkVE1p3GYcrlltm2sos\nWWUpiNGIDflG42tlJVwG+QXL7J9D4ua/jbkFOvKI0Dl893ka0gkUCR0T0Cm1TRwo\nbBTBV/b/YXVCSJug0KsIIxYG0izSzlETH0Ql9tl6G+q0C4H0HUkN/UZ3QFYPmZUs\nX3Wu8DmvAgMBAAECggEBAKIU4YK2IXfYk90uZ7q41d2zb7TP5IZ3zC2zjXuRrjSq\nchi7+zgqBkOw3tcXwf1/4ZpaMIcTc5ITMcS4VrJRB5DPYkws4bziFBEW7CepeCzh\nKLDksfSzfKpU1kzEmdNjtXWLeQY1cCouIPj810ntXrCTH8l0aOZnAd0UjKleK3S7\ngva0IYHvCtoYFdvvwCOfxRQKAufcwotkgJPs6m95QJYwwfN3EaZi7duuNu0fKRkH\nu2sfRqDcJR3Yo4Nt9LhqB/OfkfL0TuzkNbXi0ZsUTJ5pFRx1m+Gtbb3qC95MBeey\ng/F9slQwRpDyJdxIrNVn7tv5tsd8v+4USwAC+cklQnECgYEA2wFvJ4KykuKG4RXO\nbWG0pavchTIixcC86y1ht/OxZFx13KmVzyE0PiOGTozAJCAHu1JK5gLxgGzXgLLr\nnT55kBvTzQ7+HQh+jhjrIIruicfiugzEQ6MivSw0pnk2Lkta25AeHuW1bKao1dOr\nnBDrtAZ1oKybBcna8SkYHprXh/0CgYEA1qKwRoZjfokzwmLwCyXDQyDKgUM0OOLq\nMXsCVv8BXltoSH5/vlDKSePs+4Er3o596QJRUosuwLgfIHsqFSFpUDk3lIctkqOt\nT1P1tjBZg8qMCSFzIwqsyj0lXN5IK6Zqvi7WikVVQ7gN3Stu4H0C9OgyV+kzHlNW\niV8cfvMJChsCgYAWnQRMMRudPRSuQyEofDE59g/0FOQwRSF8qxfu9ZO4iC+HVF9q\nnsQVMnfYvoHMeR4zQmEHdQBYwWRTHqZjeyL0NVteThEBEHJ426vTlWTiByirC0xs\nq3iXzeu10Mg+aXt9NllV2WQtTtwaEBwlJj4gPZaBu7DaHSilRBgAeP6ORQKBgGsV\nZe75s3/5AdrUs8BMCdxe6smM9uv+wisHnQY8Wblyz1eDzUXtVs+AqMZeDr4Nx2HO\nJzaQfDXoZpc0+6zpK3q74S/4NVN418nBMNDB1Jc9IZqYlrH/7G9GDHMF72nfsFfM\nVHtN1hlgJYKX3cygci4v/pX/oeJaX81Pp47qwDLLAoGAJadd2du9Nrd5WNohsPBH\nNGtq6QMJsjAABKkFXlqFM4Jsc/zaEOa/fsLCp6lbrVEqvHZGFc+OoukDlhY+c3QU\nSFVTtnsNi4YIbd8xNUpRNw7neShlG64wG0tLTI+y7a7Xh7GWkfYdfA950O8QEh46\nrecURYwOhS+7tjhb0xXs4kU=\n-----END PRIVATE KEY-----";
 
-        if let Ok(mut auth) = GcpAuth::new(
+        let service_account_key = ServiceAccountKey::new(
+            project_id.to_string(),
             client_email.to_string(),
             private_key.to_string(),
-            mock_client,
-        ) {
-            let _result = auth.get_access_token().await;
+        );
 
-            let request = auth.http_client.last_captured_request().unwrap();
-            assert_eq!(request.method(), "POST");
-            assert_eq!(request.uri(), "https://oauth2.googleapis.com/token");
+        let mut auth = GcpAuth::new(service_account_key, Rc::new(mock_client)).unwrap();
 
-            let content_type = request.headers().get("content-type").unwrap();
-            assert_eq!(content_type, "application/x-www-form-urlencoded");
+        let _result = auth.get_access_token().await;
 
-            let body = String::from_utf8_lossy(request.body());
-            assert!(body.contains("grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer"));
-            assert!(body.contains("assertion="));
+        let request = auth.http_client.last_captured_request().unwrap();
+        assert_eq!(request.method(), "POST");
+        assert_eq!(request.uri(), "https://oauth2.googleapis.com/token");
 
-            // Extract and verify the JWT assertion structure
-            let assertion_start = body.find("assertion=").unwrap() + "assertion=".len();
-            let assertion_end = body[assertion_start..]
-                .find('&')
-                .unwrap_or(body[assertion_start..].len());
-            let assertion_encoded = &body[assertion_start..assertion_start + assertion_end];
-            let assertion = urlencoding::decode(assertion_encoded).unwrap();
+        let content_type = request.headers().get("content-type").unwrap();
+        assert_eq!(content_type, "application/x-www-form-urlencoded");
 
-            let jwt_parts: Vec<&str> = assertion.split('.').collect();
-            assert_eq!(
-                jwt_parts.len(),
-                3,
-                "JWT should have 3 parts: header.claim.signature"
-            );
+        let body = String::from_utf8_lossy(request.body());
+        assert!(body.contains("grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer"));
+        assert!(body.contains("assertion="));
 
-            let header_b64 = jwt_parts[0];
-            let claim_b64 = jwt_parts[1];
-            let signature_b64 = jwt_parts[2];
+        // Extract and verify the JWT assertion structure
+        let assertion_start = body.find("assertion=").unwrap() + "assertion=".len();
+        let assertion_end = body[assertion_start..]
+            .find('&')
+            .unwrap_or(body[assertion_start..].len());
+        let assertion_encoded = &body[assertion_start..assertion_start + assertion_end];
+        let assertion = urlencoding::decode(assertion_encoded).unwrap();
 
-            let public_key = RsaPublicKey::from(&auth.private_key);
-            let padding = Pkcs1v15Sign::new::<Sha256>();
+        let jwt_parts: Vec<&str> = assertion.split('.').collect();
+        assert_eq!(
+            jwt_parts.len(),
+            3,
+            "JWT should have 3 parts: header.claim.signature"
+        );
 
-            let to_be_signed = format!("{}.{}", header_b64, claim_b64);
+        let header_b64 = jwt_parts[0];
+        let claim_b64 = jwt_parts[1];
+        let signature_b64 = jwt_parts[2];
 
-            let signature_bytes = general_purpose::URL_SAFE_NO_PAD
-                .decode(signature_b64)
-                .unwrap();
+        let public_key = RsaPublicKey::from(&auth.private_key);
+        let padding = Pkcs1v15Sign::new::<Sha256>();
 
-            let mut hasher = Sha256::new();
-            hasher.update(to_be_signed.as_bytes());
-            let hash = hasher.finalize();
+        let to_be_signed = format!("{}.{}", header_b64, claim_b64);
 
-            public_key
-                .verify(padding, &hash, &signature_bytes)
-                .expect("JWT signature should be cryptographically valid");
+        let signature_bytes = general_purpose::URL_SAFE_NO_PAD
+            .decode(signature_b64)
+            .unwrap();
 
-            // Decode and verify the JSON content structure
-            let header_json = general_purpose::URL_SAFE_NO_PAD.decode(header_b64).unwrap();
-            let claim_json = general_purpose::URL_SAFE_NO_PAD.decode(claim_b64).unwrap();
+        let mut hasher = Sha256::new();
+        hasher.update(to_be_signed.as_bytes());
+        let hash = hasher.finalize();
 
-            let parsed_header: JwtHeader = serde_json::from_slice(&header_json).unwrap();
-            let parsed_claim: JwtClaim = serde_json::from_slice(&claim_json).unwrap();
+        public_key
+            .verify(padding, &hash, &signature_bytes)
+            .expect("JWT signature should be cryptographically valid");
 
-            assert_eq!(parsed_header.alg, "RS256");
-            assert_eq!(parsed_header.typ, "JWT");
+        // Decode and verify the JSON content structure
+        let header_json = general_purpose::URL_SAFE_NO_PAD.decode(header_b64).unwrap();
+        let claim_json = general_purpose::URL_SAFE_NO_PAD.decode(claim_b64).unwrap();
 
-            // Verify payload structure and content
-            assert_eq!(
-                parsed_claim.iss,
-                "test-service-account@test-project-123.iam.gserviceaccount.com"
-            );
-            assert_eq!(
-                parsed_claim.scope,
-                "https://www.googleapis.com/auth/cloud-platform"
-            );
-            assert_eq!(parsed_claim.aud, "https://oauth2.googleapis.com/token");
+        let parsed_header: JwtHeader = serde_json::from_slice(&header_json).unwrap();
+        let parsed_claim: JwtClaim = serde_json::from_slice(&claim_json).unwrap();
 
-            // Verify timestamps are reasonable (within last minute and next hour)
-            let now = Utc::now().timestamp();
-            assert!(parsed_claim.iat >= now - 60, "iat should be recent");
-            assert!(parsed_claim.iat <= now + 60, "iat should not be in future");
-            assert_eq!(
-                parsed_claim.exp,
-                parsed_claim.iat + 3600,
-                "exp should be 1 hour after iat"
-            );
-        }
+        assert_eq!(parsed_header.alg, "RS256");
+        assert_eq!(parsed_header.typ, "JWT");
+
+        // Verify payload structure and content
+        assert_eq!(
+            parsed_claim.iss,
+            "test-service-account@test-project-123.iam.gserviceaccount.com"
+        );
+        assert_eq!(
+            parsed_claim.scope,
+            "https://www.googleapis.com/auth/cloud-platform"
+        );
+        assert_eq!(parsed_claim.aud, "https://oauth2.googleapis.com/token");
+
+        // Verify timestamps are reasonable (within last minute and next hour)
+        let now = Utc::now().timestamp();
+        assert!(parsed_claim.iat >= now - 60, "iat should be recent");
+        assert!(parsed_claim.iat <= now + 60, "iat should not be in future");
+        assert_eq!(
+            parsed_claim.exp,
+            parsed_claim.iat + 3600,
+            "exp should be 1 hour after iat"
+        );
     }
 }

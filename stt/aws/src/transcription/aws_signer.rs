@@ -570,7 +570,6 @@ mod tests {
             region.to_string(),
         );
 
-        // Create the exact request from your specification
         let request = Request::builder()
             .method(Method::PUT)
             .uri("s3://examplebucket.s3.amazonaws.com/test$file.text")
@@ -695,7 +694,6 @@ mod tests {
             }
             "#;
 
-        // Create the exact request from your specification
         let request = Request::builder()
             .method(Method::GET)
             .uri("https://transcribe.us-east-1.amazonaws.com:443/") // test also that in case of https port is stripped
@@ -714,7 +712,6 @@ mod tests {
 
         let signed_request = result.unwrap();
 
-        // Get the authorization header
         let auth_header = signed_request
             .headers()
             .get("authorization")

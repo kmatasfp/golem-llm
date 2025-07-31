@@ -6,6 +6,7 @@ use derive_more::From;
 #[derive(Debug, From)]
 pub enum Error {
     EnvVariablesNotSet(String),
+    AuthError(String),
     #[from]
     Http(String, crate::http::Error),
 
@@ -67,6 +68,7 @@ impl Error {
             Error::Http(request_id, ..) => request_id,
             Error::APINotFound { request_id, .. } => request_id,
             Error::EnvVariablesNotSet(_) => "",
+            Error::AuthError(_) => "",
         }
     }
 }
@@ -124,6 +126,9 @@ impl From<Error> for WitSttError {
             } => WitSttError::InternalError(provider_error),
             Error::Http(_, error) => WitSttError::InternalError(format!("Internal error: {error}")),
             Error::EnvVariablesNotSet(reason) => {
+                WitSttError::InternalError(format!("Internal error: {reason}"))
+            }
+            Error::AuthError(reason) => {
                 WitSttError::InternalError(format!("Internal error: {reason}"))
             }
         }
