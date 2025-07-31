@@ -604,8 +604,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
         max_wait_time: Duration,
     ) -> Result<(), golem_stt::error::Error> {
         let start_time = std::time::Instant::now();
-        let mut retry_delay = Duration::from_millis(500);
-        let max_delay = Duration::from_secs(30);
+        let poll_interval = Duration::from_secs(10);
 
         loop {
             if start_time.elapsed() > max_wait_time {
@@ -615,7 +614,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
                 });
             }
 
-            self.runtime.sleep(retry_delay).await;
+            self.runtime.sleep(poll_interval).await;
 
             let res = self.get_vocabulary(vocabulary_name).await?;
 
@@ -631,12 +630,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
                         ),
                     });
                 }
-                "PENDING" => {
-                    retry_delay = std::cmp::min(
-                        Duration::from_millis((retry_delay.as_millis() * 2) as u64),
-                        max_delay,
-                    );
-                }
+                "PENDING" => {}
                 other => {
                     return Err(golem_stt::error::Error::APIBadRequest {
                         request_id: vocabulary_name.to_string(),
@@ -809,8 +803,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
         max_wait_time: Duration,
     ) -> Result<GetTranscriptionJobResponse, golem_stt::error::Error> {
         let start_time = std::time::Instant::now();
-        let mut retry_delay = Duration::from_millis(2000); // Start with 2 seconds for transcription jobs
-        let max_delay = Duration::from_secs(60); // Max 60 seconds between retries
+        let poll_interval = Duration::from_secs(10);
 
         loop {
             if start_time.elapsed() > max_wait_time {
@@ -820,7 +813,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
                 });
             }
 
-            self.runtime.sleep(retry_delay).await;
+            self.runtime.sleep(poll_interval).await;
 
             let res = self.get_transcription_job(transcription_job_name).await?;
 
@@ -846,11 +839,6 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
                     trace!(
                         "transcription job {} waiting for completion",
                         transcription_job_name
-                    );
-                    // Continue polling with exponential backoff
-                    retry_delay = std::cmp::min(
-                        Duration::from_millis((retry_delay.as_millis() as f64 * 1.5) as u64),
-                        max_delay,
                     );
                 }
                 other => {
@@ -1920,11 +1908,6 @@ mod tests {
             !sleep_calls.is_empty(),
             "Should have called sleep at least once"
         );
-        assert_eq!(
-            sleep_calls[0],
-            Duration::from_millis(500),
-            "First sleep should be 500ms"
-        );
 
         let captured_requests = transcribe_client.http_client.get_captured_requests();
         for request in captured_requests.iter() {
@@ -2179,11 +2162,6 @@ mod tests {
         // Should have called sleep at least once
         let sleep_calls = transcribe_client.runtime.get_sleep_calls();
         assert!(!sleep_calls.is_empty());
-        assert_eq!(
-            sleep_calls[0],
-            Duration::from_millis(2000),
-            "First sleep should be 2000ms"
-        );
 
         // Verify the requests were get_transcription_job calls
         let captured_requests = transcribe_client.http_client.get_captured_requests();
