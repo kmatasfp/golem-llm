@@ -354,7 +354,7 @@ pub struct ErrorBody {
 fn get_mime_type(format: &AudioFormat) -> String {
     match format {
         AudioFormat::wav => "audio/wav".to_string(),
-        AudioFormat::mp3 => "audio/mpeg".to_string(),
+        AudioFormat::mp3 => "audio/mp3".to_string(),
         AudioFormat::flac => "audio/flac".to_string(),
         AudioFormat::ogg => "audio/ogg".to_string(),
         AudioFormat::mp4 => "video/mp4".to_string(),

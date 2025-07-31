@@ -590,7 +590,7 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextService for SpeechToTextClien
         max_wait_time: Duration,
     ) -> Result<GetBatchRecognizeOperationResponse, SttError> {
         let start_time = std::time::Instant::now();
-        let poll_interval = Duration::from_secs(10); // Poll every 10 seconds
+        let poll_interval = Duration::from_secs(10);
 
         while start_time.elapsed() < max_wait_time {
             let response = self.get_batch_recognize(request_id, operation_name).await?;
