@@ -135,6 +135,7 @@ pub struct TranscriptionConfig {
     pub model: Option<String>,
     pub enable_profanity_filter: bool,
     pub enable_speaker_diarization: bool,
+    pub enable_multi_channel: bool,
     pub keywords: Vec<Keyword>,
     pub keyterms: Vec<String>, // only nova-3
 }
@@ -199,7 +200,12 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
         query_params.push(("punctuate", "true".to_string()));
 
         if let Some(channels) = request.audio_config.channels {
-            if channels > 1 {
+            if channels > 1
+                && request
+                    .transcription_config
+                    .as_ref()
+                    .map_or(false, |t| t.enable_multi_channel)
+            {
                 query_params.push(("multichannel", "true".to_string()));
             }
         }
@@ -220,8 +226,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
             if transcription_config
                 .model
                 .as_ref()
-                .filter(|model| *model == "nova-3")
-                .is_some()
+                .is_some_and(|m| *m == "nova-3")
             {
                 transcription_config.keyterms.iter().for_each(|keyterm| {
                     let encoded = keyterm.replace(" ", "+");
@@ -231,17 +236,9 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
 
             //Nova-2, Nova-1, Enhanced, and Base
 
-            if transcription_config
-                .model
-                .as_ref()
-                .filter(|model| {
-                    *model == "nova-2"
-                        || *model == "nova-1"
-                        || *model == "enhanced"
-                        || *model == "base"
-                })
-                .is_some()
-            {
+            if transcription_config.model.as_ref().is_some_and(|m| {
+                *m == "nova-2" || *m == "nova-1" || *m == "enhanced" || *m == "base"
+            }) {
                 transcription_config.keywords.iter().for_each(|keyword| {
                     let encoded = keyword.value.replace(" ", "+");
                     if let Some(boost) = keyword.boost {
@@ -641,6 +638,7 @@ mod tests {
                 model: Some("nova-2".to_string()),
                 enable_profanity_filter: true,
                 enable_speaker_diarization: true,
+                enable_multi_channel: true,
                 keywords: vec![],
                 keyterms: vec![],
             }),
@@ -656,6 +654,8 @@ mod tests {
             .into_owned()
             .collect();
 
+        assert_eq!(query_pairs.get("utterances"), Some(&"true".to_string()));
+        assert_eq!(query_pairs.get("punctuate"), Some(&"true".to_string()));
         assert_eq!(query_pairs.get("multichannel"), Some(&"true".to_string()));
         assert_eq!(query_pairs.get("language"), Some(&"en".to_string()));
         assert_eq!(query_pairs.get("model"), Some(&"nova-2".to_string()));
@@ -679,13 +679,14 @@ mod tests {
             audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
-                channels: Some(2), // Should add multichannel=true
+                channels: Some(2),
             },
             transcription_config: Some(TranscriptionConfig {
                 language: Some("en".to_string()),
                 model: Some("nova-3".to_string()),
                 enable_profanity_filter: true,
                 enable_speaker_diarization: true,
+                enable_multi_channel: false,
                 keywords: vec![],
                 keyterms: vec!["foo".to_string(), "bar".to_string(), "baz baz".to_string()],
             }),
@@ -726,13 +727,14 @@ mod tests {
             audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
-                channels: Some(2), // Should add multichannel=true
+                channels: Some(2),
             },
             transcription_config: Some(TranscriptionConfig {
                 language: Some("en".to_string()),
                 model: Some("nova-2".to_string()),
                 enable_profanity_filter: true,
                 enable_speaker_diarization: true,
+                enable_multi_channel: true,
                 keywords: vec![
                     Keyword {
                         value: "foo".to_string(),
@@ -785,13 +787,14 @@ mod tests {
             audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
-                channels: Some(1), // Should NOT add multichannel=true
+                channels: Some(2),
             },
             transcription_config: Some(TranscriptionConfig {
                 language: None,
                 model: None,
                 enable_profanity_filter: false,
                 enable_speaker_diarization: false,
+                enable_multi_channel: false,
                 keywords: vec![],
                 keyterms: vec![],
             }),

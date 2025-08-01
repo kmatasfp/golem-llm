@@ -672,9 +672,10 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
         let language_code = transcription_config
             .and_then(|config| config.language.as_ref().map(|lang| lang.to_string()));
         let use_identify_language = language_code.is_none();
-        let enable_channel_identification = audio_config.channels.filter(|ch| *ch > 1).is_some();
+        let enable_channel_identification = audio_config.channels.is_some_and(|c| c == 2)
+            && transcription_config.is_some_and(|config| config.enable_multi_channel);
         let enable_speaker_diarization = transcription_config
-            .map(|config| config.enable_speaker_diarization)
+            .and_then(|config| config.diarization.as_ref().map(|d| d.enabled))
             .unwrap_or(false);
 
         let model_settings = if !use_identify_language {
@@ -699,7 +700,9 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
                 },
                 max_alternatives: None,
                 max_speaker_labels: if enable_speaker_diarization {
-                    Some(30)
+                    transcription_config.and_then(|config| {
+                        config.diarization.as_ref().map(|d| d.max_speakers as i32)
+                    })
                 } else {
                     None
                 },
@@ -928,7 +931,7 @@ mod tests {
         collections::VecDeque,
     };
 
-    use crate::transcription::request::AudioFormat;
+    use crate::transcription::request::{AudioFormat, DiarizationConfig};
 
     use super::*;
     use golem_stt::http::HttpClient;
@@ -1312,7 +1315,8 @@ mod tests {
         let transcription_config = TranscriptionConfig {
             language: Some("en-US".to_string()),
             model: None,
-            enable_speaker_diarization: false,
+            diarization: None,
+            enable_multi_channel: false,
             vocabulary: vec![],
         };
 
@@ -1406,7 +1410,8 @@ mod tests {
         let transcription_config = TranscriptionConfig {
             language: Some("fr-FR".to_string()),
             model: Some("custom-medical-model".to_string()),
-            enable_speaker_diarization: false,
+            diarization: None,
+            enable_multi_channel: false,
             vocabulary: vec!["A".to_string(), "B".to_string()],
         };
 
@@ -1511,7 +1516,11 @@ mod tests {
         let transcription_config = TranscriptionConfig {
             language: Some("en-AU".to_string()),
             model: None,
-            enable_speaker_diarization: true, // Enable speaker diarization
+            diarization: Some(DiarizationConfig {
+                enabled: true,
+                max_speakers: 2,
+            }),
+            enable_multi_channel: false,
             vocabulary: vec![],
         };
 
@@ -1555,7 +1564,7 @@ mod tests {
             settings: Some(Settings {
                 channel_identification: None, // Single channel
                 max_alternatives: None,
-                max_speaker_labels: Some(30), // Set for speaker diarization
+                max_speaker_labels: Some(2), // Set for speaker diarization
                 show_alternatives: None,
                 show_speaker_labels: Some(true), // Enable speaker labels
                 vocabulary_filter_method: None,
@@ -1614,7 +1623,11 @@ mod tests {
         let transcription_config = TranscriptionConfig {
             language: Some("en-CA".to_string()),
             model: Some("telephony-model".to_string()),
-            enable_speaker_diarization: true, // Both multi-channel and speaker diarization
+            diarization: Some(DiarizationConfig {
+                enabled: true,
+                max_speakers: 4,
+            }),
+            enable_multi_channel: true, // Both multi-channel and speaker diarization
             vocabulary: vec!["A".to_string(), "B".to_string()],
         };
 
@@ -1660,7 +1673,7 @@ mod tests {
             settings: Some(Settings {
                 channel_identification: Some(true), // Multi-channel
                 max_alternatives: None,
-                max_speaker_labels: Some(30), // Speaker diarization
+                max_speaker_labels: Some(4), // Speaker diarization
                 show_alternatives: None,
                 show_speaker_labels: Some(true), // Speaker diarization
                 vocabulary_filter_method: None,
@@ -1720,7 +1733,8 @@ mod tests {
         let transcription_config = TranscriptionConfig {
             language: None, // means identify language
             model: Some("telephony-model".to_string()),
-            enable_speaker_diarization: false,
+            diarization: None,
+            enable_multi_channel: false,
             vocabulary: vec!["A".to_string(), "B".to_string()],
         };
 

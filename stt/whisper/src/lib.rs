@@ -22,7 +22,7 @@ use golem_stt::golem::stt::transcription::{
 use golem_stt::golem::stt::languages::{Guest as LanguageGuest, LanguageInfo};
 use transcription::{
     AudioConfig, AudioFormat, TranscriptionConfig, TranscriptionRequest, TranscriptionResponse,
-    TranscriptionsApi, WhisperTranscription,
+    TranscriptionsApi,
 };
 use wstd::runtime::block_on;
 use wstd::time::Duration;
@@ -150,18 +150,17 @@ impl TryFrom<WitTranscribeOptions> for TranscriptionConfig {
     type Error = WitSttError;
 
     fn try_from(options: WitTranscribeOptions) -> Result<Self, Self::Error> {
-        let enable_timestamps = options.enable_timestamps.unwrap_or(false);
+        let prompt = options
+            .vocabulary
+            .map(|c| c.phrases.into_iter().map(|p| p.value).join(", "));
 
-        let prompt = options.speech_context.map(|c| c.join(", "));
-
-        if let Some(language_code) = &options.language {
+        if let Some(ref language_code) = options.language {
             if transcription::is_supported_language(language_code) {
                 return Err(WitSttError::UnsupportedLanguage(language_code.to_owned()));
             }
         }
 
         Ok(TranscriptionConfig {
-            enable_timestamps,
             language: options.language,
             prompt,
         })
@@ -194,94 +193,46 @@ impl TryFrom<WitTranscriptionRequest> for TranscriptionRequest {
 
 impl From<TranscriptionResponse> for WitTranscriptionResult {
     fn from(response: TranscriptionResponse) -> Self {
-        match response.whisper_transcription {
-            WhisperTranscription::Words {
-                task: _,
-                language,
-                duration: _,
-                text,
-                words,
-                usage,
-            } => {
-                let metadata = WitTranscriptionMetadata {
-                    duration_seconds: usage.seconds as f32,
-                    audio_size_bytes: response.audio_size_bytes as u32,
-                    request_id: "".to_string(), // TODO: fix this
-                    model: Some("whisper-1".to_string()),
-                    language,
-                };
+        let transcription = response.whisper_transcription;
 
-                let wit_word_segments: Vec<_> = words
-                    .into_iter()
-                    .map(|word| WitWordSegment {
-                        text: word.word,
-                        timing_info: Some(WitTimingInfo {
-                            start_time_seconds: word.start as f32,
-                            end_time_seconds: word.end as f32,
-                        }),
-                        confidence: None,
-                        speaker_id: None,
-                    })
-                    .collect();
+        let metadata = WitTranscriptionMetadata {
+            duration_seconds: transcription.usage.seconds as f32,
+            audio_size_bytes: response.audio_size_bytes as u32,
+            request_id: "".to_string(), // TODO: fix this
+            model: Some("whisper-1".to_string()),
+            language: transcription.language,
+        };
 
-                let segment = WitTranscriptionSegment {
-                    transcript: text.clone(),
-                    timing_info: None,
-                    speaker_id: None,
-                    words: wit_word_segments,
-                };
+        let wit_word_segments: Vec<_> = transcription
+            .words
+            .into_iter()
+            .map(|word| WitWordSegment {
+                text: word.word,
+                timing_info: Some(WitTimingInfo {
+                    start_time_seconds: word.start as f32,
+                    end_time_seconds: word.end as f32,
+                }),
+                confidence: None,
+                speaker_id: None,
+            })
+            .collect();
 
-                let channel = WitTranscriptionChannel {
-                    id: "0".to_string(),
-                    transcript: text,
-                    segments: vec![segment],
-                };
+        let segment = WitTranscriptionSegment {
+            transcript: transcription.text.clone(),
+            timing_info: None,
+            speaker_id: None,
+            words: wit_word_segments,
+        };
 
-                WitTranscriptionResult {
-                    transcript_metadata: metadata,
-                    channels: vec![channel],
-                }
-            }
-            WhisperTranscription::Segments {
-                task: _,
-                language,
-                duration: _,
-                text,
-                segments,
-                usage,
-            } => {
-                let metadata = WitTranscriptionMetadata {
-                    duration_seconds: usage.seconds as f32,
-                    audio_size_bytes: response.audio_size_bytes as u32,
-                    request_id: "".to_string(),
-                    model: Some("whisper-1".to_string()),
-                    language,
-                };
+        let channel = WitTranscriptionChannel {
+            id: "0".to_string(),
+            transcript: transcription.text.clone(),
+            segments: vec![segment],
+        };
 
-                let wit_segments: Vec<_> = segments
-                    .into_iter()
-                    .map(|segment| WitTranscriptionSegment {
-                        transcript: segment.text,
-                        timing_info: Some(WitTimingInfo {
-                            start_time_seconds: segment.start as f32,
-                            end_time_seconds: segment.end as f32,
-                        }),
-                        speaker_id: None,
-                        words: vec![],
-                    })
-                    .collect();
-
-                let channel = WitTranscriptionChannel {
-                    id: "0".to_string(),
-                    transcript: text,
-                    segments: wit_segments,
-                };
-
-                WitTranscriptionResult {
-                    transcript_metadata: metadata,
-                    channels: vec![channel],
-                }
-            }
+        WitTranscriptionResult {
+            transcript_metadata: metadata,
+            channels: vec![channel],
         }
     }
 }

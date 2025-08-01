@@ -531,7 +531,7 @@ mod tests {
             StartTranscriptionJobResponse, TranscribeResults, Transcript, TranscriptText,
             TranscriptionJob,
         },
-        request::{AudioConfig, AudioFormat, TranscriptionConfig},
+        request::{AudioConfig, AudioFormat, DiarizationConfig, TranscriptionConfig},
     };
 
     use super::*;
@@ -1126,7 +1126,8 @@ mod tests {
             transcription_config: Some(TranscriptionConfig {
                 language: None, // No language specified
                 model: None,
-                enable_speaker_diarization: false,
+                diarization: None,
+                enable_multi_channel: false,
                 vocabulary: vec!["word1".to_string(), "word2".to_string()], // But vocabulary provided
             }),
         };
@@ -1156,7 +1157,8 @@ mod tests {
             transcription_config: Some(TranscriptionConfig {
                 language: None,                             // No language specified
                 model: Some("en-US_Telephony".to_string()), // But model provided
-                enable_speaker_diarization: false,
+                diarization: None,
+                enable_multi_channel: false,
                 vocabulary: vec![],
             }),
         };
@@ -1305,7 +1307,8 @@ mod tests {
             transcription_config: Some(TranscriptionConfig {
                 language: Some("en-US".to_string()),
                 model: None,
-                enable_speaker_diarization: false,
+                diarization: None,
+                enable_multi_channel: false,
                 vocabulary: vec!["custom".to_string(), "words".to_string()],
             }),
         };
@@ -1380,7 +1383,11 @@ mod tests {
             transcription_config: Some(TranscriptionConfig {
                 language: Some("es-ES".to_string()),
                 model: Some("en-US_Telephony".to_string()),
-                enable_speaker_diarization: true,
+                diarization: Some(DiarizationConfig {
+                    enabled: true,
+                    max_speakers: 2,
+                }),
+                enable_multi_channel: false,
                 vocabulary: vec![],
             }),
         };
@@ -1397,13 +1404,13 @@ mod tests {
         );
         assert_eq!(transcription_op.audio_config.format.to_string(), "flac");
         assert_eq!(transcription_op.audio_config.channels, Some(2));
-        assert!(
-            transcription_op
-                .transcription_config
-                .as_ref()
-                .unwrap()
-                .enable_speaker_diarization
-        );
+        assert!(transcription_op
+            .transcription_config
+            .as_ref()
+            .unwrap()
+            .diarization
+            .as_ref()
+            .is_some_and(|d| d.enabled));
         assert_eq!(transcription_op.vocabulary_name, None);
     }
 
@@ -1464,7 +1471,8 @@ mod tests {
             transcription_config: Some(TranscriptionConfig {
                 language: Some("fr-FR".to_string()),
                 model: None,
-                enable_speaker_diarization: false,
+                diarization: None,
+                enable_multi_channel: false,
                 vocabulary: vec![],
             }),
         };
@@ -1549,7 +1557,8 @@ mod tests {
             transcription_config: Some(TranscriptionConfig {
                 language: Some("en-US".to_string()),
                 model: None,
-                enable_speaker_diarization: false,
+                diarization: None,
+                enable_multi_channel: false,
                 vocabulary: vec!["word1".to_string()],
             }),
         };
@@ -1624,7 +1633,8 @@ mod tests {
             transcription_config: Some(TranscriptionConfig {
                 language: Some("en-US".to_string()),
                 model: None,
-                enable_speaker_diarization: false,
+                diarization: None,
+                enable_multi_channel: false,
                 vocabulary: vec!["invalid".to_string()],
             }),
         };

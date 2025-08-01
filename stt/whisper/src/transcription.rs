@@ -121,7 +121,6 @@ pub struct AudioConfig {
 #[derive(Debug, Clone)]
 pub struct TranscriptionConfig {
     pub language: Option<String>,
-    pub enable_timestamps: bool,
     pub prompt: Option<String>,
 }
 
@@ -183,14 +182,11 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
 
         form.add_field("model", "whisper-1");
         form.add_field("response_format", "verbose_json");
+        form.add_field("", "timestamp_granularities[]=word");
 
         if let Some(transcription_config) = request.transcription_config {
             if let Some(language) = transcription_config.language {
                 form.add_field("language", &language);
-            }
-
-            if transcription_config.enable_timestamps {
-                form.add_field("", "timestamp_granularities[]=word");
             }
 
             if let Some(prompt) = transcription_config.prompt {
@@ -293,24 +289,13 @@ pub struct TranscriptionResponse {
 
 #[allow(unused)]
 #[derive(Debug, Deserialize, PartialEq)]
-#[serde(untagged)]
-pub enum WhisperTranscription {
-    Segments {
-        task: String,
-        language: String,
-        duration: f64,
-        text: String,
-        segments: Vec<Segment>,
-        usage: Usage,
-    },
-    Words {
-        task: String,
-        language: String,
-        duration: f64,
-        text: String,
-        words: Vec<Word>,
-        usage: Usage,
-    },
+pub struct WhisperTranscription {
+    pub task: String,
+    pub language: String,
+    pub duration: f64,
+    pub text: String,
+    pub words: Vec<Word>,
+    pub usage: Usage,
 }
 
 #[allow(unused)]
@@ -443,30 +428,29 @@ mod tests {
     #[wstd::test]
     async fn test_api_key_gets_passed_as_auth_header() {
         let response_body = r#"
-            {
-                "task": "transcribe",
-                "language": "en",
-                "duration": 10.5,
-                "text": "Hello,!",
-                "segments": [
-                    {
-                        "id": 0,
-                        "seek": 0,
-                        "start": 0.0,
-                        "end": 2.5,
-                        "text": "Hello,",
-                        "temperature": 0.0,
-                        "avg_logprob": -0.5,
-                        "compression_ratio": 1.0,
-                        "no_speech_prob": 0.1
-                    }
-                ],
-                "usage": {
-                    "type": "transcribe",
-                    "seconds": 10
-                }
-            }
-        "#;
+               {
+                   "task": "transcribe",
+                   "language": "en",
+                   "duration": 8.2,
+                   "text": "Hello world",
+                   "words": [
+                       {
+                           "word": "Hello",
+                           "start": 0.0,
+                           "end": 1.5
+                       },
+                       {
+                           "word": "world",
+                           "start": 1.5,
+                           "end": 3.0
+                       }
+                   ],
+                   "usage": {
+                       "type": "transcribe",
+                       "seconds": 10
+                   }
+               }
+           "#;
 
         let mock_client = MockHttpClient::new();
         mock_client.expect_response(
@@ -510,30 +494,29 @@ mod tests {
     #[wstd::test]
     async fn test_resquest_gets_sent_as_multi_part_form_data() {
         let response_body = r#"
-            {
-                "task": "transcribe",
-                "language": "en",
-                "duration": 10.5,
-                "text": "Hello World from Rust!",
-                "segments": [
-                    {
-                        "id": 0,
-                        "seek": 0,
-                        "start": 0.0,
-                        "end": 2.5,
-                        "text": "Hello World from Rust!",
-                        "temperature": 0.0,
-                        "avg_logprob": -0.5,
-                        "compression_ratio": 1.0,
-                        "no_speech_prob": 0.1
-                    }
-                ],
-                "usage": {
-                    "type": "transcribe",
-                    "seconds": 10
-                }
-            }
-        "#;
+               {
+                   "task": "transcribe",
+                   "language": "en",
+                   "duration": 8.2,
+                   "text": "Hello world",
+                   "words": [
+                       {
+                           "word": "Hello",
+                           "start": 0.0,
+                           "end": 1.5
+                       },
+                       {
+                           "word": "world",
+                           "start": 1.5,
+                           "end": 3.0
+                       }
+                   ],
+                   "usage": {
+                       "type": "transcribe",
+                       "seconds": 10
+                   }
+               }
+           "#;
 
         let mock_client = MockHttpClient::new();
         mock_client.expect_response(
@@ -558,7 +541,6 @@ mod tests {
             },
             transcription_config: Some(TranscriptionConfig {
                 language: Some(language.clone()),
-                enable_timestamps: false,
                 prompt: Some(prompt.clone()),
             }),
         };
@@ -656,111 +638,7 @@ mod tests {
     }
 
     #[wstd::test]
-    async fn test_word_level_timestamps_requested() {
-        let response_body = r#"
-               {
-                   "task": "transcribe",
-                   "language": "en",
-                   "duration": 8.2,
-                   "text": "Hello world",
-                   "words": [
-                       {
-                           "word": "Hello",
-                           "start": 0.0,
-                           "end": 1.5
-                       },
-                       {
-                           "word": "world",
-                           "start": 1.5,
-                           "end": 3.0
-                       }
-                   ],
-                   "usage": {
-                       "type": "transcribe",
-                       "seconds": 10
-                   }
-               }
-           "#;
-
-        let mock_client = MockHttpClient::new();
-        mock_client.expect_response(
-            Response::builder()
-                .status(StatusCode::OK)
-                .body(response_body.as_bytes().to_vec())
-                .unwrap(),
-        );
-
-        let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
-
-        let audio_bytes = b"fake audio data".to_vec();
-
-        let request = TranscriptionRequest {
-            request_id: "some-transcription-id".to_string(),
-            audio: audio_bytes.clone().into(),
-            audio_config: AudioConfig {
-                format: AudioFormat::mp3,
-            },
-            transcription_config: Some(TranscriptionConfig {
-                language: None,
-                enable_timestamps: true,
-                prompt: None,
-            }),
-        };
-
-        api.transcribe_audio(request).await.unwrap();
-
-        let captured_request = api.http_client.last_captured_request().unwrap();
-
-        let content_type_header = captured_request
-            .headers()
-            .get("Content-Type")
-            .unwrap()
-            .to_str()
-            .unwrap();
-
-        assert!(
-            content_type_header.starts_with("multipart/form-data"),
-            "should be multipart/form-data"
-        );
-
-        let boundary = content_type_header.split("boundary=").nth(1).unwrap();
-
-        let body_bytes = captured_request.body().to_vec();
-
-        let cursor = Cursor::new(body_bytes);
-        let mut multipart = Multipart::with_body(cursor, boundary);
-        let mut fields: HashMap<String, MultipartField> = HashMap::new();
-
-        while let Ok(Some(mut field)) = multipart.read_entry() {
-            let field_name = field.headers.name.clone();
-
-            let mut data = Vec::new();
-            field.data.read_to_end(&mut data).unwrap();
-
-            let multipart_field = MultipartField {
-                data,
-                filename: field.headers.filename.clone(),
-                content_type: field.headers.content_type.as_ref().map(|ct| ct.to_string()),
-            };
-
-            fields.insert(field_name.to_string(), multipart_field);
-        }
-
-        let timestamp_granularity_field = fields.get("").unwrap();
-        assert_eq!(
-            timestamp_granularity_field,
-            &MultipartField {
-                data: b"timestamp_granularities[]=word".to_vec(),
-                filename: None,
-                content_type: None,
-            }
-        );
-
-        assert_eq!(api.http_client.captured_request_count(), 1);
-    }
-
-    #[wstd::test]
-    async fn test_transcribe_audio_success_words() {
+    async fn test_transcribe_audio_success() {
         let response_body = r#"
                {
                    "task": "transcribe",
@@ -808,7 +686,6 @@ mod tests {
             },
             transcription_config: Some(TranscriptionConfig {
                 language: Some("en".to_string()),
-                enable_timestamps: true,
                 prompt: None,
             }),
         };
@@ -817,7 +694,7 @@ mod tests {
 
         let expected_response = TranscriptionResponse {
             audio_size_bytes: audio_byte_len,
-            whisper_transcription: WhisperTranscription::Words {
+            whisper_transcription: WhisperTranscription {
                 task: "transcribe".to_string(),
                 language: "en".to_string(),
                 duration: 8.2,

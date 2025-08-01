@@ -60,16 +60,20 @@ pub struct Phrase {
 }
 
 #[derive(Debug, Clone)]
+pub struct DiarizationConfig {
+    pub enabled: bool,
+    pub min_speaker_count: Option<i32>,
+    pub max_speaker_count: Option<i32>,
+}
+
+#[derive(Debug, Clone)]
 pub struct TranscriptionConfig {
     pub language_codes: Option<Vec<String>>,
     pub model: Option<String>,
     pub enable_profanity_filter: bool,
-    pub enable_speaker_diarization: bool,
-    pub min_speaker_count: Option<i32>,
-    pub max_speaker_count: Option<i32>,
+    pub diarization: Option<DiarizationConfig>,
     pub enable_multi_channel: bool,
     pub phrases: Vec<Phrase>,
-    pub max_alternatives: Option<i32>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -482,20 +486,17 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextService for SpeechToTextClien
                 features.multi_channel_mode = Some("SEPARATE_RECOGNITION_PER_CHANNEL".to_string());
             }
 
-            if config.enable_speaker_diarization {
-                let min_speakers = config.min_speaker_count.unwrap_or(2);
-                let max_speakers = config.max_speaker_count.unwrap_or(6);
+            if let Some(ref diarization_config) = config.diarization {
+                let min_speakers = diarization_config.min_speaker_count.unwrap_or(2);
+                let max_speakers = diarization_config.max_speaker_count.unwrap_or(6);
                 features.diarization_config = Some(SpeakerDiarizationConfig {
                     min_speaker_count: min_speakers,
                     max_speaker_count: max_speakers,
                 });
             }
-
-            // todo, rethink this should we always enable it?
-            if let Some(max_alt) = config.max_alternatives {
-                features.max_alternatives = Some(max_alt);
-            }
         }
+
+        features.max_alternatives = Some(1); //get the best alternative only
 
         let adaptation = if let Some(config) = transcription_config {
             if !config.phrases.is_empty() {
@@ -810,7 +811,7 @@ mod tests {
                     enable_automatic_punctuation: Some(true),
                     multi_channel_mode: None,
                     diarization_config: None,
-                    max_alternatives: None,
+                    max_alternatives: Some(1),
                 },
                 adaptation: None,
                 auto_decoding_config: Some(AutoDetectDecodingConfig {}),
@@ -894,12 +895,9 @@ mod tests {
             language_codes: Some(vec!["en-US".to_string()]),
             model: Some("latest_long".to_string()), // Not latest_short, so multi-channel should work
             enable_profanity_filter: false,
-            enable_speaker_diarization: false,
-            min_speaker_count: None,
-            max_speaker_count: None,
+            diarization: None,
             enable_multi_channel: true, // Enable multi-channel
             phrases: vec![],
-            max_alternatives: None,
         };
 
         let _result = client
@@ -927,7 +925,7 @@ mod tests {
                     enable_automatic_punctuation: Some(true),
                     multi_channel_mode: Some("SEPARATE_RECOGNITION_PER_CHANNEL".to_string()),
                     diarization_config: None,
-                    max_alternatives: None,
+                    max_alternatives: Some(1),
                 },
                 adaptation: None,
                 auto_decoding_config: Some(AutoDetectDecodingConfig {}),
@@ -996,12 +994,14 @@ mod tests {
             language_codes: Some(vec!["en-US".to_string()]),
             model: Some("latest_long".to_string()),
             enable_profanity_filter: false,
-            enable_speaker_diarization: true, // Enable speaker diarization
-            min_speaker_count: Some(3),       // Custom min speakers
-            max_speaker_count: Some(5),       // Custom max speakers
+            diarization: Some(DiarizationConfig {
+                enabled: true,
+                min_speaker_count: Some(3),
+                max_speaker_count: Some(5),
+            }),
+            // Custom max speakers
             enable_multi_channel: false,
             phrases: vec![],
-            max_alternatives: None,
         };
 
         let _result = client
@@ -1032,7 +1032,7 @@ mod tests {
                         min_speaker_count: 3,
                         max_speaker_count: 5,
                     }),
-                    max_alternatives: None,
+                    max_alternatives: Some(1),
                 },
                 adaptation: None,
                 auto_decoding_config: Some(AutoDetectDecodingConfig {}),
@@ -1101,12 +1101,9 @@ mod tests {
             language_codes: Some(vec!["es-ES".to_string(), "en-US".to_string()]), // Multiple languages
             model: Some("latest_long".to_string()),
             enable_profanity_filter: false,
-            enable_speaker_diarization: false,
-            min_speaker_count: None,
-            max_speaker_count: None,
+            diarization: None,
             enable_multi_channel: false,
             phrases: vec![],
-            max_alternatives: Some(3), // Also verify max alternatives
         };
 
         let _result = client
@@ -1134,7 +1131,7 @@ mod tests {
                     enable_automatic_punctuation: Some(true),
                     multi_channel_mode: None,
                     diarization_config: None,
-                    max_alternatives: Some(3),
+                    max_alternatives: Some(1),
                 },
                 adaptation: None,
                 auto_decoding_config: None,
@@ -1207,12 +1204,9 @@ mod tests {
             language_codes: Some(vec!["en-US".to_string()]),
             model: Some("medical_conversation".to_string()), // User-provided model
             enable_profanity_filter: false,
-            enable_speaker_diarization: false,
-            min_speaker_count: None,
-            max_speaker_count: None,
+            diarization: None,
             enable_multi_channel: false,
             phrases: vec![],
-            max_alternatives: None,
         };
 
         let _result = client
@@ -1240,7 +1234,7 @@ mod tests {
                     enable_automatic_punctuation: Some(true),
                     multi_channel_mode: None,
                     diarization_config: None,
-                    max_alternatives: None,
+                    max_alternatives: Some(1),
                 },
                 adaptation: None,
                 auto_decoding_config: Some(AutoDetectDecodingConfig {}),
@@ -1309,9 +1303,7 @@ mod tests {
             language_codes: Some(vec!["en-US".to_string()]),
             model: Some("latest_short".to_string()),
             enable_profanity_filter: false,
-            enable_speaker_diarization: false,
-            min_speaker_count: None,
-            max_speaker_count: None,
+            diarization: None,
             enable_multi_channel: false,
             phrases: vec![
                 Phrase {
@@ -1327,7 +1319,6 @@ mod tests {
                     boost: Some(15.5), // Another phrase with boost
                 },
             ],
-            max_alternatives: None,
         };
 
         let _result = client
@@ -1355,7 +1346,7 @@ mod tests {
                     enable_automatic_punctuation: Some(true),
                     multi_channel_mode: None,
                     diarization_config: None,
-                    max_alternatives: None,
+                    max_alternatives: Some(1),
                 },
                 adaptation: Some(SpeechAdaptation {
                     phrase_sets: vec![AdaptationPhraseSet {
@@ -1443,12 +1434,9 @@ mod tests {
             language_codes: Some(vec!["en-US".to_string()]),
             model: Some("latest_long".to_string()),
             enable_profanity_filter: true, // Enable profanity filter
-            enable_speaker_diarization: false,
-            min_speaker_count: None,
-            max_speaker_count: None,
+            diarization: None,
             enable_multi_channel: false,
             phrases: vec![],
-            max_alternatives: None,
         };
 
         let _result = client
@@ -1476,7 +1464,7 @@ mod tests {
                     enable_automatic_punctuation: Some(true),
                     multi_channel_mode: None,
                     diarization_config: None,
-                    max_alternatives: None,
+                    max_alternatives: Some(1),
                 },
                 adaptation: None,
                 auto_decoding_config: Some(AutoDetectDecodingConfig {}),

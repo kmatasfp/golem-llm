@@ -201,11 +201,18 @@ impl TryFrom<WitTranscribeOptions> for TranscriptionConfig {
             }
         }
 
+        let enable_multi_channel = options.enable_multi_channel.unwrap_or(false);
+        let enable_speaker_diarization = options
+            .diarization
+            .map(|diarization| diarization.enabled)
+            .unwrap_or(false);
+
         Ok(TranscriptionConfig {
             language: options.language,
             model: options.model,
             enable_profanity_filter: options.profanity_filter.unwrap_or(false),
-            enable_speaker_diarization: options.enable_speaker_diarization.unwrap_or(false),
+            enable_speaker_diarization,
+            enable_multi_channel,
             keywords,
             keyterms,
         })

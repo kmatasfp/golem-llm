@@ -115,6 +115,7 @@ pub struct TranscriptionConfig {
     pub locales: Vec<String>,
     pub diarization: Option<DiarizationConfig>,
     pub profanity_filter_mode: Option<ProfanityFilterMode>,
+    pub enable_multi_channel: bool,
 }
 
 #[derive(Clone)]
@@ -186,13 +187,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
                 .channels
                 .as_ref()
                 .and_then(|&channels| {
-                    if !config
-                        .diarization
-                        .as_ref()
-                        .map(|dcf| dcf.enabled)
-                        .unwrap_or(false)
-                        && channels == 2
-                    {
+                    if !config.enable_multi_channel && channels == 2 {
                         Some(vec![0, 1])
                     } else {
                         None
@@ -504,12 +499,13 @@ mod tests {
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
-                channels: Some(2),
+                channels: Some(1),
             },
             transcription_config: Some(TranscriptionConfig {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
                 profanity_filter_mode: None,
+                enable_multi_channel: false,
             }),
         };
 
@@ -583,6 +579,7 @@ mod tests {
                     max_speakers: 3,
                 }),
                 profanity_filter_mode: None,
+                enable_multi_channel: false,
             }),
         };
 
@@ -730,6 +727,7 @@ mod tests {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
                 profanity_filter_mode: None,
+                enable_multi_channel: true,
             }),
         };
 
@@ -828,6 +826,7 @@ mod tests {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
                 profanity_filter_mode: Some(ProfanityFilterMode::Masked),
+                enable_multi_channel: false,
             }),
         };
 
@@ -1227,6 +1226,7 @@ mod tests {
                     max_speakers: 2,
                 }),
                 profanity_filter_mode: None,
+                enable_multi_channel: false,
             }),
         };
 
@@ -1387,6 +1387,7 @@ mod tests {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
                 profanity_filter_mode: None,
+                enable_multi_channel: false,
             }),
         };
 
@@ -1441,6 +1442,7 @@ mod tests {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
                 profanity_filter_mode: None,
+                enable_multi_channel: false,
             }),
         };
 
@@ -1495,6 +1497,7 @@ mod tests {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
                 profanity_filter_mode: None,
+                enable_multi_channel: false,
             }),
         };
 
@@ -1549,6 +1552,7 @@ mod tests {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
                 profanity_filter_mode: None,
+                enable_multi_channel: false,
             }),
         };
 
@@ -1603,6 +1607,7 @@ mod tests {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
                 profanity_filter_mode: None,
+                enable_multi_channel: false,
             }),
         };
 
@@ -1657,6 +1662,7 @@ mod tests {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
                 profanity_filter_mode: None,
+                enable_multi_channel: false,
             }),
         };
 
@@ -1711,6 +1717,7 @@ mod tests {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
                 profanity_filter_mode: None,
+                enable_multi_channel: false,
             }),
         };
 
@@ -1756,6 +1763,7 @@ mod tests {
                 locales: vec!["en-US".to_string()],
                 diarization: None,
                 profanity_filter_mode: None,
+                enable_multi_channel: false,
             }),
         };
 

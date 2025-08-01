@@ -19,7 +19,9 @@ use golem_stt::transcription::SttProviderClient;
 use golem_stt::LOGGING_STATE;
 use log::trace;
 use transcription::api::{TranscribeApi, TranscriptionResponse};
-use transcription::request::{AudioConfig, AudioFormat, TranscriptionConfig, TranscriptionRequest};
+use transcription::request::{
+    AudioConfig, AudioFormat, DiarizationConfig, TranscriptionConfig, TranscriptionRequest,
+};
 
 use futures_concurrency::future::Join;
 use itertools::Itertools;
@@ -203,10 +205,22 @@ impl TryFrom<WitTranscribeOptions> for TranscriptionConfig {
             })
             .unwrap_or_default();
 
+        let diarization_config = if let Some(dc) = options.diarization {
+            Some(DiarizationConfig {
+                enabled: dc.enabled,
+                max_speakers: dc.max_speaker_count.unwrap_or(30) as u8,
+            })
+        } else {
+            None
+        };
+
+        let enable_multi_channel = options.enable_multi_channel.unwrap_or(false);
+
         Ok(TranscriptionConfig {
             language: options.language,
             model: options.model,
-            enable_speaker_diarization: options.enable_speaker_diarization.unwrap_or(false),
+            diarization: diarization_config,
+            enable_multi_channel,
             vocabulary,
         })
     }

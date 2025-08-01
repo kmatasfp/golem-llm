@@ -168,10 +168,10 @@ impl TryFrom<WitTranscribeOptions> for TranscriptionConfig {
             }
         }
 
-        let diarization_config = if options.enable_speaker_diarization.unwrap_or(false) {
+        let diarization_config = if let Some(dc) = options.diarization {
             Some(DiarizationConfig {
-                enabled: true,
-                max_speakers: 2, // TODO this needs to be configurable
+                enabled: dc.enabled,
+                max_speakers: dc.max_speaker_count.unwrap_or(2) as u8,
             })
         } else {
             None
@@ -183,10 +183,13 @@ impl TryFrom<WitTranscribeOptions> for TranscriptionConfig {
             None
         };
 
+        let enable_multi_channel = options.enable_multi_channel.unwrap_or(false);
+
         Ok(TranscriptionConfig {
             locales: options.language.map_or_else(Vec::new, |lang| vec![lang]),
             diarization: diarization_config,
             profanity_filter_mode,
+            enable_multi_channel,
         })
     }
 }

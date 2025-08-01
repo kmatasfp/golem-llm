@@ -27,10 +27,17 @@ pub struct AudioConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct DiarizationConfig {
+    pub enabled: bool,
+    pub max_speakers: u8,
+}
+
+#[derive(Debug, Clone)]
 pub struct TranscriptionConfig {
     pub language: Option<String>,
     pub model: Option<String>,
-    pub enable_speaker_diarization: bool,
+    pub diarization: Option<DiarizationConfig>,
+    pub enable_multi_channel: bool,
     pub vocabulary: Vec<String>,
 }
 
