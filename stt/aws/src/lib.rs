@@ -266,7 +266,7 @@ impl From<TranscriptionResponse> for WitTranscriptionResult {
         let metadata = WitTranscriptionMetadata {
             duration_seconds,
             audio_size_bytes: response.audio_size_bytes as u32,
-            request_id: response.aws_transcription.job_name,
+            request_id: response.request_id,
             model: response.model,
             language: response.language,
         };

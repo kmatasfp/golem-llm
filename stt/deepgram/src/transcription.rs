@@ -292,6 +292,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
                 })?;
 
             Ok(TranscriptionResponse {
+                request_id,
                 audio_size_bytes,
                 language: req_language.unwrap_or_default(),
                 deepgram_transcription,
@@ -309,27 +310,27 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
 
             match response.status() {
                 StatusCode::BAD_REQUEST => Err(Error::APIBadRequest {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
                 StatusCode::UNAUTHORIZED => Err(Error::APIUnauthorized {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
                 StatusCode::PAYMENT_REQUIRED => Err(Error::APIAccessDenied {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
                 StatusCode::FORBIDDEN => Err(Error::APIForbidden {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
                 status if status.is_server_error() => Err(Error::APIInternalServerError {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
                 _ => Err(Error::APIUnknown {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
             }
@@ -340,6 +341,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
 #[allow(unused)]
 #[derive(Debug, PartialEq)]
 pub struct TranscriptionResponse {
+    pub request_id: String,
     pub audio_size_bytes: usize,
     pub language: String,
     pub deepgram_transcription: DeepgramTranscription,
@@ -902,6 +904,7 @@ mod tests {
         let response = api.transcribe_audio(request).await.unwrap();
 
         let expected_response = TranscriptionResponse {
+            request_id: "some-transcription-id".to_string(),
             language: String::new(),
             audio_size_bytes: audio_data.len(),
             deepgram_transcription: DeepgramTranscription {
@@ -1074,6 +1077,7 @@ mod tests {
         let response = api.transcribe_audio(request).await.unwrap();
 
         let expected_response = TranscriptionResponse {
+            request_id: "some-transcription-id".to_string(),
             language: String::new(),
             audio_size_bytes: audio_data.len(),
             deepgram_transcription: DeepgramTranscription {

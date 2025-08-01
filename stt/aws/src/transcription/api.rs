@@ -447,6 +447,7 @@ impl<S3: S3Service, TC: TranscribeService>
         }
 
         Ok(TranscriptionResponse {
+            request_id: request_id.to_string(),
             audio_size_bytes,
             language: req_language.unwrap_or_default(),
             model,
@@ -458,6 +459,7 @@ impl<S3: S3Service, TC: TranscribeService>
 #[allow(unused)]
 #[derive(Debug, PartialEq)]
 pub struct TranscriptionResponse {
+    pub request_id: String,
     pub audio_size_bytes: usize,
     pub language: String,
     pub model: Option<String>,

@@ -224,6 +224,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
                 })?;
 
             Ok(TranscriptionResponse {
+                request_id,
                 audio_size_bytes,
                 whisper_transcription,
             })
@@ -240,39 +241,39 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
 
             match response.status() {
                 StatusCode::BAD_REQUEST => Err(Error::APIBadRequest {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
                 StatusCode::UNAUTHORIZED => Err(Error::APIUnauthorized {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
                 StatusCode::FORBIDDEN => Err(Error::APIForbidden {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
                 StatusCode::NOT_FOUND => Err(Error::APINotFound {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
                 StatusCode::CONFLICT => Err(Error::APIConflict {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
                 StatusCode::UNPROCESSABLE_ENTITY => Err(Error::APIUnprocessableEntity {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
                 StatusCode::TOO_MANY_REQUESTS => Err(Error::APIRateLimit {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
                 status if status.is_server_error() => Err(Error::APIInternalServerError {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
                 _ => Err(Error::APIUnknown {
-                    request_id: request_id.clone(),
+                    request_id,
                     provider_error,
                 }),
             }
@@ -283,6 +284,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
 #[allow(unused)]
 #[derive(Debug, PartialEq)]
 pub struct TranscriptionResponse {
+    pub request_id: String,
     pub audio_size_bytes: usize,
     pub whisper_transcription: WhisperTranscription,
 }
@@ -693,6 +695,7 @@ mod tests {
         let response = api.transcribe_audio(request).await.unwrap();
 
         let expected_response = TranscriptionResponse {
+            request_id: "some-transcription-id".to_string(),
             audio_size_bytes: audio_byte_len,
             whisper_transcription: WhisperTranscription {
                 task: "transcribe".to_string(),

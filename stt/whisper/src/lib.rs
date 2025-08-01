@@ -198,7 +198,7 @@ impl From<TranscriptionResponse> for WitTranscriptionResult {
         let metadata = WitTranscriptionMetadata {
             duration_seconds: transcription.usage.seconds as f32,
             audio_size_bytes: response.audio_size_bytes as u32,
-            request_id: "".to_string(), // TODO: fix this
+            request_id: response.request_id,
             model: Some("whisper-1".to_string()),
             language: transcription.language,
         };

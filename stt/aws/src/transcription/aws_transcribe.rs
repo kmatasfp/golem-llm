@@ -166,7 +166,7 @@ pub struct Subtitles {
     pub output_start_index: Option<i32>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default)]
 #[serde(rename_all = "PascalCase")]
 pub struct Settings {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -669,90 +669,71 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
         transcription_config: Option<&TranscriptionConfig>,
         vocabulary_name: Option<&str>,
     ) -> Result<StartTranscriptionJobResponse, golem_stt::error::Error> {
-        let language_code = transcription_config
-            .and_then(|config| config.language.as_ref().map(|lang| lang.to_string()));
-        let use_identify_language = language_code.is_none();
-        let enable_channel_identification = audio_config.channels.is_some_and(|c| c == 2)
-            && transcription_config.is_some_and(|config| config.enable_multi_channel);
-        let enable_speaker_diarization = transcription_config
-            .and_then(|config| config.diarization.as_ref().map(|d| d.enabled))
-            .unwrap_or(false);
-
-        let model_settings = if !use_identify_language {
-            transcription_config
-                .and_then(|config| config.model.as_deref())
-                .map(|model| ModelSettings {
-                    language_model_name: model.to_string(),
-                })
-        } else {
-            None
-        };
-
-        let settings = if enable_channel_identification
-            || enable_speaker_diarization
-            || (!use_identify_language && vocabulary_name.is_some())
-        {
-            Some(Settings {
-                channel_identification: if enable_channel_identification {
-                    Some(true)
-                } else {
-                    None
-                },
-                max_alternatives: None,
-                max_speaker_labels: if enable_speaker_diarization {
-                    transcription_config.and_then(|config| {
-                        config.diarization.as_ref().map(|d| d.max_speakers as i32)
-                    })
-                } else {
-                    None
-                },
-                show_alternatives: None,
-                show_speaker_labels: if enable_speaker_diarization {
-                    Some(true)
-                } else {
-                    None
-                },
-                vocabulary_filter_method: None,
-                vocabulary_filter_name: None,
-                vocabulary_name: if !use_identify_language {
-                    vocabulary_name.map(|s| s.to_string())
-                } else {
-                    None
-                },
-            })
-        } else {
-            None
-        };
-
-        let request_body = StartTranscriptionJobRequest {
-            content_redaction: None,
-            identify_language: if use_identify_language {
-                Some(true)
-            } else {
-                None
-            },
-            identify_multiple_languages: None,
-            job_execution_settings: None,
-            kms_encryption_context: None,
-            language_code,
-            language_id_settings: None,
-            language_options: None,
+        let mut request_body = StartTranscriptionJobRequest {
+            transcription_job_name: transcription_job_name.to_string(),
             media: Media {
                 media_file_uri: media_file_uri.to_string(),
                 redacted_media_file_uri: None,
             },
             media_format: Some(audio_config.format.to_string()),
+            content_redaction: None,
+            identify_language: None,
+            identify_multiple_languages: None,
+            job_execution_settings: None,
+            kms_encryption_context: None,
+            language_code: None,
+            language_id_settings: None,
+            language_options: None,
             media_sample_rate_hertz: None,
-            model_settings,
+            model_settings: None,
             output_bucket_name: None,
             output_encryption_kms_key_id: None,
             output_key: None,
-            settings,
+            settings: None,
             subtitles: None,
             tags: None,
             toxicity_detection: None,
-            transcription_job_name: transcription_job_name.to_string(),
         };
+
+        let mut settings: Option<Settings> = None;
+
+        if let Some(config) = transcription_config {
+            if let Some(language) = &config.language {
+                request_body.language_code = Some(language.to_string());
+
+                if let Some(model) = &config.model {
+                    request_body.model_settings = Some(ModelSettings {
+                        language_model_name: model.to_string(),
+                    });
+                }
+
+                if let Some(vocab_name) = vocabulary_name {
+                    settings
+                        .get_or_insert_with(|| Settings::default())
+                        .vocabulary_name = Some(vocab_name.to_string());
+                }
+            } else {
+                request_body.identify_language = Some(true);
+            }
+
+            if audio_config.channels.is_some_and(|c| c == 2) && config.enable_multi_channel {
+                settings
+                    .get_or_insert_with(|| Settings::default())
+                    .channel_identification = Some(true);
+            }
+
+            if let Some(diarization) = &config.diarization {
+                if diarization.enabled {
+                    let settings_ref = settings.get_or_insert_with(|| Settings::default());
+                    settings_ref.show_speaker_labels = Some(true);
+                    settings_ref.max_speaker_labels = Some(diarization.max_speakers as i32);
+                }
+            }
+        } else {
+            request_body.identify_language = Some(true);
+        }
+
+        request_body.settings = settings;
 
         self.make_authenticated_request(
             "com.amazonaws.transcribe.Transcribe.StartTranscriptionJob",

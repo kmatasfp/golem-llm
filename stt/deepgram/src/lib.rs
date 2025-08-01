@@ -249,7 +249,7 @@ impl From<TranscriptionResponse> for WitTranscriptionResult {
         let metadata = WitTranscriptionMetadata {
             duration_seconds: response.deepgram_transcription.metadata.duration,
             audio_size_bytes: response.audio_size_bytes as u32,
-            request_id: response.deepgram_transcription.metadata.request_id,
+            request_id: response.request_id,
             model: serde_json::to_string(&response.deepgram_transcription.metadata.model_info).ok(),
             language: response.language,
         };

@@ -187,7 +187,10 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
                 .channels
                 .as_ref()
                 .and_then(|&channels| {
-                    if !config.enable_multi_channel && channels == 2 {
+                    if config.diarization.as_ref().is_none_or(|d| !d.enabled)
+                        && config.enable_multi_channel
+                        && channels == 2
+                    {
                         Some(vec![0, 1])
                     } else {
                         None
