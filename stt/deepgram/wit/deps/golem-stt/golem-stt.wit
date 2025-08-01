@@ -8,26 +8,12 @@ interface types {
     transcription-failed(string),
     unauthorized(string),
     access-denied(string),
-    quota-exceeded(quota-info),
     rate-limited(string),
     insufficient-credits,
     unsupported-operation(string),
     service-unavailable(string),
     network-error(string),
     internal-error(string),
-  }
-
-  record quota-info {
-    used: u32,
-    limit: u32,
-    reset-time: u64,
-    unit: quota-unit,
-  }
-
-  enum quota-unit {
-    seconds,
-    requests,
-    credits,
   }
 
   type language-code = string;
@@ -47,15 +33,9 @@ interface types {
     channels: option<u8>,
   }
 
-  /// Only word-level timing is commonly supported
-  enum timing-mark-type {
-    word,
-  }
-
   record timing-info {
     start-time-seconds: f32,
     end-time-seconds: f32,
-    mark-type: timing-mark-type,
   }
 
   record word-segment {
@@ -63,12 +43,6 @@ interface types {
     timing-info: option<timing-info>,
     confidence: option<f32>,
     speaker-id: option<string>,
-  }
-
-  record transcript-alternative {
-    text: string,
-    confidence: f32,
-    words: list<word-segment>,
   }
 
   record transcription-metadata {
@@ -79,9 +53,22 @@ interface types {
     language: language-code,
   }
 
+  record transcription-channel {
+    id: string,
+    transcript: string,
+    segments: list<transcription-segment>
+  }
+
+  record transcription-segment {
+    transcript: string,
+    timing-info: option<timing-info>,
+    speaker-id: option<string>,
+    words: list<word-segment>,
+  }
+
   record transcription-result {
-    alternatives: list<transcript-alternative>,
-    metadata: transcription-metadata,
+    transcript-metadata: transcription-metadata,
+    channels: list<transcription-channel>
   }
 }
 
@@ -103,7 +90,6 @@ interface transcription {
     transcription-result,
     stt-error,
     language-code,
-    transcript-alternative,
   };
 
   record phrase {

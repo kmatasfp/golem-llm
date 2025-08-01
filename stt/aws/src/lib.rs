@@ -6,13 +6,14 @@ use golem_stt::golem::stt::transcription::{
     FailedTranscription as WitFailedTranscription, Guest as TranscriptionGuest,
     MultiTranscriptionResult as WitMultiTranscriptionResult,
     TranscribeOptions as WitTranscribeOptions, TranscriptionRequest as WitTranscriptionRequest,
-    TranscriptionResult as WitTranscriptionResult,
 };
 
 use golem_stt::golem::stt::types::{
     AudioFormat as WitAudioFormat, SttError as WitSttError, TimingInfo as WitTimingInfo,
-    TimingMarkType as WitTimingMarkType, TranscriptAlternative as WitTranscriptAlternative,
-    TranscriptionMetadata as WitTranscriptionMetadata, WordSegment as WitWordSegment,
+    TranscriptionChannel as WitTranscriptionChannel,
+    TranscriptionMetadata as WitTranscriptionMetadata,
+    TranscriptionResult as WitTranscriptionResult, TranscriptionSegment as WitTranscriptionSegment,
+    WordSegment as WitWordSegment,
 };
 use golem_stt::transcription::SttProviderClient;
 use golem_stt::LOGGING_STATE;
@@ -256,73 +257,109 @@ impl From<TranscriptionResponse> for WitTranscriptionResult {
             language: response.language,
         };
 
-        let alternatives: Vec<WitTranscriptAlternative> = aws_results
-            .transcripts
-            .iter()
-            .map(|transcript| {
-                // Create word segments from items (pronunciation only)
-                let words: Vec<WitWordSegment> = aws_results
-                    .items
+        let channels = if let Some(ref channel_labels) = aws_results.channel_labels {
+            channel_labels
+                .channels
+                .iter()
+                .map(|channel| channel.channel_label.clone())
+                .collect()
+        } else {
+            vec!["ch_0".to_string()]
+        };
+
+        let wit_channels: Vec<_> = channels
+            .into_iter()
+            .map(|channel_id| {
+                let channel_segments: Vec<&_> = aws_results
+                    .audio_segments
                     .iter()
-                    .filter(|item| item.item_type == "pronunciation")
-                    .filter_map(|item| {
-                        // Get the best alternative (first one)
-                        let alternative = item.alternatives.first()?;
-
-                        // Parse confidence from string
-                        let confidence = alternative.confidence.parse::<f32>().ok();
-
-                        // Create timing info if available
-                        let timing_info = match (&item.start_time, &item.end_time) {
-                            (Some(start_str), Some(end_str)) => {
-                                match (start_str.parse::<f32>(), end_str.parse::<f32>()) {
-                                    (Ok(start), Ok(end)) => Some(WitTimingInfo {
-                                        start_time_seconds: start,
-                                        end_time_seconds: end,
-                                        mark_type: WitTimingMarkType::Word,
-                                    }),
-                                    _ => None,
-                                }
-                            }
-                            _ => None,
-                        };
-
-                        Some(WitWordSegment {
-                            text: alternative.content.clone(),
-                            timing_info,
-                            confidence,
-                            speaker_id: item.speaker_label.clone(),
-                        })
+                    .filter(|segment| {
+                        segment
+                            .channel_label
+                            .as_ref()
+                            .unwrap_or(&"ch_0".to_string())
+                            == &channel_id
                     })
                     .collect();
 
-                // Calculate average confidence for the alternative
-                let confidence = if words.is_empty() {
-                    0.0
-                } else {
-                    let sum: f32 = words.iter().filter_map(|word| word.confidence).sum();
-                    let count = words
-                        .iter()
-                        .filter(|word| word.confidence.is_some())
-                        .count();
-                    if count > 0 {
-                        sum / count as f32
-                    } else {
-                        0.0
-                    }
-                };
+                // Create channel transcript by unioning all segment transcripts
+                let channel_transcript = channel_segments
+                    .iter()
+                    .map(|segment| segment.transcript.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ");
 
-                WitTranscriptAlternative {
-                    text: transcript.transcript.clone(),
-                    confidence,
-                    words,
+                let wit_segments: Vec<_> = channel_segments
+                    .into_iter()
+                    .map(|segment| {
+                        // Look up words from items using segment's item IDs
+                        let wit_words: Vec<WitWordSegment> = segment
+                            .items
+                            .iter()
+                            .filter_map(|item_id| {
+                                // Find the item with this ID
+                                aws_results
+                                    .items
+                                    .iter()
+                                    .find(|item| item.id.map_or(false, |id| id == *item_id))
+                            })
+                            .filter(|item| item.item_type == "pronunciation") // Only pronunciation items, not punctuation
+                            .filter_map(|item| {
+                                // Get the first (best) alternative
+                                let alternative = item.alternatives.first()?;
+
+                                // Parse confidence from string
+                                let confidence = alternative.confidence.parse::<f32>().ok();
+
+                                // Create timing info if available
+                                let timing_info = match (&item.start_time, &item.end_time) {
+                                    (Some(start_str), Some(end_str)) => {
+                                        match (start_str.parse::<f32>(), end_str.parse::<f32>()) {
+                                            (Ok(start), Ok(end)) => Some(WitTimingInfo {
+                                                start_time_seconds: start,
+                                                end_time_seconds: end,
+                                            }),
+                                            _ => None,
+                                        }
+                                    }
+                                    _ => None,
+                                };
+
+                                Some(WitWordSegment {
+                                    text: alternative.content.clone(),
+                                    timing_info,
+                                    confidence,
+                                    speaker_id: item.speaker_label.clone(),
+                                })
+                            })
+                            .collect();
+
+                        WitTranscriptionSegment {
+                            transcript: segment.transcript.clone(),
+                            timing_info: Some(WitTimingInfo {
+                                start_time_seconds: segment
+                                    .start_time
+                                    .parse::<f32>()
+                                    .unwrap_or(0.0),
+                                end_time_seconds: segment.end_time.parse::<f32>().unwrap_or(0.0),
+                            }),
+                            speaker_id: segment.speaker_label.clone(),
+                            words: wit_words,
+                        }
+                    })
+                    .collect();
+
+                WitTranscriptionChannel {
+                    id: channel_id,
+                    transcript: channel_transcript,
+                    segments: wit_segments,
                 }
             })
             .collect();
 
         WitTranscriptionResult {
-            metadata,
-            alternatives,
+            transcript_metadata: metadata,
+            channels: wit_channels,
         }
     }
 }

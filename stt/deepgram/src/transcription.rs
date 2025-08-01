@@ -195,6 +195,9 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
 
         let mut query_params: Vec<(&str, String)> = vec![];
 
+        query_params.push(("utterances", "true".to_string()));
+        query_params.push(("punctuate", "true".to_string()));
+
         if let Some(channels) = request.audio_config.channels {
             if channels > 1 {
                 query_params.push(("multichannel", "true".to_string()));
@@ -373,6 +376,7 @@ pub struct ModelInfo {
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct Results {
     pub channels: Vec<Channel>,
+    pub utterances: Vec<Utterance>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -395,6 +399,18 @@ pub struct Word {
     pub confidence: f32,
     pub speaker: Option<u8>,
     pub speaker_confidence: Option<f32>,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct Utterance {
+    pub start: f32,
+    pub end: f32,
+    pub confidence: f32,
+    pub channel: u8,
+    pub transcript: String,
+    pub words: Vec<Word>,
+    pub speaker: Option<u8>,
+    pub id: String,
 }
 
 #[cfg(test)]
@@ -465,27 +481,50 @@ mod tests {
 
     fn create_mock_success_response() -> Response<Vec<u8>> {
         let response_body = r#"{
-            "metadata": {
-                "transaction_key": "test-transaction-key",
-                "request_id": "test-request-id",
-                "sha256": "test-sha256",
-                "created": "2023-01-01T00:00:00Z",
-                "duration": 10.5,
-                "channels": 1,
-                "models": ["nova-2"],
-                "model_info": {
-                    "nova-2": {
-                        "name": "nova-2",
-                        "version": "1.0.0",
-                        "arch": "transformer"
+                "metadata": {
+                    "transaction_key": "test-transaction-key",
+                    "request_id": "test-request-id",
+                    "sha256": "test-sha256",
+                    "created": "2023-01-01T00:00:00Z",
+                    "duration": 10.5,
+                    "channels": 1,
+                    "models": ["nova-2"],
+                    "model_info": {
+                        "nova-2": {
+                            "name": "nova-2",
+                            "version": "1.0.0",
+                            "arch": "transformer"
+                        }
                     }
-                }
-            },
-            "results": {
-                "channels": [{
-                    "alternatives": [{
-                        "transcript": "Hello world",
+                },
+                "results": {
+                    "channels": [{
+                        "alternatives": [{
+                            "transcript": "Hello world",
+                            "confidence": 0.95,
+                            "words": [{
+                                "word": "Hello",
+                                "start": 0.0,
+                                "end": 0.5,
+                                "confidence": 0.95,
+                                "speaker": 0,
+                                "speaker_confidence": 0.9
+                            }, {
+                                "word": "world",
+                                "start": 0.6,
+                                "end": 1.0,
+                                "confidence": 0.95,
+                                "speaker": 0,
+                                "speaker_confidence": 0.9
+                            }]
+                        }]
+                    }],
+                    "utterances": [{
+                        "start": 0.0,
+                        "end": 1.0,
                         "confidence": 0.95,
+                        "channel": 0,
+                        "transcript": "Hello world",
                         "words": [{
                             "word": "Hello",
                             "start": 0.0,
@@ -500,11 +539,12 @@ mod tests {
                             "confidence": 0.95,
                             "speaker": 0,
                             "speaker_confidence": 0.9
-                        }]
+                        }],
+                        "speaker": 0,
+                        "id": "test-utterance-id"
                     }]
-                }]
-            }
-        }"#;
+                }
+            }"#;
 
         Response::builder()
             .status(StatusCode::OK)
@@ -813,6 +853,25 @@ mod tests {
                             "confidence": 0.95
                         }]
                     }]
+                }],
+                "utterances": [{
+                    "start": 0.0,
+                    "end": 1.0,
+                    "confidence": 0.95,
+                    "channel": 0,
+                    "transcript": "Hello world",
+                    "words": [{
+                        "word": "Hello",
+                        "start": 0.0,
+                        "end": 0.5,
+                        "confidence": 0.95
+                    }, {
+                        "word": "world",
+                        "start": 0.6,
+                        "end": 1.0,
+                        "confidence": 0.95
+                    }],
+                    "id": "test-utterance-1"
                 }]
             }
         }"#;
@@ -885,6 +944,33 @@ mod tests {
                             ],
                         }],
                     }],
+                    utterances: vec![Utterance {
+                        start: 0.0,
+                        end: 1.0,
+                        confidence: 0.95,
+                        channel: 0,
+                        transcript: "Hello world".to_string(),
+                        words: vec![
+                            Word {
+                                word: "Hello".to_string(),
+                                start: 0.0,
+                                end: 0.5,
+                                confidence: 0.95,
+                                speaker: None,
+                                speaker_confidence: None,
+                            },
+                            Word {
+                                word: "world".to_string(),
+                                start: 0.6,
+                                end: 1.0,
+                                confidence: 0.95,
+                                speaker: None,
+                                speaker_confidence: None,
+                            },
+                        ],
+                        speaker: None,
+                        id: "test-utterance-1".to_string(),
+                    }],
                 },
             },
         };
@@ -934,6 +1020,30 @@ mod tests {
                             "speaker_confidence": 0.9
                         }]
                     }]
+                }],
+                "utterances": [{
+                    "start": 0.0,
+                    "end": 1.0,
+                    "confidence": 0.95,
+                    "channel": 0,
+                    "transcript": "Hello world",
+                    "words": [{
+                        "word": "Hello",
+                        "start": 0.0,
+                        "end": 0.5,
+                        "confidence": 0.95,
+                        "speaker": 0,
+                        "speaker_confidence": 0.9
+                    }, {
+                        "word": "world",
+                        "start": 0.6,
+                        "end": 1.0,
+                        "confidence": 0.95,
+                        "speaker": 0,
+                        "speaker_confidence": 0.9
+                    }],
+                    "speaker": 0,
+                    "id": "test-utterance-2"
                 }]
             }
         }"#;
@@ -1005,6 +1115,33 @@ mod tests {
                                 },
                             ],
                         }],
+                    }],
+                    utterances: vec![Utterance {
+                        start: 0.0,
+                        end: 1.0,
+                        confidence: 0.95,
+                        channel: 0,
+                        transcript: "Hello world".to_string(),
+                        words: vec![
+                            Word {
+                                word: "Hello".to_string(),
+                                start: 0.0,
+                                end: 0.5,
+                                confidence: 0.95,
+                                speaker: Some(0),
+                                speaker_confidence: Some(0.9),
+                            },
+                            Word {
+                                word: "world".to_string(),
+                                start: 0.6,
+                                end: 1.0,
+                                confidence: 0.95,
+                                speaker: Some(0),
+                                speaker_confidence: Some(0.9),
+                            },
+                        ],
+                        speaker: Some(0),
+                        id: "test-utterance-2".to_string(),
                     }],
                 },
             },

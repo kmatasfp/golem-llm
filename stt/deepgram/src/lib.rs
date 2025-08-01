@@ -15,13 +15,15 @@ use golem_stt::golem::stt::transcription::{
     FailedTranscription as WitFailedTranscription, Guest as TranscriptionGuest,
     MultiTranscriptionResult as WitMultiTranscriptionResult, Phrase as WitPhrase,
     TranscribeOptions as WitTranscribeOptions, TranscriptionRequest as WitTranscriptionRequest,
-    TranscriptionResult as WitTranscriptionResult, Vocabulary as WitVocabulary,
+    Vocabulary as WitVocabulary,
 };
 
 use golem_stt::golem::stt::types::{
     AudioFormat as WitAudioFormat, SttError as WitSttError, TimingInfo as WitTimingInfo,
-    TimingMarkType as WitTimingMarkType, TranscriptAlternative as WitTranscriptAlternative,
-    TranscriptionMetadata as WitTranscriptionMetadata, WordSegment as WitWordSegment,
+    TranscriptionChannel as WitTranscriptionChannel,
+    TranscriptionMetadata as WitTranscriptionMetadata,
+    TranscriptionResult as WitTranscriptionResult, TranscriptionSegment as WitTranscriptionSegment,
+    WordSegment as WitWordSegment,
 };
 
 use futures_concurrency::future::Join;
@@ -245,40 +247,65 @@ impl From<TranscriptionResponse> for WitTranscriptionResult {
             language: response.language,
         };
 
-        let alternatives: Vec<WitTranscriptAlternative> = response
+        let wit_channels: Vec<_> = response
             .deepgram_transcription
             .results
             .channels
             .into_iter()
-            .flat_map(|channel| {
-                channel.alternatives.into_iter().map(|alternative| {
-                    let words: Vec<WitWordSegment> = alternative
-                        .words
-                        .into_iter()
-                        .map(|word| WitWordSegment {
-                            text: word.word,
-                            timing_info: Some(WitTimingInfo {
-                                start_time_seconds: word.start,
-                                end_time_seconds: word.end,
-                                mark_type: WitTimingMarkType::Word,
-                            }),
-                            confidence: Some(word.confidence),
-                            speaker_id: word.speaker.map(|id| id.to_string()),
-                        })
-                        .collect();
+            .enumerate()
+            .map(|(channel_idx, channel)| {
+                // Get the channel transcript from the first alternative
+                let channel_transcript = channel
+                    .alternatives
+                    .first()
+                    .map(|alt| alt.transcript.clone())
+                    .unwrap_or_default();
 
-                    WitTranscriptAlternative {
-                        text: alternative.transcript,
-                        confidence: alternative.confidence,
-                        words,
-                    }
-                })
+                // Filter utterances for this channel and convert to segments
+                let wit_segments: Vec<_> = response
+                    .deepgram_transcription
+                    .results
+                    .utterances
+                    .iter()
+                    .filter(|utterance| utterance.channel as usize == channel_idx)
+                    .map(|utterance| {
+                        let wit_words: Vec<_> = utterance
+                            .words
+                            .iter()
+                            .map(|word| WitWordSegment {
+                                text: word.word.clone(),
+                                timing_info: Some(WitTimingInfo {
+                                    start_time_seconds: word.start,
+                                    end_time_seconds: word.end,
+                                }),
+                                confidence: Some(word.confidence),
+                                speaker_id: word.speaker.map(|id| id.to_string()),
+                            })
+                            .collect();
+
+                        WitTranscriptionSegment {
+                            transcript: utterance.transcript.clone(),
+                            timing_info: Some(WitTimingInfo {
+                                start_time_seconds: utterance.start,
+                                end_time_seconds: utterance.end,
+                            }),
+                            speaker_id: utterance.speaker.map(|id| id.to_string()),
+                            words: wit_words,
+                        }
+                    })
+                    .collect();
+
+                WitTranscriptionChannel {
+                    id: channel_idx.to_string(),
+                    transcript: channel_transcript,
+                    segments: wit_segments,
+                }
             })
             .collect();
 
         WitTranscriptionResult {
-            metadata,
-            alternatives,
+            transcript_metadata: metadata,
+            channels: wit_channels,
         }
     }
 }

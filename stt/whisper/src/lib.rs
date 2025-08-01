@@ -7,15 +7,16 @@ use itertools::Itertools;
 use golem_stt::error::Error;
 use golem_stt::golem::stt::types::{
     AudioFormat as WitAudioFormat, SttError as WitSttError, TimingInfo as WitTimingInfo,
-    TimingMarkType as WitTimingMarkType, TranscriptAlternative as WitTranscriptAlternative,
-    TranscriptionMetadata as WitTranscriptionMetadata, WordSegment as WitWordSegment,
+    TranscriptionChannel as WitTranscriptionChannel,
+    TranscriptionMetadata as WitTranscriptionMetadata,
+    TranscriptionResult as WitTranscriptionResult, TranscriptionSegment as WitTranscriptionSegment,
+    WordSegment as WitWordSegment,
 };
 
 use golem_stt::golem::stt::transcription::{
     FailedTranscription as WitFailedTranscription, Guest as TranscriptionGuest,
     MultiTranscriptionResult as WitMultiTranscriptionResult,
     TranscribeOptions as WitTranscribeOptions, TranscriptionRequest as WitTranscriptionRequest,
-    TranscriptionResult as WitTranscriptionResult,
 };
 
 use golem_stt::golem::stt::languages::{Guest as LanguageGuest, LanguageInfo};
@@ -205,34 +206,40 @@ impl From<TranscriptionResponse> for WitTranscriptionResult {
                 let metadata = WitTranscriptionMetadata {
                     duration_seconds: usage.seconds as f32,
                     audio_size_bytes: response.audio_size_bytes as u32,
-                    request_id: "".to_string(),
+                    request_id: "".to_string(), // TODO: fix this
                     model: Some("whisper-1".to_string()),
                     language,
                 };
 
-                let wit_word_segments: Vec<WitWordSegment> = words
+                let wit_word_segments: Vec<_> = words
                     .into_iter()
                     .map(|word| WitWordSegment {
                         text: word.word,
                         timing_info: Some(WitTimingInfo {
                             start_time_seconds: word.start as f32,
                             end_time_seconds: word.end as f32,
-                            mark_type: WitTimingMarkType::Word,
                         }),
                         confidence: None,
                         speaker_id: None,
                     })
                     .collect();
 
-                let alternative = WitTranscriptAlternative {
-                    text,
-                    confidence: 0.0,
+                let segment = WitTranscriptionSegment {
+                    transcript: text.clone(),
+                    timing_info: None,
+                    speaker_id: None,
                     words: wit_word_segments,
                 };
 
+                let channel = WitTranscriptionChannel {
+                    id: "0".to_string(),
+                    transcript: text,
+                    segments: vec![segment],
+                };
+
                 WitTranscriptionResult {
-                    metadata,
-                    alternatives: vec![alternative],
+                    transcript_metadata: metadata,
+                    channels: vec![channel],
                 }
             }
             WhisperTranscription::Segments {
@@ -240,7 +247,7 @@ impl From<TranscriptionResponse> for WitTranscriptionResult {
                 language,
                 duration: _,
                 text,
-                segments: _,
+                segments,
                 usage,
             } => {
                 let metadata = WitTranscriptionMetadata {
@@ -251,15 +258,28 @@ impl From<TranscriptionResponse> for WitTranscriptionResult {
                     language,
                 };
 
-                let alternative = WitTranscriptAlternative {
-                    text,
-                    confidence: 0.0,
-                    words: vec![],
+                let wit_segments: Vec<_> = segments
+                    .into_iter()
+                    .map(|segment| WitTranscriptionSegment {
+                        transcript: segment.text,
+                        timing_info: Some(WitTimingInfo {
+                            start_time_seconds: segment.start as f32,
+                            end_time_seconds: segment.end as f32,
+                        }),
+                        speaker_id: None,
+                        words: vec![],
+                    })
+                    .collect();
+
+                let channel = WitTranscriptionChannel {
+                    id: "0".to_string(),
+                    transcript: text,
+                    segments: wit_segments,
                 };
 
                 WitTranscriptionResult {
-                    metadata,
-                    alternatives: vec![alternative],
+                    transcript_metadata: metadata,
+                    channels: vec![channel],
                 }
             }
         }

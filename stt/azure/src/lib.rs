@@ -8,9 +8,12 @@ mod transcription;
 use golem_stt::error::Error as SttError;
 use golem_stt::golem::stt::types::{
     AudioFormat as WitAudioFormat, SttError as WitSttError, TimingInfo as WitTimingInfo,
-    TimingMarkType as WitTimingMarkType, TranscriptAlternative as WitTranscriptAlternative,
-    TranscriptionMetadata as WitTranscriptionMetadata, WordSegment as WitWordSegment,
+    TranscriptionChannel as WitTranscriptionChannel,
+    TranscriptionMetadata as WitTranscriptionMetadata,
+    TranscriptionResult as WitTranscriptionResult, TranscriptionSegment as WitTranscriptionSegment,
+    WordSegment as WitWordSegment,
 };
+
 use golem_stt::http::WstdHttpClient;
 use golem_stt::LOGGING_STATE;
 
@@ -18,7 +21,6 @@ use golem_stt::golem::stt::transcription::{
     FailedTranscription as WitFailedTranscription, Guest as TranscriptionGuest,
     MultiTranscriptionResult as WitMultiTranscriptionResult,
     TranscribeOptions as WitTranscribeOptions, TranscriptionRequest as WitTranscriptionRequest,
-    TranscriptionResult as WitTranscriptionResult,
 };
 
 use golem_stt::golem::stt::languages::{Guest as LanguageGuest, LanguageInfo};
@@ -228,54 +230,61 @@ impl From<TranscriptionResponse> for WitTranscriptionResult {
             language: response.locales.as_slice().join(", "),
         };
 
-        let alternatives: Vec<WitTranscriptAlternative> = azure_transcription
-            .phrases
+        let wit_channels: Vec<_> = azure_transcription
+            .combined_phrases
             .iter()
-            .map(|phrase| {
-                let words: Vec<WitWordSegment> = phrase
-                    .words
+            .map(|combined_phrase| {
+                let channel_id = combined_phrase.channel.unwrap_or(0);
+
+                // Filter phrases for this channel and convert to segments
+                let wit_segments: Vec<_> = azure_transcription
+                    .phrases
                     .iter()
-                    .map(|word| WitWordSegment {
-                        text: word.text.clone(),
-                        timing_info: Some(WitTimingInfo {
-                            start_time_seconds: word.offset_milliseconds as f32 / 1000.0,
-                            end_time_seconds: (word.offset_milliseconds
-                                + word.duration_milliseconds)
-                                as f32
-                                / 1000.0,
-                            mark_type: WitTimingMarkType::Word,
-                        }),
-                        confidence: Some(phrase.confidence as f32),
-                        speaker_id: phrase.speaker.map(|id| id.to_string()),
+                    .filter(|phrase| phrase.channel.unwrap_or(0) == channel_id)
+                    .map(|phrase| {
+                        let wit_words: Vec<_> = phrase
+                            .words
+                            .iter()
+                            .map(|word| WitWordSegment {
+                                text: word.text.clone(),
+                                timing_info: Some(WitTimingInfo {
+                                    start_time_seconds: word.offset_milliseconds as f32 / 1000.0,
+                                    end_time_seconds: (word.offset_milliseconds
+                                        + word.duration_milliseconds)
+                                        as f32
+                                        / 1000.0,
+                                }),
+                                confidence: Some(phrase.confidence as f32),
+                                speaker_id: phrase.speaker.map(|id| id.to_string()),
+                            })
+                            .collect();
+
+                        WitTranscriptionSegment {
+                            transcript: phrase.text.clone(),
+                            timing_info: Some(WitTimingInfo {
+                                start_time_seconds: phrase.offset_milliseconds as f32 / 1000.0,
+                                end_time_seconds: (phrase.offset_milliseconds
+                                    + phrase.duration_milliseconds)
+                                    as f32
+                                    / 1000.0,
+                            }),
+                            speaker_id: phrase.speaker.map(|id| id.to_string()),
+                            words: wit_words,
+                        }
                     })
                     .collect();
 
-                WitTranscriptAlternative {
-                    text: phrase.text.clone(),
-                    confidence: phrase.confidence as f32,
-                    words,
+                WitTranscriptionChannel {
+                    id: channel_id.to_string(),
+                    transcript: combined_phrase.text.clone(),
+                    segments: wit_segments,
                 }
             })
             .collect();
 
-        // If we have no phrase-level alternatives, create one from combined_phrases
-        let alternatives_with_fallback = if alternatives.is_empty() {
-            azure_transcription
-                .combined_phrases
-                .iter()
-                .map(|combined_phrase| WitTranscriptAlternative {
-                    text: combined_phrase.text.clone(),
-                    confidence: 1.0, // Combined phrases don't have confidence scores
-                    words: vec![],   // Combined phrases don't have word-level details
-                })
-                .collect()
-        } else {
-            alternatives
-        };
-
         WitTranscriptionResult {
-            metadata,
-            alternatives: alternatives_with_fallback,
+            transcript_metadata: metadata,
+            channels: wit_channels,
         }
     }
 }
