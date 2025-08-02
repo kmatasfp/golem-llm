@@ -1,4 +1,6 @@
+use async_lock::Mutex;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Duration, Utc};
@@ -85,6 +87,11 @@ pub struct GcpAuth<HC: HttpClient> {
     project_id: String,
     client_email: String,
     private_key: RsaPrivateKey,
+    token_data: Arc<Mutex<TokenData>>,
+}
+
+#[derive(Debug)]
+struct TokenData {
     access_token: Option<String>,
     token_expires_at: Option<DateTime<Utc>>,
 }
@@ -99,8 +106,10 @@ impl<HC: HttpClient> GcpAuth<HC> {
             project_id: serivce_account_key.project_id,
             client_email: serivce_account_key.client_email,
             private_key,
-            access_token: None,
-            token_expires_at: None,
+            token_data: Arc::new(Mutex::new(TokenData {
+                access_token: None,
+                token_expires_at: None,
+            })),
         })
     }
 
@@ -113,19 +122,38 @@ impl<HC: HttpClient> GcpAuth<HC> {
             .map_err(|e| Error::CryptoError(format!("Failed to parse private key: {}", e)))
     }
 
-    pub async fn get_access_token(&mut self) -> Result<String, Error> {
-        // Check if we have a valid token
-        if let (Some(token), Some(expires_at)) = (&self.access_token, &self.token_expires_at) {
+    pub async fn get_access_token(&self) -> Result<String, Error> {
+        // First, check if we have a valid token (quick read-only check)
+        {
+            let token_data = self.token_data.lock().await;
+
+            if let (Some(token), Some(expires_at)) =
+                (&token_data.access_token, &token_data.token_expires_at)
+            {
+                if Utc::now() < *expires_at - Duration::minutes(5) {
+                    return Ok(token.clone());
+                }
+            }
+        }
+
+        let mut token_data = self.token_data.lock().await;
+
+        // Double-check if another concurrent access refreshed token while we were waiting
+        if let (Some(token), Some(expires_at)) =
+            (&token_data.access_token, &token_data.token_expires_at)
+        {
             if Utc::now() < *expires_at - Duration::minutes(5) {
                 return Ok(token.clone());
             }
         }
 
+        // Refresh token
         let jwt = self.create_signed_jwt()?;
         let access_token = self.exchange_jwt_for_oauth_token(jwt).await?;
 
-        self.access_token = Some(access_token.clone());
-        self.token_expires_at = Some(Utc::now() + Duration::minutes(55)); // 5 min buffer
+        // Update token
+        token_data.access_token = Some(access_token.clone());
+        token_data.token_expires_at = Some(Utc::now() + Duration::minutes(55));
 
         Ok(access_token)
     }

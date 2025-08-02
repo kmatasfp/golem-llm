@@ -9,72 +9,12 @@ use http::{header::CONTENT_TYPE, Method, Request, StatusCode};
 use log::trace;
 use serde::{Deserialize, Serialize};
 
-use super::gcp_auth::GcpAuth;
+use super::{
+    gcp_auth::GcpAuth,
+    request::{AudioConfig, AudioFormat, TranscriptionConfig},
+};
 
 const BASE_URL: &str = "https://speech.googleapis.com/v2";
-
-#[derive(Debug, Clone)]
-pub enum AudioFormat {
-    LinearPcm,
-    Flac,
-    Mp3,
-    OggOpus,
-    WebmOpus,
-    AmrNb,
-    AmrWb,
-    Wav,
-    Mp4,
-    M4a,
-    Mov,
-}
-
-impl std::fmt::Display for AudioFormat {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AudioFormat::LinearPcm => write!(f, "LINEAR16"),
-            AudioFormat::Flac => write!(f, "FLAC"),
-            AudioFormat::Mp3 => write!(f, "MP3"),
-            AudioFormat::OggOpus => write!(f, "OGG_OPUS"),
-            AudioFormat::WebmOpus => write!(f, "WEBM_OPUS"),
-            AudioFormat::AmrNb => write!(f, "AMR"),
-            AudioFormat::AmrWb => write!(f, "AMR_WB"),
-            AudioFormat::Wav => write!(f, "WAV_LINEAR16"),
-            AudioFormat::Mp4 => write!(f, "MP4_AAC"),
-            AudioFormat::M4a => write!(f, "M4A_AAC"),
-            AudioFormat::Mov => write!(f, "MOV_AAC"),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct AudioConfig {
-    pub format: AudioFormat,
-    pub sample_rate_hertz: Option<u32>,
-    pub channels: Option<u8>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Phrase {
-    pub value: String,
-    pub boost: Option<f32>,
-}
-
-#[derive(Debug, Clone)]
-pub struct DiarizationConfig {
-    pub enabled: bool,
-    pub min_speaker_count: Option<i32>,
-    pub max_speaker_count: Option<i32>,
-}
-
-#[derive(Debug, Clone)]
-pub struct TranscriptionConfig {
-    pub language_codes: Option<Vec<String>>,
-    pub model: Option<String>,
-    pub enable_profanity_filter: bool,
-    pub diarization: Option<DiarizationConfig>,
-    pub enable_multi_channel: bool,
-    pub phrases: Vec<Phrase>,
-}
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -121,9 +61,9 @@ struct RecognitionFeatures {
     max_alternatives: Option<i32>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct GetBatchRecognizeOperationResponse {
+pub struct BatchRecognizeOperationResponse {
     pub name: String,
     pub metadata: Option<OperationMetadata>,
     pub done: bool,
@@ -131,14 +71,14 @@ pub struct GetBatchRecognizeOperationResponse {
     pub response: Option<BatchRecognizeResponse>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchRecognizeResponse {
     pub results: HashMap<String, BatchRecognizeFileResult>,
     pub total_billed_duration: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchRecognizeFileResult {
     pub error: Option<OperationError>,
@@ -146,14 +86,14 @@ pub struct BatchRecognizeFileResult {
     pub inline_result: Option<InlineResult>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchRecognizeResults {
     pub results: Vec<SpeechRecognitionResult>,
     pub metadata: Option<RecognitionResponseMetadata>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct InlineResult {
     pub transcript: BatchRecognizeResults,
@@ -221,7 +161,7 @@ struct RecognitionOutputConfig {
 #[serde(rename_all = "camelCase")]
 struct InlineOutputConfig {}
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -236,7 +176,7 @@ pub struct OperationMetadata {
     progress_percent: Option<i32>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationError {
     code: i32,
@@ -246,7 +186,7 @@ pub struct OperationError {
 }
 
 // Response structs
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RecognitionResponseMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -255,7 +195,7 @@ pub struct RecognitionResponseMetadata {
     pub total_billed_duration: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SpeechRecognitionResult {
     pub alternatives: Vec<SpeechRecognitionAlternative>,
@@ -267,7 +207,7 @@ pub struct SpeechRecognitionResult {
     pub language_code: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SpeechRecognitionAlternative {
     pub transcript: String,
@@ -277,7 +217,7 @@ pub struct SpeechRecognitionAlternative {
     pub words: Vec<WordInfo>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct WordInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -293,28 +233,28 @@ pub struct WordInfo {
 
 pub trait SpeechToTextService {
     async fn start_batch_recognize(
-        &mut self,
+        &self,
         operation_name: &str,
         audio_gcs_uris: Vec<String>,
         audio_config: &AudioConfig,
         transcription_config: Option<&TranscriptionConfig>,
-    ) -> Result<GetBatchRecognizeOperationResponse, SttError>;
+    ) -> Result<BatchRecognizeOperationResponse, SttError>;
 
     async fn get_batch_recognize(
-        &mut self,
+        &self,
         request_id: &str,
         operation_name: &str,
-    ) -> Result<GetBatchRecognizeOperationResponse, SttError>;
+    ) -> Result<BatchRecognizeOperationResponse, SttError>;
 
     async fn wait_for_batch_recognize_completion(
-        &mut self,
+        &self,
         request_id: &str,
         operation_name: &str,
         max_wait_time: Duration,
-    ) -> Result<GetBatchRecognizeOperationResponse, SttError>;
+    ) -> Result<BatchRecognizeOperationResponse, SttError>;
 
     async fn delete_batch_recognize(
-        &mut self,
+        &self,
         request_id: &str,
         operation_name: &str,
     ) -> Result<(), SttError>;
@@ -341,8 +281,9 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextClient<HC, RT> {
             runtime,
         }
     }
+
     async fn make_authenticated_request<T>(
-        &mut self,
+        &self,
         uri: &str,
         request_id: &str,
         method: Method,
@@ -433,12 +374,12 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextClient<HC, RT> {
 
 impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextService for SpeechToTextClient<HC, RT> {
     async fn start_batch_recognize(
-        &mut self,
+        &self,
         request_id: &str,
         audio_gcs_uris: Vec<String>,
         audio_config: &AudioConfig,
         transcription_config: Option<&TranscriptionConfig>,
-    ) -> Result<GetBatchRecognizeOperationResponse, SttError> {
+    ) -> Result<BatchRecognizeOperationResponse, SttError> {
         let (auto_decoding_config, explicit_decoding_config) = match audio_config.format {
             AudioFormat::Wav
             | AudioFormat::Flac
@@ -574,10 +515,10 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextService for SpeechToTextClien
     }
 
     async fn get_batch_recognize(
-        &mut self,
+        &self,
         request_id: &str,
         operation_name: &str,
-    ) -> Result<GetBatchRecognizeOperationResponse, SttError> {
+    ) -> Result<BatchRecognizeOperationResponse, SttError> {
         let uri = format!("{}/{}", BASE_URL, operation_name);
 
         self.make_authenticated_request(&uri, &request_id, Method::GET, None)
@@ -585,11 +526,11 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextService for SpeechToTextClien
     }
 
     async fn wait_for_batch_recognize_completion(
-        &mut self,
+        &self,
         request_id: &str,
         operation_name: &str,
         max_wait_time: Duration,
-    ) -> Result<GetBatchRecognizeOperationResponse, SttError> {
+    ) -> Result<BatchRecognizeOperationResponse, SttError> {
         let start_time = std::time::Instant::now();
         let poll_interval = Duration::from_secs(10);
 
@@ -619,7 +560,7 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextService for SpeechToTextClien
     }
 
     async fn delete_batch_recognize(
-        &mut self,
+        &self,
         request_id: &str,
         operation_name: &str,
     ) -> Result<(), SttError> {
@@ -643,7 +584,10 @@ mod tests {
     use http::{Response, StatusCode};
 
     use super::*;
-    use crate::transcription::gcp_auth::{GcpAuth, ServiceAccountKey};
+    use crate::transcription::{
+        gcp_auth::{GcpAuth, ServiceAccountKey},
+        request::{DiarizationConfig, Phrase},
+    };
 
     struct MockHttpClient {
         pub responses: RefCell<VecDeque<Result<Response<Vec<u8>>, golem_stt::http::Error>>>,

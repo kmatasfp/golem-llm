@@ -157,6 +157,134 @@ impl<S3: S3Service, TC: TranscribeService> TranscribeApi<S3, TC> {
             transcribe_client,
         }
     }
+
+    async fn upload_audio_to_s3(
+        &self,
+        request_id: &str,
+        object_key: &str,
+        audio_bytes: Vec<u8>,
+    ) -> Result<(), Error> {
+        self.s3_client
+            .put_object(&request_id, &self.bucket_name, object_key, audio_bytes)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn create_vocabulary<'a>(
+        &self,
+        request_id: &'a str,
+        language_code: &str,
+        vocabulary: Vec<String>,
+    ) -> Result<&'a str, Error> {
+        let res = self
+            .transcribe_client
+            .create_vocabulary(
+                request_id.to_string(),
+                language_code.to_string(),
+                vocabulary,
+            )
+            .await?;
+
+        if res.vocabulary_state == "FAILED" {
+            return Err(Error::APIBadRequest {
+                request_id: request_id.to_string(),
+                provider_error: format!(
+                    "Vocabulary creation failed: {}",
+                    res.failure_reason
+                        .unwrap_or_else(|| "Unknown error".to_string())
+                ),
+            });
+        }
+
+        if res.vocabulary_state == "PENDING" {
+            self.transcribe_client
+                .wait_for_vocabulary_ready(&request_id, Duration::from_secs(300))
+                .await?;
+        }
+
+        Ok(request_id)
+    }
+
+    async fn run_transcription_job(
+        &self,
+        request_id: &str,
+        object_key: &str,
+        audio_config: &AudioConfig,
+        transcription_config: Option<&TranscriptionConfig>,
+        vocabulary_name: Option<&str>,
+    ) -> Result<TranscriptionJob, Error> {
+        let bucket = &self.bucket_name;
+        let res = self
+            .transcribe_client
+            .start_transcription_job(
+                &request_id,
+                &format!("s3://{}/{object_key}", &bucket),
+                audio_config,
+                transcription_config,
+                vocabulary_name,
+            )
+            .await?;
+
+        if res.transcription_job.transcription_job_status == "FAILED" {
+            log::error!("transcription job {} failed", request_id);
+            return Err(Error::APIBadRequest {
+                request_id: request_id.to_string(),
+                provider_error: format!(
+                    "Transcription job creation failed: {}",
+                    res.transcription_job
+                        .failure_reason
+                        .unwrap_or_else(|| "Unknown error".to_string())
+                ),
+            });
+        }
+
+        trace!("waiting for {} to complete", request_id.to_string());
+        let completed_transcription_job = if res.transcription_job.transcription_job_status
+            == "IN_PROGRESS"
+        {
+            self.transcribe_client
+                .wait_for_transcription_job_completion(&request_id, Duration::from_secs(3600 * 6))
+                .await?
+                .transcription_job
+        } else {
+            res.transcription_job
+        };
+
+        Ok(completed_transcription_job)
+    }
+
+    async fn download_transcription(
+        &self,
+        request_id: &str,
+        completed_transcription_job: &TranscriptionJob,
+    ) -> Result<TranscribeOutput, Error> {
+        trace!(
+            "retrieveing transcription job {} result",
+            request_id.to_string()
+        );
+        if let Some(ref transcript) = completed_transcription_job.transcript {
+            if let Some(ref transcript_uri) = transcript.transcript_file_uri {
+                let transcribe_output = self
+                    .transcribe_client
+                    .download_transcript_json(request_id.as_ref(), &transcript_uri)
+                    .await?;
+
+                Ok(transcribe_output)
+            } else {
+                Err(golem_stt::error::Error::APIUnknown {
+                    request_id: request_id.to_string(),
+                    provider_error: "Transcription completed but no transcript file URI found"
+                        .to_string(),
+                })
+            }
+        } else {
+            Err(golem_stt::error::Error::APIUnknown {
+                request_id: request_id.to_string(),
+                provider_error: "Transcription completed but no transcript found".to_string(),
+            })
+        }
+    }
 }
 
 impl<S3: S3Service, TC: TranscribeService>
@@ -167,136 +295,6 @@ impl<S3: S3Service, TC: TranscribeService>
         &self,
         request: TranscriptionRequest,
     ) -> Result<TranscriptionResponse, Error> {
-        async fn upload_audio_to_s3(
-            api: &TranscribeApi<impl S3Service, impl TranscribeService>,
-            request_id: &str,
-            object_key: &str,
-            audio_bytes: Vec<u8>,
-        ) -> Result<(), Error> {
-            api.s3_client
-                .put_object(&request_id, &api.bucket_name, object_key, audio_bytes)
-                .await?;
-
-            Ok(())
-        }
-
-        async fn create_vocabulary<'a>(
-            api: &TranscribeApi<impl S3Service, impl TranscribeService>,
-            request_id: &'a str,
-            language_code: &str,
-            vocabulary: Vec<String>,
-        ) -> Result<&'a str, Error> {
-            let res = api
-                .transcribe_client
-                .create_vocabulary(
-                    request_id.to_string(),
-                    language_code.to_string(),
-                    vocabulary,
-                )
-                .await?;
-
-            if res.vocabulary_state == "FAILED" {
-                return Err(Error::APIBadRequest {
-                    request_id: request_id.to_string(),
-                    provider_error: format!(
-                        "Vocabulary creation failed: {}",
-                        res.failure_reason
-                            .unwrap_or_else(|| "Unknown error".to_string())
-                    ),
-                });
-            }
-
-            if res.vocabulary_state == "PENDING" {
-                api.transcribe_client
-                    .wait_for_vocabulary_ready(&request_id, Duration::from_secs(300))
-                    .await?;
-            }
-
-            Ok(request_id)
-        }
-
-        async fn run_transcription_job(
-            api: &TranscribeApi<impl S3Service, impl TranscribeService>,
-            request_id: &str,
-            object_key: &str,
-            audio_config: &AudioConfig,
-            transcription_config: Option<&TranscriptionConfig>,
-            vocabulary_name: Option<&str>,
-        ) -> Result<TranscriptionJob, Error> {
-            let bucket = &api.bucket_name;
-            let res = api
-                .transcribe_client
-                .start_transcription_job(
-                    &request_id,
-                    &format!("s3://{}/{object_key}", &bucket),
-                    audio_config,
-                    transcription_config,
-                    vocabulary_name,
-                )
-                .await?;
-
-            if res.transcription_job.transcription_job_status == "FAILED" {
-                log::error!("transcription job {} failed", request_id);
-                return Err(Error::APIBadRequest {
-                    request_id: request_id.to_string(),
-                    provider_error: format!(
-                        "Transcription job creation failed: {}",
-                        res.transcription_job
-                            .failure_reason
-                            .unwrap_or_else(|| "Unknown error".to_string())
-                    ),
-                });
-            }
-
-            trace!("waiting for {} to complete", request_id.to_string());
-            let completed_transcription_job =
-                if res.transcription_job.transcription_job_status == "IN_PROGRESS" {
-                    api.transcribe_client
-                        .wait_for_transcription_job_completion(
-                            &request_id,
-                            Duration::from_secs(3600 * 6),
-                        )
-                        .await?
-                        .transcription_job
-                } else {
-                    res.transcription_job
-                };
-
-            Ok(completed_transcription_job)
-        }
-
-        async fn download_transcription(
-            api: &TranscribeApi<impl S3Service, impl TranscribeService>,
-            request_id: &str,
-            completed_transcription_job: &TranscriptionJob,
-        ) -> Result<TranscribeOutput, Error> {
-            trace!(
-                "retrieveing transcription job {} result",
-                request_id.to_string()
-            );
-            if let Some(ref transcript) = completed_transcription_job.transcript {
-                if let Some(ref transcript_uri) = transcript.transcript_file_uri {
-                    let transcribe_output = api
-                        .transcribe_client
-                        .download_transcript_json(request_id.as_ref(), &transcript_uri)
-                        .await?;
-
-                    Ok(transcribe_output)
-                } else {
-                    Err(golem_stt::error::Error::APIUnknown {
-                        request_id: request_id.to_string(),
-                        provider_error: "Transcription completed but no transcript file URI found"
-                            .to_string(),
-                    })
-                }
-            } else {
-                Err(golem_stt::error::Error::APIUnknown {
-                    request_id: request_id.to_string(),
-                    provider_error: "Transcription completed but no transcript found".to_string(),
-                })
-            }
-        }
-
         trace!("Sending request to AWS Transcribe API: {request:?}");
 
         let request_id: Rc<str> = Rc::from(request.request_id);
@@ -389,21 +387,37 @@ impl<S3: S3Service, TC: TranscribeService>
                     }
                 }
 
-                upload_audio_to_s3(&self, &request_id, &object_key, request.audio).await?;
+                self.upload_audio_to_s3(&request_id, &object_key, request.audio)
+                    .await?;
 
                 let vocabulary_name = if let Some(ref config) = request.transcription_config {
                     if !config.vocabulary.is_empty() {
                         let language_code = config.language.as_ref().unwrap(); // Safe due to validation above
 
-                        let vocabulary_name = create_vocabulary(
-                            &self,
-                            &request_id,
-                            language_code,
-                            config.vocabulary.clone(),
-                        )
-                        .await?;
+                        let vocabulary_name = self
+                            .create_vocabulary(
+                                &request_id,
+                                language_code,
+                                config.vocabulary.clone(),
+                            )
+                            .await;
 
-                        Some(vocabulary_name)
+                        match vocabulary_name {
+                            Ok(name) => Some(name),
+                            Err(err) => {
+                                match self
+                                    .s3_client
+                                    .delete_object(&request_id, &self.bucket_name, &object_key)
+                                    .await
+                                {
+                                    Ok(_) => (),
+                                    Err(e) => {
+                                        log::error!("Failed to delete object: {}", e);
+                                    }
+                                }
+                                return Err(err);
+                            }
+                        }
                     } else {
                         None
                     }
@@ -411,40 +425,43 @@ impl<S3: S3Service, TC: TranscribeService>
                     None
                 };
 
-                run_transcription_job(
-                    &self,
-                    &request_id,
-                    &object_key,
-                    &request.audio_config,
-                    request.transcription_config.as_ref(),
-                    vocabulary_name,
-                )
-                .await?
+                let completed_transcription_job = self
+                    .run_transcription_job(
+                        &request_id,
+                        &object_key,
+                        &request.audio_config,
+                        request.transcription_config.as_ref(),
+                        vocabulary_name,
+                    )
+                    .await;
+
+                if vocabulary_size > 0 {
+                    match self.transcribe_client.delete_vocabulary(&request_id).await {
+                        Ok(_) => (),
+                        Err(e) => {
+                            log::error!("Failed to delete vocabulary: {}", e);
+                        }
+                    }
+                }
+
+                match self
+                    .s3_client
+                    .delete_object(&request_id, &self.bucket_name, &object_key)
+                    .await
+                {
+                    Ok(_) => (),
+                    Err(e) => {
+                        log::error!("Failed to delete object: {}", e);
+                    }
+                }
+
+                completed_transcription_job?
             }
         };
 
-        let aws_transcription =
-            download_transcription(&self, &request_id, &completed_transcription_job).await?;
-
-        if vocabulary_size > 0 {
-            match self.transcribe_client.delete_vocabulary(&request_id).await {
-                Ok(_) => (),
-                Err(e) => {
-                    log::error!("Failed to delete vocabulary: {}", e);
-                }
-            }
-        }
-
-        match self
-            .s3_client
-            .delete_object(&request_id, &self.bucket_name, &object_key)
-            .await
-        {
-            Ok(_) => (),
-            Err(e) => {
-                log::error!("Failed to delete object: {}", e);
-            }
-        }
+        let aws_transcription = self
+            .download_transcription(&request_id, &completed_transcription_job)
+            .await?;
 
         Ok(TranscriptionResponse {
             request_id: request_id.to_string(),
@@ -1650,6 +1667,9 @@ mod tests {
         } else {
             panic!("Expected APIBadRequest error");
         }
+
+        let captured_s3_deletes = api.s3_client.get_captured_delete_operations();
+        assert_eq!(captured_s3_deletes.len(), 1);
     }
 
     #[wstd::test]
@@ -1695,6 +1715,9 @@ mod tests {
         } else {
             panic!("Expected APIBadRequest error");
         }
+
+        let captured_s3_deletes = api.s3_client.get_captured_delete_operations();
+        assert_eq!(captured_s3_deletes.len(), 1);
     }
 
     #[wstd::test]

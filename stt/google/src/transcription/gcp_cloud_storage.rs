@@ -8,7 +8,7 @@ use super::gcp_auth::GcpAuth;
 #[allow(async_fn_in_trait)]
 pub trait CloudStorageService {
     async fn put_object(
-        &mut self,
+        &self,
         request_id: &str,
         bucket: &str,
         object_name: &str,
@@ -16,7 +16,7 @@ pub trait CloudStorageService {
     ) -> Result<(), SttError>;
 
     async fn delete_object(
-        &mut self,
+        &self,
         request_id: &str,
         bucket: &str,
         object_name: &str,
@@ -40,7 +40,7 @@ impl<HC: HttpClient> CloudStorageClient<HC> {
 
 impl<HC: HttpClient> CloudStorageService for CloudStorageClient<HC> {
     async fn put_object(
-        &mut self,
+        &self,
         request_id: &str,
         bucket: &str,
         object_name: &str,
@@ -133,7 +133,7 @@ impl<HC: HttpClient> CloudStorageService for CloudStorageClient<HC> {
     }
 
     async fn delete_object(
-        &mut self,
+        &self,
         request_id: &str,
         bucket: &str,
         object_name: &str,
