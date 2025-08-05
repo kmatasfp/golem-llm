@@ -93,7 +93,6 @@ impl GuestSchemaManager for SchemaManager {
     }
 
     fn get_edge_label_schema(&self, label: String) -> Result<Option<EdgeLabelSchema>, GraphError> {
-        // JanusGraph doesn't have getEdgeLabels() method, so we need to check directly
         let script = format!("mgmt.getEdgeLabel('{label}') != null");
         let result = self.execute_management_query(&script)?;
 
@@ -134,8 +133,6 @@ impl GuestSchemaManager for SchemaManager {
     }
 
     fn list_edge_labels(&self) -> Result<Vec<String>, GraphError> {
-        // JanusGraph doesn't have getEdgeLabels() method, so return empty list or use alternative approach
-        // For now, we'll return an error indicating this is not supported
         Err(GraphError::UnsupportedOperation(
             "Listing edge labels is not supported in JanusGraph management API".to_string(),
         ))
@@ -291,7 +288,7 @@ impl SchemaManager {
         for _attempt in 0..3 {
             match self.graph.api.execute(&full_script, None) {
                 Ok(response) => {
-                    let result = response["result"]["data"].clone();
+                    let result = response.clone();
                     return Ok(result);
                 }
                 Err(GraphError::TransactionFailed(_)) => {

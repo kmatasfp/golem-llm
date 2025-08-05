@@ -37,30 +37,27 @@ impl GuestGraph for Graph {
         let edge_count_res = self.api.execute("g.E().count()", None)?;
 
         fn extract_count(val: &serde_json::Value) -> Option<u64> {
-            val.get("result")
-                .and_then(|r| r.get("data"))
-                .and_then(|d| {
-                    if let Some(list) = d.get("@value").and_then(|v| v.as_array()) {
-                        list.first()
-                    } else if let Some(arr) = d.as_array() {
-                        arr.first()
+            // The client now returns the data directly
+            if let Some(list) = val.get("@value").and_then(|v| v.as_array()) {
+                list.first()
+            } else if let Some(arr) = val.as_array() {
+                arr.first()
+            } else {
+                Some(val)
+            }
+            .and_then(|v| {
+                if let Some(n) = v.as_u64() {
+                    Some(n)
+                } else if let Some(obj) = v.as_object() {
+                    if let Some(val) = obj.get("@value") {
+                        val.as_u64()
                     } else {
                         None
                     }
-                })
-                .and_then(|v| {
-                    if let Some(n) = v.as_u64() {
-                        Some(n)
-                    } else if let Some(obj) = v.as_object() {
-                        if let Some(val) = obj.get("@value") {
-                            val.as_u64()
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                })
+                } else {
+                    None
+                }
+            })
         }
 
         let vertex_count = extract_count(&vertex_count_res);

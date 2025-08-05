@@ -1333,6 +1333,7 @@ dependencies = [
  "golem-rust",
  "log",
  "reqwest",
+ "serde",
  "serde_json",
  "uuid",
  "wit-bindgen-rt 0.40.0",

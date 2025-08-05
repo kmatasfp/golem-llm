@@ -48,8 +48,7 @@ impl ExtendedGuest for GraphJanusGraphComponent {
         let port = with_config_key(config, "JANUSGRAPH_PORT")
             .and_then(|p| p.parse().ok())
             .or(config.port)
-            .unwrap_or(8182); // Default Gremlin Server port
-
+            .unwrap_or(8182); 
         let username =
             with_config_key(config, "JANUSGRAPH_USER").or_else(|| config.username.clone());
 

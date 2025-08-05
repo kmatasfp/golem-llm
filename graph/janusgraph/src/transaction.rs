@@ -43,19 +43,6 @@ fn graphson_map_to_object(data: &Value) -> Result<Value, GraphError> {
     Ok(Value::Object(obj))
 }
 
-fn unwrap_list(data: &Value) -> Result<&Vec<Value>, GraphError> {
-    data.get("@value")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| {
-            GraphError::InternalError("Expected `@value: List` in Gremlin response".into())
-        })
-}
-fn first_list_item(data: &Value) -> Result<&Value, GraphError> {
-    unwrap_list(data)?
-        .first()
-        .ok_or_else(|| GraphError::InternalError("Empty result list from Gremlin".into()))
-}
-
 impl GuestTransaction for Transaction {
     fn commit(&self) -> Result<(), GraphError> {
         {
@@ -130,7 +117,26 @@ impl GuestTransaction for Transaction {
         gremlin.push_str(".elementMap()");
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
-        let element = first_list_item(&response["result"]["data"])?;
+        
+        let element = if let Some(_graphson_obj) = response.as_object() {
+            if response.get("@type") == Some(&json!("g:List")) {
+                let arr = response.get("@value")
+                    .and_then(|v| v.as_array())
+                    .ok_or_else(|| GraphError::InternalError("Expected @value array in GraphSON List".to_string()))?;
+                arr.first()
+                    .ok_or_else(|| GraphError::InternalError("Empty result from vertex creation".to_string()))?
+            } else {
+                &response
+            }
+        } else if let Some(arr) = response.as_array() {
+            arr.first()
+                .ok_or_else(|| GraphError::InternalError("Empty result from vertex creation".to_string()))?
+        } else {
+            return Err(GraphError::InternalError(format!(
+                "Unexpected response format from vertex creation: {:#}", response
+            )));
+        };
+        
         let obj = graphson_map_to_object(element)?;
 
         helpers::parse_vertex_from_gremlin(&obj)
@@ -151,10 +157,9 @@ impl GuestTransaction for Transaction {
 
         let resp = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
-        let data = &resp["result"]["data"];
-        let list: Vec<Value> = if let Some(arr) = data.as_array() {
+        let list: Vec<Value> = if let Some(arr) = resp.as_array() {
             arr.clone()
-        } else if let Some(inner) = data.get("@value").and_then(Value::as_array) {
+        } else if let Some(inner) = resp.get("@value").and_then(Value::as_array) {
             inner.clone()
         } else {
             vec![]
@@ -217,12 +222,11 @@ impl GuestTransaction for Transaction {
 
         let resp = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
-        let data = &resp["result"]["data"];
-        let maybe_row = data
+        let maybe_row = resp
             .as_array()
             .and_then(|arr| arr.first().cloned())
             .or_else(|| {
-                data.get("@value")
+                resp.get("@value")
                     .and_then(Value::as_array)
                     .and_then(|arr| arr.first().cloned())
             });
@@ -303,11 +307,10 @@ impl GuestTransaction for Transaction {
         gremlin.push_str(".elementMap()");
 
         let resp = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
-        let data = &resp["result"]["data"];
-
-        let row = if let Some(arr) = data.as_array() {
+        
+        let row = if let Some(arr) = resp.as_array() {
             arr.first()
-        } else if let Some(inner) = data.get("@value").and_then(Value::as_array) {
+        } else if let Some(inner) = resp.get("@value").and_then(Value::as_array) {
             inner.first()
         } else {
             None
@@ -466,10 +469,9 @@ impl GuestTransaction for Transaction {
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
         trace!("[DEBUG][find_vertices] Raw Gremlin response: {response:?}");
 
-        let data = &response["result"]["data"];
-        let result_data = if let Some(arr) = data.as_array() {
+        let result_data = if let Some(arr) = response.as_array() {
             arr.clone()
-        } else if let Some(inner) = data.get("@value").and_then(Value::as_array) {
+        } else if let Some(inner) = response.get("@value").and_then(Value::as_array) {
             inner.clone()
         } else {
             return Err(GraphError::InternalError(
@@ -532,11 +534,10 @@ impl GuestTransaction for Transaction {
         let resp = self
             .api
             .execute(&gremlin, Some(Value::Object(bindings.clone())))?;
-        let data = &resp["result"]["data"];
-
-        let row = if let Some(arr) = data.as_array() {
+        
+        let row = if let Some(arr) = resp.as_array() {
             arr.first().cloned()
-        } else if let Some(inner) = data.get("@value").and_then(Value::as_array) {
+        } else if let Some(inner) = resp.get("@value").and_then(Value::as_array) {
             inner.first().cloned()
         } else {
             None
@@ -612,12 +613,11 @@ impl GuestTransaction for Transaction {
 
         let resp = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
-        let data = &resp["result"]["data"];
-        let maybe_row = data
+        let maybe_row = resp
             .as_array()
             .and_then(|arr| arr.first().cloned())
             .or_else(|| {
-                data.get("@value")
+                resp.get("@value")
                     .and_then(Value::as_array)
                     .and_then(|arr| arr.first().cloned())
             });
@@ -727,12 +727,11 @@ impl GuestTransaction for Transaction {
 
         let resp = self.api.execute(gremlin_fetch, Some(fetch_bindings))?;
 
-        let data = &resp["result"]["data"];
-        let row = data
+        let row = resp
             .as_array()
             .and_then(|arr| arr.first().cloned())
             .or_else(|| {
-                data.get("@value")
+                resp.get("@value")
                     .and_then(Value::as_array)
                     .and_then(|a| a.first().cloned())
             })
@@ -831,10 +830,9 @@ impl GuestTransaction for Transaction {
 
         let resp = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
-        let data = &resp["result"]["data"];
-        let row = if let Some(arr) = data.as_array() {
+        let row = if let Some(arr) = resp.as_array() {
             arr.first().cloned()
-        } else if let Some(inner) = data.get("@value").and_then(Value::as_array) {
+        } else if let Some(inner) = resp.get("@value").and_then(Value::as_array) {
             inner.first().cloned()
         } else {
             return Err(GraphError::ElementNotFound(id_clone.clone()));
@@ -972,7 +970,7 @@ impl GuestTransaction for Transaction {
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
-        let result_data = response["result"]["data"].as_array().ok_or_else(|| {
+        let result_data = response.as_array().ok_or_else(|| {
             GraphError::InternalError("Invalid response from Gremlin for find_edges".to_string())
         })?;
 
@@ -1031,10 +1029,9 @@ impl GuestTransaction for Transaction {
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
-        let data = &response["result"]["data"];
-        let result_data = if let Some(arr) = data.as_array() {
+        let result_data = if let Some(arr) = response.as_array() {
             arr.clone()
-        } else if let Some(inner) = data.get("@value").and_then(Value::as_array) {
+        } else if let Some(inner) = response.get("@value").and_then(Value::as_array) {
             inner.clone()
         } else {
             return Err(GraphError::InternalError(
@@ -1097,10 +1094,9 @@ impl GuestTransaction for Transaction {
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
-        let data = &response["result"]["data"];
-        let result_data = if let Some(arr) = data.as_array() {
+        let result_data = if let Some(arr) = response.as_array() {
             arr.clone()
-        } else if let Some(inner) = data.get("@value").and_then(Value::as_array) {
+        } else if let Some(inner) = response.get("@value").and_then(Value::as_array) {
             inner.clone()
         } else {
             return Err(GraphError::InternalError(
@@ -1150,10 +1146,9 @@ impl GuestTransaction for Transaction {
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
-        let data = &response["result"]["data"];
-        let result_data = if let Some(arr) = data.as_array() {
+        let result_data = if let Some(arr) = response.as_array() {
             arr.clone()
-        } else if let Some(inner) = data.get("@value").and_then(Value::as_array) {
+        } else if let Some(inner) = response.get("@value").and_then(Value::as_array) {
             inner.clone()
         } else {
             return Err(GraphError::InternalError(
@@ -1226,10 +1221,9 @@ impl GuestTransaction for Transaction {
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
-        let data = &response["result"]["data"];
-        let result_data = if let Some(arr) = data.as_array() {
+        let result_data = if let Some(arr) = response.as_array() {
             arr.clone()
-        } else if let Some(inner) = data.get("@value").and_then(Value::as_array) {
+        } else if let Some(inner) = response.get("@value").and_then(Value::as_array) {
             inner.clone()
         } else {
             return Err(GraphError::InternalError(
@@ -1280,7 +1274,7 @@ impl GuestTransaction for Transaction {
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
-        let result_data = response["result"]["data"]
+        let result_data = response
             .as_array()
             .and_then(|arr| arr.first())
             .ok_or_else(|| {
@@ -1350,7 +1344,8 @@ impl GuestTransaction for Transaction {
             format!("{gremlin_match}.fold().coalesce(unfold(), {gremlin_create}).elementMap()");
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
-        let result_data = response["result"]["data"]
+        
+        let result_data = response
             .as_array()
             .and_then(|arr| arr.first())
             .ok_or_else(|| {

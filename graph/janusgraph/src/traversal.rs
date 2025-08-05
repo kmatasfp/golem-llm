@@ -64,14 +64,14 @@ impl Transaction {
 
         let resp = self.api.execute(gremlin, Some(Value::Object(bindings)))?;
 
-        let data_array = if let Some(data) = resp["result"]["data"].as_object() {
+        let data_array = if let Some(data) = resp.as_object() {
             if data.get("@type") == Some(&Value::String("g:List".to_string())) {
                 data.get("@value").and_then(|v| v.as_array())
             } else {
                 None
             }
         } else {
-            resp["result"]["data"].as_array()
+            resp.as_array()
         };
 
         if let Some(arr) = data_array {
@@ -120,14 +120,14 @@ impl Transaction {
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
-        let data_array = if let Some(data) = response["result"]["data"].as_object() {
+        let data_array = if let Some(data) = response.as_object() {
             if data.get("@type") == Some(&Value::String("g:List".to_string())) {
                 data.get("@value").and_then(|v| v.as_array())
             } else {
                 None
             }
         } else {
-            response["result"]["data"].as_array()
+            response.as_array()
         };
 
         if let Some(arr) = data_array {
@@ -160,14 +160,14 @@ impl Transaction {
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
-        let data_array = if let Some(data) = response["result"]["data"].as_object() {
+        let data_array = if let Some(data) = response.as_object() {
             if data.get("@type") == Some(&Value::String("g:List".to_string())) {
                 data.get("@value").and_then(|v| v.as_array())
             } else {
                 None
             }
         } else {
-            response["result"]["data"].as_array()
+            response.as_array()
         };
 
         if let Some(arr) = data_array {
@@ -244,14 +244,14 @@ impl Transaction {
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
-        let data_array = if let Some(data) = response["result"]["data"].as_object() {
+        let data_array = if let Some(data) = response.as_object() {
             if data.get("@type") == Some(&Value::String("g:List".to_string())) {
                 data.get("@value").and_then(|v| v.as_array())
             } else {
                 None
             }
         } else {
-            response["result"]["data"].as_array()
+            response.as_array()
         };
 
         if let Some(arr) = data_array {
