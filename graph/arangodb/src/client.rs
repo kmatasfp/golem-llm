@@ -91,18 +91,13 @@ impl ArangoDbApi {
                 })
             }
         } else {
-            let error_body: Value = response.json().map_err(|e| {
+            let error_body: ArangoErrorResponse = response.json().map_err(|e| {
                 GraphError::InternalError(format!("Failed to read error response: {e}"))
             })?;
 
-            let error_msg = error_body
-                .get("errorMessage")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Unknown error");
+            let error_msg = error_body.error_message.as_deref().unwrap_or("Unknown error");
 
-            let error_num = error_body.get("errorNum").and_then(|v| v.as_i64());
-
-            let mut error = if let Some(code) = error_num {
+            let mut error = if let Some(code) = error_body.error_num {
                 from_arangodb_error_code(code, error_msg)
             } else {
                 map_arangodb_http_status(status_code, error_msg, &error_body)
@@ -130,15 +125,8 @@ impl ArangoDbApi {
         };
 
         let body = json!({ "collections": collections });
-        let result: Value = self.execute(Method::POST, "/_api/transaction/begin", Some(&body))?;
-
-        result
-            .get("id")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .ok_or_else(|| {
-                GraphError::InternalError("Missing transaction ID in response".to_string())
-            })
+        let result: TransactionBeginResponse = self.execute(Method::POST, "/_api/transaction/begin", Some(&body))?;
+        Ok(result.id)
     }
 
     #[allow(dead_code)]
@@ -157,15 +145,8 @@ impl ArangoDbApi {
         };
 
         let body = json!({ "collections": collections_spec });
-        let result: Value = self.execute(Method::POST, "/_api/transaction/begin", Some(&body))?;
-
-        result
-            .get("id")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .ok_or_else(|| {
-                GraphError::InternalError("Missing transaction ID in response".to_string())
-            })
+        let result: TransactionBeginResponse = self.execute(Method::POST, "/_api/transaction/begin", Some(&body))?;
+        Ok(result.id)
     }
 
     pub fn commit_transaction(&self, transaction_id: &str) -> Result<(), GraphError> {
@@ -216,7 +197,7 @@ impl ArangoDbApi {
     fn enhance_arangodb_error(
         &self,
         error: GraphError,
-        error_body: &serde_json::Value,
+        error_body: &ArangoErrorResponse,
     ) -> GraphError {
         match &error {
             GraphError::InternalError(_)
@@ -241,30 +222,24 @@ impl ArangoDbApi {
         }
     }
 
-    fn is_arangodb_document_not_found_error(&self, error_body: &serde_json::Value) -> bool {
-        if let Some(error_num) = error_body.get("errorNum").and_then(|v| v.as_i64()) {
-            return error_num == 1202;
-        }
-        false
+    fn is_arangodb_document_not_found_error(&self, error_body: &ArangoErrorResponse) -> bool {
+        error_body.error_num == Some(1202)
     }
 
-    fn is_arangodb_unique_constraint_error(&self, error_body: &serde_json::Value) -> bool {
-        if let Some(error_num) = error_body.get("errorNum").and_then(|v| v.as_i64()) {
-            return error_num == 1210;
-        }
-        false
+    fn is_arangodb_unique_constraint_error(&self, error_body: &ArangoErrorResponse) -> bool {
+        error_body.error_num == Some(1210)
     }
 
-    fn extract_arangodb_element_id(&self, error_body: &serde_json::Value) -> Option<ElementId> {
-        if let Some(doc_id) = error_body.get("_id").and_then(|v| v.as_str()) {
-            return Some(ElementId::StringValue(doc_id.to_string()));
+    fn extract_arangodb_element_id(&self, error_body: &ArangoErrorResponse) -> Option<ElementId> {
+        if let Some(doc_id) = &error_body.id {
+            return Some(ElementId::StringValue(doc_id.clone()));
         }
 
-        if let Some(doc_key) = error_body.get("_key").and_then(|v| v.as_str()) {
-            return Some(ElementId::StringValue(doc_key.to_string()));
+        if let Some(doc_key) = &error_body.key {
+            return Some(ElementId::StringValue(doc_key.clone()));
         }
 
-        if let Some(error_msg) = error_body.get("errorMessage").and_then(|v| v.as_str()) {
+        if let Some(error_msg) = &error_body.error_message {
             if let Some(element_id) = self.extract_arangodb_id_from_message(error_msg) {
                 return Some(element_id);
             }
@@ -321,10 +296,16 @@ impl ArangoDbApi {
                     details,
                     err
                 );
+                let error_body = ArangoErrorResponse {
+                    error_message: Some(error_msg.clone()),
+                    error_num: None,
+                    id: None,
+                    key: None,
+                };
                 return map_arangodb_http_status(
                     status.as_u16(),
                     &error_msg,
-                    &serde_json::Value::Null,
+                    &error_body,
                 );
             }
         }
@@ -349,33 +330,19 @@ impl ArangoDbApi {
 
     pub fn list_collections(&self) -> Result<Vec<ContainerInfo>, GraphError> {
         trace!("List collections");
-        let response: Value = self.execute(Method::GET, "/_api/collection", None)?;
+        let collections: Vec<CollectionInfo> = self.execute(Method::GET, "/_api/collection", None)?;
 
-        let collections_array = if let Some(result) = response.get("result") {
-            result.as_array().ok_or_else(|| {
-                GraphError::InternalError(
-                    "Invalid response for list_collections - result is not array".to_string(),
-                )
-            })?
-        } else {
-            response.as_array().ok_or_else(|| {
-                GraphError::InternalError("Invalid response for list_collections - no result field and response is not array".to_string())
-            })?
-        };
-
-        let collections = collections_array
-            .iter()
-            .filter(|v| !v["isSystem"].as_bool().unwrap_or(false))
-            .map(|v| {
-                let name = v["name"].as_str().unwrap_or_default().to_string();
-                let coll_type = v["type"].as_u64().unwrap_or(2);
-                let container_type = if coll_type == 3 {
+        let collections = collections
+            .into_iter()
+            .filter(|c| !c.is_system)
+            .map(|c| {
+                let container_type = if c.collection_type == 3 {
                     ContainerType::EdgeContainer
                 } else {
                     ContainerType::VertexContainer
                 };
                 ContainerInfo {
-                    name,
+                    name: c.name,
                     container_type,
                     element_count: None,
                 }
@@ -397,8 +364,8 @@ impl ArangoDbApi {
         );
         let type_str = match index_type {
             IndexType::Exact => "persistent",
-            IndexType::Range => "persistent", // ArangoDB's persistent index supports range queries
-            IndexType::Text => "inverted", // Full-text requires enterprise edition or arangosearch
+            IndexType::Range => "persistent", 
+            IndexType::Text => "inverted",
             IndexType::Geospatial => "geo",
         };
 
@@ -424,17 +391,15 @@ impl ArangoDbApi {
         for collection in collections {
             let endpoint = format!("/_api/index?collection={}", collection.name);
 
-            if let Ok(response) = self.execute::<Value>(Method::GET, &endpoint, None) {
-                if let Some(indexes) = response["indexes"].as_array() {
-                    for idx in indexes {
-                        if let Some(idx_name) = idx["name"].as_str() {
-                            if idx_name == name {
-                                if let Some(idx_id) = idx["id"].as_str() {
-                                    let delete_endpoint = format!("/_api/index/{idx_id}");
-                                    let _: Value =
-                                        self.execute(Method::DELETE, &delete_endpoint, None)?;
-                                    return Ok(());
-                                }
+            if let Ok(response) = self.execute::<IndexListResponse>(Method::GET, &endpoint, None) {
+                for idx in response.indexes {
+                    if let Some(idx_name) = &idx.name {
+                        if idx_name == name {
+                            if let Some(idx_id) = &idx.id {
+                                let delete_endpoint = format!("/_api/index/{idx_id}");
+                                let _: Value =
+                                    self.execute(Method::DELETE, &delete_endpoint, None)?;
+                                return Ok(());
                             }
                         }
                     }
@@ -455,64 +420,42 @@ impl ArangoDbApi {
         for collection in collections {
             let endpoint = format!("/_api/index?collection={}", collection.name);
 
-            match self.execute::<Value>(Method::GET, &endpoint, None) {
+            match self.execute::<IndexListResponse>(Method::GET, &endpoint, None) {
                 Ok(response) => {
-                    if let Some(indexes) = response["indexes"].as_array() {
-                        for index in indexes {
-                            if let Some(index_type) = index["type"].as_str() {
-                                if index_type == "primary" || index_type == "edge" {
-                                    continue;
-                                }
-                            }
-
-                            let name = index["name"].as_str().unwrap_or("").to_string();
-                            let id = index["id"].as_str().unwrap_or("").to_string();
-
-                            let fields: Vec<String> = index["fields"]
-                                .as_array()
-                                .map(|arr| {
-                                    arr.iter()
-                                        .filter_map(|f| f.as_str())
-                                        .map(String::from)
-                                        .collect()
-                                })
-                                .unwrap_or_default();
-
-                            if fields.is_empty() {
-                                continue;
-                            }
-
-                            let unique = index["unique"].as_bool().unwrap_or(false);
-                            let index_type_str = index["type"].as_str().unwrap_or("persistent");
-                            let index_type = match index_type_str {
-                                "geo" => golem_graph::golem::graph::schema::IndexType::Geospatial,
-                                "inverted" => golem_graph::golem::graph::schema::IndexType::Text,
-                                _ => golem_graph::golem::graph::schema::IndexType::Exact,
-                            };
-
-                            let logical_name = if fields.len() == 1 {
-                                format!("idx_{}_{}", collection.name, fields[0])
-                            } else {
-                                format!("idx_{}_{}", collection.name, fields.join("_"))
-                            };
-
-                            let final_name = if !name.is_empty() {
-                                name
-                            } else if !id.is_empty() {
-                                id
-                            } else {
-                                logical_name
-                            };
-
-                            all_indexes.push(IndexDefinition {
-                                name: final_name,
-                                label: collection.name.clone(),
-                                container: Some(collection.name.clone()),
-                                properties: fields,
-                                unique,
-                                index_type,
-                            });
+                    for index in response.indexes {
+                        if index.index_type == "primary" || index.index_type == "edge" {
+                            continue;
                         }
+
+                        if index.fields.is_empty() {
+                            continue;
+                        }
+
+                        let unique = index.unique.unwrap_or(false);
+                        let index_type = match index.index_type.as_str() {
+                            "geo" => golem_graph::golem::graph::schema::IndexType::Geospatial,
+                            "inverted" => golem_graph::golem::graph::schema::IndexType::Text,
+                            _ => golem_graph::golem::graph::schema::IndexType::Exact,
+                        };
+
+                        let logical_name = if index.fields.len() == 1 {
+                            format!("idx_{}_{}", collection.name, index.fields[0])
+                        } else {
+                            format!("idx_{}_{}", collection.name, index.fields.join("_"))
+                        };
+
+                        let final_name = index.name
+                            .or(index.id)
+                            .unwrap_or(logical_name);
+
+                        all_indexes.push(IndexDefinition {
+                            name: final_name,
+                            label: collection.name.clone(),
+                            container: Some(collection.name.clone()),
+                            properties: index.fields,
+                            unique,
+                            index_type,
+                        });
                     }
                 }
                 Err(_) => {
@@ -570,7 +513,7 @@ impl ArangoDbApi {
             .filter(|c| matches!(c.container_type, ContainerType::EdgeContainer))
             .map(|c| EdgeTypeDefinition {
                 collection: c.name,
-                from_collections: vec![], // ArangoDB doesn't store these constraints
+                from_collections: vec![], 
                 to_collections: vec![],   // ArangoDB doesn't store these constraints
             })
             .collect();
@@ -586,13 +529,13 @@ impl ArangoDbApi {
 
     pub fn get_database_statistics(&self) -> Result<DatabaseStatistics, GraphError> {
         trace!("Get database statistics");
-        let collections: ListCollectionsResponse =
+        let collections: Vec<CollectionInfoShort> =
             self.execute(Method::GET, "/_api/collection?excludeSystem=true", None)?;
 
         let mut total_vertex_count = 0;
         let mut total_edge_count = 0;
 
-        for collection_info in collections.result {
+        for collection_info in collections {
             let properties_endpoint =
                 format!("/_api/collection/{}/properties", collection_info.name);
             let properties: CollectionPropertiesResponse =
@@ -633,16 +576,26 @@ impl ArangoDbApi {
         };
 
         let body = json!({ "collections": collections });
-        let result: Value = self.execute(Method::POST, "/_api/transaction/begin", Some(&body))?;
-
-        result
-            .get("id")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .ok_or_else(|| {
-                GraphError::InternalError("Missing transaction ID in response".to_string())
-            })
+        let result: TransactionBeginResponse = self.execute(Method::POST, "/_api/transaction/begin", Some(&body))?;
+        Ok(result.id)
     }
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct ArangoErrorResponse {
+    #[serde(rename = "errorMessage")]
+    pub error_message: Option<String>,
+    #[serde(rename = "errorNum")]
+    pub error_num: Option<i64>,
+    #[serde(rename = "_id")]
+    pub id: Option<String>,
+    #[serde(rename = "_key")]
+    pub key: Option<String>,
+}
+
+#[derive(serde::Deserialize, Debug)]
+struct TransactionBeginResponse {
+    pub id: String,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -659,13 +612,18 @@ pub struct DatabaseStatistics {
 }
 
 #[derive(serde::Deserialize, Debug)]
-struct ListCollectionsResponse {
-    result: Vec<CollectionInfoShort>,
+struct CollectionInfoShort {
+    name: String,
 }
 
 #[derive(serde::Deserialize, Debug)]
-struct CollectionInfoShort {
-    name: String,
+#[serde(rename_all = "camelCase")]
+struct CollectionInfo {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub collection_type: u8,
+    #[serde(rename = "isSystem")]
+    pub is_system: bool,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -674,6 +632,21 @@ struct CollectionPropertiesResponse {
     count: u64,
     #[serde(rename = "type")]
     collection_type: ArangoCollectionType,
+}
+
+#[derive(serde::Deserialize, Debug)]
+struct IndexListResponse {
+    pub indexes: Vec<IndexInfo>,
+}
+
+#[derive(serde::Deserialize, Debug)]
+struct IndexInfo {
+    pub id: Option<String>,
+    pub name: Option<String>,
+    #[serde(rename = "type")]
+    pub index_type: String,
+    pub fields: Vec<String>,
+    pub unique: Option<bool>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -831,7 +804,7 @@ pub fn from_arangodb_error_code(error_code: i64, message: &str) -> GraphError {
 fn map_arangodb_http_status(
     status: u16,
     message: &str,
-    error_body: &serde_json::Value,
+    error_body: &ArangoErrorResponse,
 ) -> GraphError {
     match status {
         // Authentication and Authorization
@@ -858,10 +831,10 @@ fn map_arangodb_http_status(
 
         _ => {
             let debug_info = format!(
-                "ArangoDB HTTP error [{}]: {} | Error body sample: {}",
+                "ArangoDB HTTP error [{}]: {} | Error code: {:?}",
                 status,
                 message,
-                error_body.to_string().chars().take(200).collect::<String>()
+                error_body.error_num
             );
             GraphError::InternalError(debug_info)
         }
