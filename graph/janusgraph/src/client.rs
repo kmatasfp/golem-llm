@@ -151,7 +151,7 @@ impl JanusGraphApi {
         trace!("[JanusGraphApi] Endpoint: {}", self.endpoint);
         trace!("[JanusGraphApi] Session ID: {}", self.session_id);
         trace!("[JanusGraphApi] Gremlin Query: {gremlin}");
-        
+
         let body_string = serde_json::to_string(&request).map_err(|e| {
             GraphError::InternalError(format!("Failed to serialize request body: {e}"))
         })?;
@@ -192,7 +192,7 @@ impl JanusGraphApi {
         let request = GremlinRequest {
             gremlin: gremlin.to_string(),
             bindings,
-            session: String::new(), 
+            session: String::new(),
             processor: "".to_string(),
             op: "eval".to_string(),
         };
@@ -290,11 +290,7 @@ impl JanusGraphApi {
                     result: None,
                     exceptions: None,
                 };
-                return Self::map_janusgraph_http_status(
-                    status.as_u16(),
-                    &error_msg,
-                    &error_body,
-                );
+                return Self::map_janusgraph_http_status(status.as_u16(), &error_msg, &error_body);
             }
         }
 
@@ -309,7 +305,7 @@ impl JanusGraphApi {
             let response_body: GremlinResponse = response.json().map_err(|e| {
                 GraphError::InternalError(format!("Failed to parse response body: {e}"))
             })?;
-            
+
             if let Some(result) = response_body.result {
                 if let Some(data) = result.data {
                     Ok(data)
@@ -454,10 +450,7 @@ impl JanusGraphApi {
         class_name: &str,
         exception_data: &GremlinErrorData,
     ) -> Option<GraphError> {
-        let message = exception_data
-            .message
-            .as_deref()
-            .unwrap_or(class_name);
+        let message = exception_data.message.as_deref().unwrap_or(class_name);
 
         match class_name {
             // JanusGraph specific exceptions
@@ -633,9 +626,7 @@ impl JanusGraphApi {
 
                 let debug_info = format!(
                     "JanusGraph HTTP error [{}]: {} | Status: {:?}",
-                    status,
-                    message,
-                    error_body.status
+                    status, message, error_body.status
                 );
                 GraphError::InternalError(debug_info)
             }

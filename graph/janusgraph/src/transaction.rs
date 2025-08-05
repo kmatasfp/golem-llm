@@ -117,26 +117,33 @@ impl GuestTransaction for Transaction {
         gremlin.push_str(".elementMap()");
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
-        
+
         let element = if let Some(_graphson_obj) = response.as_object() {
             if response.get("@type") == Some(&json!("g:List")) {
-                let arr = response.get("@value")
+                let arr = response
+                    .get("@value")
                     .and_then(|v| v.as_array())
-                    .ok_or_else(|| GraphError::InternalError("Expected @value array in GraphSON List".to_string()))?;
-                arr.first()
-                    .ok_or_else(|| GraphError::InternalError("Empty result from vertex creation".to_string()))?
+                    .ok_or_else(|| {
+                        GraphError::InternalError(
+                            "Expected @value array in GraphSON List".to_string(),
+                        )
+                    })?;
+                arr.first().ok_or_else(|| {
+                    GraphError::InternalError("Empty result from vertex creation".to_string())
+                })?
             } else {
                 &response
             }
         } else if let Some(arr) = response.as_array() {
-            arr.first()
-                .ok_or_else(|| GraphError::InternalError("Empty result from vertex creation".to_string()))?
+            arr.first().ok_or_else(|| {
+                GraphError::InternalError("Empty result from vertex creation".to_string())
+            })?
         } else {
             return Err(GraphError::InternalError(format!(
-                "Unexpected response format from vertex creation: {:#}", response
+                "Unexpected response format from vertex creation: {response:#}"
             )));
         };
-        
+
         let obj = graphson_map_to_object(element)?;
 
         helpers::parse_vertex_from_gremlin(&obj)
@@ -307,7 +314,7 @@ impl GuestTransaction for Transaction {
         gremlin.push_str(".elementMap()");
 
         let resp = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
-        
+
         let row = if let Some(arr) = resp.as_array() {
             arr.first()
         } else if let Some(inner) = resp.get("@value").and_then(Value::as_array) {
@@ -534,7 +541,7 @@ impl GuestTransaction for Transaction {
         let resp = self
             .api
             .execute(&gremlin, Some(Value::Object(bindings.clone())))?;
-        
+
         let row = if let Some(arr) = resp.as_array() {
             arr.first().cloned()
         } else if let Some(inner) = resp.get("@value").and_then(Value::as_array) {
@@ -1344,7 +1351,7 @@ impl GuestTransaction for Transaction {
             format!("{gremlin_match}.fold().coalesce(unfold(), {gremlin_create}).elementMap()");
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
-        
+
         let result_data = response
             .as_array()
             .and_then(|arr| arr.first())

@@ -21,7 +21,7 @@ pub struct GremlinQueryResult {
 
 #[derive(Deserialize, Debug)]
 #[serde(untagged)]
-#[allow(dead_code)] 
+#[allow(dead_code)]
 pub enum GraphSONValue {
     Object(GraphSONObject),
     Array(Vec<Value>),
@@ -50,7 +50,7 @@ pub struct GraphSONVertex {
 
 #[derive(Deserialize, Debug)]
 pub struct GraphSONProperty {
-    #[allow(dead_code)] 
+    #[allow(dead_code)]
     pub id: Option<String>,
     pub value: Option<Value>,
     #[serde(rename = "@value")]
@@ -65,7 +65,7 @@ pub struct GraphSONPropertyValue {
 #[derive(Deserialize, Debug)]
 pub struct GraphSONMap {
     #[serde(rename = "@type")]
-    #[allow(dead_code)] 
+    #[allow(dead_code)]
     pub map_type: Option<String>,
     #[serde(rename = "@value")]
     pub value: Option<Vec<Value>>,
@@ -74,7 +74,7 @@ pub struct GraphSONMap {
 #[derive(Deserialize, Debug)]
 pub struct GraphSONList {
     #[serde(rename = "@type")]
-    #[allow(dead_code)]  
+    #[allow(dead_code)]
     pub list_type: Option<String>,
     #[serde(rename = "@value")]
     pub value: Option<Vec<Value>>,
@@ -125,15 +125,18 @@ fn parse_graphson_vertex(item: &Value) -> Result<Vec<(String, PropertyValue)>, G
                 for (prop_key, prop_array) in properties {
                     if let Some(first_prop) = prop_array.first() {
                         if let Some(prop_value) = &first_prop.value {
-                            if let Ok(converted_value) = conversions::from_gremlin_value(prop_value) {
+                            if let Ok(converted_value) = conversions::from_gremlin_value(prop_value)
+                            {
                                 row.push((prop_key, converted_value));
                                 continue;
                             }
                         }
-                        
+
                         if let Some(at_value) = &first_prop.at_value {
                             if let Some(actual_value) = &at_value.value {
-                                if let Ok(converted_value) = conversions::from_gremlin_value(actual_value) {
+                                if let Ok(converted_value) =
+                                    conversions::from_gremlin_value(actual_value)
+                                {
                                     row.push((prop_key, converted_value));
                                 }
                             }
@@ -157,7 +160,9 @@ fn parse_graphson_vertex(item: &Value) -> Result<Vec<(String, PropertyValue)>, G
         }
     }
 
-    Err(GraphError::InternalError("Failed to parse GraphSON vertex/edge".to_string()))
+    Err(GraphError::InternalError(
+        "Failed to parse GraphSON vertex/edge".to_string(),
+    ))
 }
 
 fn parse_graphson_map(item: &Value) -> Result<Vec<(String, PropertyValue)>, GraphError> {
@@ -165,11 +170,13 @@ fn parse_graphson_map(item: &Value) -> Result<Vec<(String, PropertyValue)>, Grap
         if let Some(map_array) = graphson_map.value {
             let mut row = Vec::new();
             let mut i = 0;
-            
+
             while i + 1 < map_array.len() {
                 if let (Some(key_val), Some(value_val)) = (map_array.get(i), map_array.get(i + 1)) {
                     if let Some(key_str) = key_val.as_str() {
-                        let converted_value = if let Ok(graphson_list) = serde_json::from_value::<GraphSONList>(value_val.clone()) {
+                        let converted_value = if let Ok(graphson_list) =
+                            serde_json::from_value::<GraphSONList>(value_val.clone())
+                        {
                             if let Some(list_values) = graphson_list.value {
                                 if let Some(first_value) = list_values.first() {
                                     conversions::from_gremlin_value(first_value)?
@@ -184,26 +191,30 @@ fn parse_graphson_map(item: &Value) -> Result<Vec<(String, PropertyValue)>, Grap
                         } else {
                             conversions::from_gremlin_value(value_val)?
                         };
-                        
+
                         row.push((key_str.to_string(), converted_value));
                     }
                 }
                 i += 2;
             }
-            
+
             return Ok(row);
         }
     }
 
-    Err(GraphError::InternalError("Failed to parse GraphSON map".to_string()))
+    Err(GraphError::InternalError(
+        "Failed to parse GraphSON map".to_string(),
+    ))
 }
 
 fn parse_plain_object(item: &Value) -> Result<Vec<(String, PropertyValue)>, GraphError> {
     if let Some(object_map) = item.as_object() {
         let mut row = Vec::new();
-        
+
         for (key, gremlin_value) in object_map {
-            let converted_value = if let Ok(graphson_list) = serde_json::from_value::<GraphSONList>(gremlin_value.clone()) {
+            let converted_value = if let Ok(graphson_list) =
+                serde_json::from_value::<GraphSONList>(gremlin_value.clone())
+            {
                 if let Some(list_values) = graphson_list.value {
                     if let Some(first_value) = list_values.first() {
                         conversions::from_gremlin_value(first_value)?
@@ -222,21 +233,22 @@ fn parse_plain_object(item: &Value) -> Result<Vec<(String, PropertyValue)>, Grap
             } else {
                 conversions::from_gremlin_value(gremlin_value)?
             };
-            
+
             row.push((key.clone(), converted_value));
         }
-        
+
         return Ok(row);
     }
 
-    Err(GraphError::InternalError("Expected object for plain map".to_string()))
+    Err(GraphError::InternalError(
+        "Expected object for plain map".to_string(),
+    ))
 }
 
 fn parse_gremlin_response(response: Value) -> Result<QueryResult, GraphError> {
-    let result_data = extract_result_data(&response)?
-        .ok_or_else(|| {
-            GraphError::InternalError("Invalid response structure from Gremlin".to_string())
-        })?;
+    let result_data = extract_result_data(&response)?.ok_or_else(|| {
+        GraphError::InternalError("Invalid response structure from Gremlin".to_string())
+    })?;
 
     let arr = if let Some(graphson_obj) = result_data.as_object() {
         if let Some(value_array) = graphson_obj.get("@value").and_then(|v| v.as_array()) {
@@ -249,14 +261,14 @@ fn parse_gremlin_response(response: Value) -> Result<QueryResult, GraphError> {
     } else {
         return Ok(QueryResult::Values(vec![]));
     };
-    
+
     if arr.is_empty() {
         return Ok(QueryResult::Values(vec![]));
     }
 
-    let first_item = arr.first().ok_or_else(|| {
-        GraphError::InternalError("Empty result array".to_string())
-    })?;
+    let first_item = arr
+        .first()
+        .ok_or_else(|| GraphError::InternalError("Empty result array".to_string()))?;
 
     if !first_item.is_object() {
         let values = arr
@@ -266,9 +278,9 @@ fn parse_gremlin_response(response: Value) -> Result<QueryResult, GraphError> {
         return Ok(QueryResult::Values(values));
     }
 
-    let obj = first_item.as_object().ok_or_else(|| {
-        GraphError::InternalError("Expected object in result array".to_string())
-    })?;
+    let obj = first_item
+        .as_object()
+        .ok_or_else(|| GraphError::InternalError("Expected object in result array".to_string()))?;
 
     if obj.get("@type") == Some(&Value::String("g:Vertex".to_string()))
         || obj.get("@type") == Some(&Value::String("g:Edge".to_string()))
@@ -281,7 +293,7 @@ fn parse_gremlin_response(response: Value) -> Result<QueryResult, GraphError> {
                 }
             }
         }
-        return Ok(QueryResult::Maps(maps));
+        Ok(QueryResult::Maps(maps))
     } else if obj.get("@type") == Some(&Value::String("g:Map".to_string())) {
         let mut maps = Vec::new();
         for item in arr {
