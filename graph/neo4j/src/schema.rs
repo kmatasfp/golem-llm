@@ -1,3 +1,4 @@
+use crate::client::{Neo4jStatement, Neo4jStatements};
 use crate::helpers::{config_from_env, map_neo4j_type_to_wit};
 use crate::{GraphNeo4jComponent, SchemaManager};
 use golem_graph::durability::ExtendedGuest;
@@ -11,7 +12,7 @@ use golem_graph::golem::graph::{
     },
 };
 use log::trace;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -44,10 +45,10 @@ impl GuestSchemaManager for SchemaManager {
                     name = prop.name
                 );
                 let tx = self.graph.begin_transaction()?;
-                match tx.api.execute_in_transaction(
-                    &tx.transaction_url,
-                    json!({ "statements": [ { "statement": q } ] }),
-                ) {
+                let statement = Neo4jStatement::with_row_only(q, HashMap::new());
+                let statements = Neo4jStatements::single(statement);
+                
+                match tx.api.execute_typed_transaction(&tx.transaction_url, &statements) {
                     Err(e) => {
                         let is_enterprise_error = matches!(
                             &e,
@@ -72,10 +73,9 @@ impl GuestSchemaManager for SchemaManager {
                     name = prop.name
                 );
                 let tx = self.graph.begin_transaction()?;
-                tx.api.execute_in_transaction(
-                    &tx.transaction_url,
-                    json!({ "statements": [ { "statement": q } ] }),
-                )?;
+                let statement = Neo4jStatement::with_row_only(q, HashMap::new());
+                let statements = Neo4jStatements::single(statement);
+                tx.api.execute_typed_transaction(&tx.transaction_url, &statements)?;
                 tx.commit()?;
             }
         }
@@ -95,18 +95,19 @@ impl GuestSchemaManager for SchemaManager {
                     "CREATE CONSTRAINT {} IF NOT EXISTS FOR ()-[r:{}]-() REQUIRE r.{} IS NOT NULL",
                     constraint_name, &schema.label, &prop.name
                 );
-                statements.push(json!({ "statement": query, "parameters": {} }));
+                statements.push(Neo4jStatement::with_row_only(query, HashMap::new()));
             }
-            if prop.unique {}
+            if prop.unique {
+            }
         }
 
         if statements.is_empty() {
             return tx.commit();
         }
 
-        let statements_payload = json!({ "statements": statements });
+        let statements_batch = Neo4jStatements::batch(statements);
         tx.api
-            .execute_in_transaction(&tx.transaction_url, statements_payload)?;
+            .execute_typed_transaction(&tx.transaction_url, &statements_batch)?;
 
         tx.commit()
     }
@@ -121,94 +122,80 @@ impl GuestSchemaManager for SchemaManager {
             "CALL db.schema.nodeTypeProperties() YIELD nodeLabels, propertyName, propertyTypes, mandatory \
              WHERE $label IN nodeLabels \
              RETURN propertyName, propertyTypes, mandatory";
-        let props_stmt = json!({
-            "statement": props_query,
-            "parameters": { "label": &label }
-        });
-        let props_resp = tx
-            .api
-            .execute_in_transaction(&tx.transaction_url, json!({ "statements": [props_stmt] }))?;
+        let mut params = HashMap::new();
+        params.insert("label".to_string(), json!(&label));
+        let props_stmt = Neo4jStatement::with_row_only(props_query.to_string(), params);
 
         let cons_query = "SHOW CONSTRAINTS YIELD name, type, properties, labelsOrTypes \
              WHERE type = 'UNIQUENESS' AND $label IN labelsOrTypes \
              RETURN properties";
-        let cons_stmt = json!({
-            "statement": cons_query,
-            "parameters": { "label": &label }
-        });
-        let cons_resp = tx
+        let mut cons_params = HashMap::new();
+        cons_params.insert("label".to_string(), json!(&label));
+        let cons_stmt = Neo4jStatement::with_row_only(cons_query.to_string(), cons_params);
+
+        let statements = Neo4jStatements::batch(vec![props_stmt, cons_stmt]);
+        let response = tx
             .api
-            .execute_in_transaction(&tx.transaction_url, json!({ "statements": [cons_stmt] }))?;
+            .execute_typed_transaction(&tx.transaction_url, &statements)?;
 
         tx.commit()?;
 
-        let props_block = props_resp["results"]
-            .as_array()
-            .and_then(|r| r.first())
-            .ok_or_else(|| GraphError::InternalError("Invalid property schema response".into()))?;
-        let props_data = props_block["data"]
-            .as_array()
-            .ok_or_else(|| GraphError::InternalError("Missing property schema data".into()))?;
+        if !response.errors.is_empty() {
+            return Err(GraphError::InvalidQuery(response.errors[0].message.clone()));
+        }
 
-        if props_data.is_empty() {
+        let props_result = response.results.get(0)
+            .ok_or_else(|| GraphError::InternalError("Missing property schema response".into()))?;
+        props_result.check_errors()?;
+
+        if props_result.data.is_empty() {
             return Ok(None);
         }
 
         #[derive(serde::Deserialize)]
-        struct Info {
+        struct PropertyInfo {
             property_name: String,
             property_types: Vec<String>,
             mandatory: bool,
         }
 
         let mut defs: HashMap<String, PropertyDefinition> = HashMap::new();
-        for row_item in props_data {
-            if let Some(row_val) = row_item.get("row") {
-                if let Ok(row) = serde_json::from_value::<Vec<Value>>(row_val.clone()) {
-                    if row.len() >= 3 {
-                        let info = Info {
-                            property_name: row[0].as_str().unwrap_or("").to_string(),
-                            property_types: serde_json::from_value(row[1].clone())
-                                .unwrap_or_default(),
-                            mandatory: row[2].as_bool().unwrap_or(false),
-                        };
-                        defs.insert(
-                            info.property_name.clone(),
-                            PropertyDefinition {
-                                name: info.property_name.clone(),
-                                property_type: info
-                                    .property_types
-                                    .first()
-                                    .map(|s| map_neo4j_type_to_wit(s))
-                                    .unwrap_or(PropertyType::StringType),
-                                required: info.mandatory,
-                                unique: false,
-                                default_value: None,
-                            },
-                        );
-                    }
+        for data_item in &props_result.data {
+            if let Some(row) = &data_item.row {
+                if row.len() >= 3 {
+                    let info = PropertyInfo {
+                        property_name: row[0].as_str().unwrap_or("").to_string(),
+                        property_types: serde_json::from_value(row[1].clone())
+                            .unwrap_or_default(),
+                        mandatory: row[2].as_bool().unwrap_or(false),
+                    };
+                    defs.insert(
+                        info.property_name.clone(),
+                        PropertyDefinition {
+                            name: info.property_name,
+                            property_type: info
+                                .property_types
+                                .first()
+                                .map(|s| map_neo4j_type_to_wit(s))
+                                .unwrap_or(PropertyType::StringType),
+                            required: info.mandatory,
+                            unique: false,
+                            default_value: None,
+                        },
+                    );
                 }
             }
         }
 
-        let cons_block = cons_resp["results"]
-            .as_array()
-            .and_then(|r| r.first())
-            .ok_or_else(|| {
-                GraphError::InternalError("Invalid constraint schema response".into())
-            })?;
-        let cons_data = cons_block["data"]
-            .as_array()
-            .ok_or_else(|| GraphError::InternalError("Missing constraint data".into()))?;
-
-        for row_item in cons_data {
-            if let Some(row_val) = row_item.get("row") {
-                if let Ok(row) = serde_json::from_value::<Vec<Value>>(row_val.clone()) {
+        if let Some(cons_result) = response.results.get(1) {
+            cons_result.check_errors()?;
+            for data_item in &cons_result.data {
+                if let Some(row) = &data_item.row {
                     if let Some(list_val) = row.first() {
                         if let Ok(list) = serde_json::from_value::<Vec<String>>(list_val.clone()) {
                             for prop_name in list {
-                                if let Some(d) = defs.get_mut(&prop_name) {
-                                    d.unique = true;
+                                if let Some(def) = defs.get_mut(&prop_name) {
+                                    def.unique = true;
                                 }
                             }
                         }
@@ -235,28 +222,18 @@ impl GuestSchemaManager for SchemaManager {
         let tx = self.graph.begin_transaction()?;
 
         let props_query = "CALL db.schema.relTypeProperties() YIELD relType, propertyName, propertyTypes, mandatory WHERE relType = $label RETURN propertyName, propertyTypes, mandatory";
-        let props_statement = json!({
-            "statement": props_query,
-            "parameters": { "label": &label }
-        });
-        let props_response = tx.api.execute_in_transaction(
-            &tx.transaction_url,
-            json!({ "statements": [props_statement] }),
-        )?;
-
+        let mut params = HashMap::new();
+        params.insert("label".to_string(), json!(&label));
+        let props_statement = Neo4jStatement::with_row_only(props_query.to_string(), params);
+        let statements = Neo4jStatements::single(props_statement);
+        
+        let response = tx.api.execute_typed_transaction(&tx.transaction_url, &statements)?;
         tx.commit()?;
 
-        let props_result = props_response["results"]
-            .as_array()
-            .and_then(|r| r.first())
-            .ok_or_else(|| {
-                GraphError::InternalError("Invalid property schema response for edge".to_string())
-            })?;
-        let props_data = props_result["data"].as_array().ok_or_else(|| {
-            GraphError::InternalError("Missing property schema data for edge".to_string())
-        })?;
+        let props_result = response.first_result()?;
+        props_result.check_errors()?;
 
-        if props_data.is_empty() {
+        if props_result.data.is_empty() {
             return Ok(None);
         }
 
@@ -268,30 +245,28 @@ impl GuestSchemaManager for SchemaManager {
         }
 
         let mut property_definitions = Vec::new();
-        for item in props_data {
-            if let Some(row_val) = item.get("row") {
-                if let Ok(row) = serde_json::from_value::<Vec<Value>>(row_val.clone()) {
-                    if row.len() >= 3 {
-                        let info = Neo4jPropertyInfo {
-                            property_name: row[0].as_str().unwrap_or("").to_string(),
-                            property_types: serde_json::from_value(row[1].clone())
-                                .unwrap_or_default(),
-                            mandatory: row[2].as_bool().unwrap_or(false),
-                        };
+        for data_item in &props_result.data {
+            if let Some(row) = &data_item.row {
+                if row.len() >= 3 {
+                    let info = Neo4jPropertyInfo {
+                        property_name: row[0].as_str().unwrap_or("").to_string(),
+                        property_types: serde_json::from_value(row[1].clone())
+                            .unwrap_or_default(),
+                        mandatory: row[2].as_bool().unwrap_or(false),
+                    };
 
-                        if !info.property_name.is_empty() {
-                            property_definitions.push(PropertyDefinition {
-                                name: info.property_name,
-                                property_type: info
-                                    .property_types
-                                    .first()
-                                    .map(|s| map_neo4j_type_to_wit(s))
-                                    .unwrap_or(PropertyType::StringType),
-                                required: info.mandatory,
-                                unique: false,
-                                default_value: None,
-                            });
-                        }
+                    if !info.property_name.is_empty() {
+                        property_definitions.push(PropertyDefinition {
+                            name: info.property_name,
+                            property_type: info
+                                .property_types
+                                .first()
+                                .map(|s| map_neo4j_type_to_wit(s))
+                                .unwrap_or(PropertyType::StringType),
+                            required: info.mandatory,
+                            unique: false, 
+                            default_value: None,
+                        });
                     }
                 }
             }
@@ -310,18 +285,18 @@ impl GuestSchemaManager for SchemaManager {
         let tx = self.graph.begin_transaction()?;
         let result = tx.execute_schema_query_and_extract_string_list(
             "CALL db.labels() YIELD label RETURN label",
-        );
+        )?;
         tx.commit()?;
-        result
+        Ok(result)
     }
 
     fn list_edge_labels(&self) -> Result<Vec<String>, GraphError> {
         let tx = self.graph.begin_transaction()?;
         let result = tx.execute_schema_query_and_extract_string_list(
             "CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType",
-        );
+        )?;
         tx.commit()?;
-        result
+        Ok(result)
     }
 
     fn create_index(&self, index: IndexDefinition) -> Result<(), GraphError> {
@@ -346,54 +321,42 @@ impl GuestSchemaManager for SchemaManager {
             index_type_str, index.name, index.label, properties_str
         );
 
-        let statement = json!({ "statement": query, "parameters": {} });
-        let statements = json!({ "statements": [statement] });
+        let statement = Neo4jStatement::with_row_only(query, HashMap::new());
+        let statements = Neo4jStatements::single(statement);
         tx.api
-            .execute_in_transaction(&tx.transaction_url, statements)?;
+            .execute_typed_transaction(&tx.transaction_url, &statements)?;
         tx.commit()
     }
 
     fn drop_index(&self, name: String) -> Result<(), GraphError> {
         let tx = self.graph.begin_transaction()?;
         let query = format!("DROP INDEX {name} IF EXISTS");
-        let statement = json!({ "statement": query, "parameters": {} });
-        let statements = json!({ "statements": [statement] });
+        let statement = Neo4jStatement::with_row_only(query, HashMap::new());
+        let statements = Neo4jStatements::single(statement);
         tx.api
-            .execute_in_transaction(&tx.transaction_url, statements)?;
+            .execute_typed_transaction(&tx.transaction_url, &statements)?;
         tx.commit()
     }
 
     fn list_indexes(&self) -> Result<Vec<IndexDefinition>, GraphError> {
         let tx = self.graph.begin_transaction()?;
         let query = "SHOW INDEXES";
-        let statement = json!({ "statement": query, "parameters": {} });
-        let statements = json!({ "statements": [statement] });
+        let statement = Neo4jStatement::with_row_only(query.to_string(), HashMap::new());
+        let statements = Neo4jStatements::single(statement);
         let response = tx
             .api
-            .execute_in_transaction(&tx.transaction_url, statements)?;
+            .execute_typed_transaction(&tx.transaction_url, &statements)?;
 
         tx.commit()?;
 
-        let result = response["results"]
-            .as_array()
-            .and_then(|r| r.first())
-            .ok_or_else(|| {
-                GraphError::InternalError("Invalid response for list_indexes".to_string())
-            })?;
+        let result = response.first_result()?;
+        result.check_errors()?;
 
-        if let Some(errors) = result["errors"].as_array() {
-            if !errors.is_empty() {
-                return Err(GraphError::InvalidQuery(errors[0].to_string()));
-            }
-        }
-
-        let empty_vec = vec![];
-        let data = result["data"].as_array().unwrap_or(&empty_vec);
         let mut indexes = Vec::new();
 
-        for item in data {
-            if let Some(row) = item["row"].as_array() {
-                if row.len() >= 8 {
+        for data_item in &result.data {
+            if let Some(row) = &data_item.row {
+                if row.len() >= 10 {
                     let name = row[1].as_str().unwrap_or_default().to_string();
                     let index_type_str = row[4].as_str().unwrap_or_default().to_lowercase();
                     let label = row[6]

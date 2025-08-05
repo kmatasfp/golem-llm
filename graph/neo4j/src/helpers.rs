@@ -1,4 +1,5 @@
 use crate::conversions::from_cypher_element_id;
+use crate::client::{Neo4jNode, Neo4jResponse, GraphData};
 use golem_graph::golem::graph::{
     connection::ConnectionConfig,
     errors::GraphError,
@@ -6,18 +7,136 @@ use golem_graph::golem::graph::{
     types::{Edge, ElementId, Path, Vertex},
 };
 use serde_json::Value;
+use std::collections::HashMap;
 use std::env;
 
+pub(crate) struct ElementIdHelper;
+
+impl ElementIdHelper {
+    pub fn to_cypher_value(id: &ElementId) -> String {
+        match id {
+            ElementId::StringValue(s) => s.clone(),
+            ElementId::Int64(i) => i.to_string(),
+            ElementId::Uuid(u) => u.clone(),
+        }
+    }
+
+    pub fn to_cypher_parameter(id: &ElementId) -> HashMap<String, Value> {
+        let mut params = HashMap::new();
+        params.insert("id".to_string(), Value::String(Self::to_cypher_value(id)));
+        params
+    }
+}
+
+pub(crate) trait Neo4jResponseProcessor<T> {
+    fn process_response(response: Neo4jResponse) -> Result<T, GraphError>;
+}
+
+pub(crate) struct VertexProcessor;
+
+impl Neo4jResponseProcessor<Vertex> for VertexProcessor {
+    fn process_response(response: Neo4jResponse) -> Result<Vertex, GraphError> {
+        let result = response.first_result()?;
+        result.check_errors()?;
+        let node = result.first_graph_node()?;
+        parse_vertex_from_neo4j_node(node, None)
+    }
+}
+
+pub(crate) struct EdgeProcessor;
+
+impl Neo4jResponseProcessor<Edge> for EdgeProcessor {
+    fn process_response(response: Neo4jResponse) -> Result<Edge, GraphError> {
+        let result = response.first_result()?;
+        result.check_errors()?;
+        let row = result.first_row()?;
+        parse_edge_from_row(row)
+    }
+}
+
+pub(crate) struct VertexListProcessor;
+
+impl Neo4jResponseProcessor<Vec<Vertex>> for VertexListProcessor {
+    fn process_response(response: Neo4jResponse) -> Result<Vec<Vertex>, GraphError> {
+        let result = response.first_result()?;
+        result.check_errors()?;
+        
+        let mut vertices = Vec::new();
+        for data in &result.data {
+            if let Some(graph) = &data.graph {
+                for node in &graph.nodes {
+                    vertices.push(parse_vertex_from_neo4j_node(node, None)?);
+                }
+            }
+        }
+        Ok(vertices)
+    }
+}
+
+pub(crate) struct EdgeListProcessor;
+
+impl Neo4jResponseProcessor<Vec<Edge>> for EdgeListProcessor {
+    fn process_response(response: Neo4jResponse) -> Result<Vec<Edge>, GraphError> {
+        let result = response.first_result()?;
+        result.check_errors()?;
+        
+        let mut edges = Vec::new();
+        for data in &result.data {
+            if let Some(row) = &data.row {
+                edges.push(parse_edge_from_row(row)?);
+            }
+        }
+        Ok(edges)
+    }
+}
+
+pub(crate) fn parse_vertex_from_neo4j_node(
+    node: &Neo4jNode,
+    id_override: Option<ElementId>,
+) -> Result<Vertex, GraphError> {
+    let id = if let Some(id_val) = id_override {
+        id_val
+    } else {
+        from_cypher_element_id(&Value::String(node.element_id.clone()))?
+    };
+
+    let properties = if !node.properties.is_empty() {
+        crate::conversions::from_cypher_properties(
+            node.properties.iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        )?
+    } else {
+        vec![]
+    };
+
+    let (vertex_type, additional_labels) = node.labels
+        .split_first()
+        .map_or((String::new(), Vec::new()), |(first, rest)| {
+            (first.clone(), rest.to_vec())
+        });
+
+    Ok(Vertex {
+        id,
+        vertex_type,
+        additional_labels,
+        properties,
+    })
+}
+
+#[allow(dead_code)]
 pub(crate) fn parse_vertex_from_graph_data(
     node_val: &serde_json::Value,
     id_override: Option<ElementId>,
 ) -> Result<Vertex, GraphError> {
     let id = if let Some(id_val) = id_override {
         id_val
-    } else if let Some(element_id) = node_val.get("elementId") {
-        from_cypher_element_id(element_id)?
     } else {
-        from_cypher_element_id(&node_val["id"])?
+        if let Some(element_id) = node_val.get("elementId") {
+            from_cypher_element_id(element_id)?
+        } else {
+            from_cypher_element_id(&node_val["id"])?
+        }
     };
 
     let labels: Vec<String> = node_val["labels"]
@@ -80,30 +199,50 @@ pub(crate) fn parse_edge_from_row(row: &[Value]) -> Result<Edge, GraphError> {
     })
 }
 
-pub(crate) fn parse_path_from_data(data: &serde_json::Value) -> Result<Path, GraphError> {
-    let nodes_val = data["graph"]["nodes"]
-        .as_array()
-        .ok_or_else(|| GraphError::InternalError("Missing nodes in path response".to_string()))?;
-    let rels_val = data["graph"]["relationships"].as_array().ok_or_else(|| {
-        GraphError::InternalError("Missing relationships in path response".to_string())
-    })?;
-
+pub(crate) fn parse_path_from_graph_data(graph_data: &GraphData) -> Result<Path, GraphError> {
     let mut vertices = Vec::new();
-    for node_val in nodes_val {
-        vertices.push(parse_vertex_from_graph_data(node_val, None)?);
-    }
-
-    let mut edges = Vec::new();
-    for rel_val in rels_val {
-        let id = from_cypher_element_id(&rel_val["id"])?;
-        let edge_type = rel_val["type"].as_str().unwrap_or_default().to_string();
-        let properties = if let Some(props) = rel_val["properties"].as_object() {
-            crate::conversions::from_cypher_properties(props.clone())?
+    for node in &graph_data.nodes {
+        let id = from_cypher_element_id(&Value::String(node.element_id.clone()))?;
+        let (vertex_type, additional_labels) = node.labels
+            .split_first()
+            .map_or((String::new(), Vec::new()), |(first, rest)| {
+                (first.clone(), rest.to_vec())
+            });
+        
+        let properties = if !node.properties.is_empty() {
+            let map: serde_json::Map<String, Value> = node.properties.iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            crate::conversions::from_cypher_properties(map)?
         } else {
             vec![]
         };
-        let from_vertex = from_cypher_element_id(&rel_val["startNode"])?;
-        let to_vertex = from_cypher_element_id(&rel_val["endNode"])?;
+        
+        vertices.push(Vertex { 
+            id, 
+            vertex_type,
+            additional_labels,
+            properties 
+        });
+    }
+
+    let mut edges = Vec::new();
+    for rel in &graph_data.relationships {
+        let id = from_cypher_element_id(&Value::String(rel.element_id.clone()))?;
+        let edge_type = rel.relationship_type.clone();
+        
+        let properties = if !rel.properties.is_empty() {
+            let map: serde_json::Map<String, Value> = rel.properties.iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            crate::conversions::from_cypher_properties(map)?
+        } else {
+            vec![]
+        };
+        
+        let from_vertex = from_cypher_element_id(&Value::String(rel.start_node.clone()))?;
+        let to_vertex = from_cypher_element_id(&Value::String(rel.end_node.clone()))?;
+        
         edges.push(Edge {
             id,
             edge_type,
@@ -115,8 +254,8 @@ pub(crate) fn parse_path_from_data(data: &serde_json::Value) -> Result<Path, Gra
 
     Ok(Path {
         vertices,
-        edges,
-        length: rels_val.len() as u32,
+        edges: edges.clone(),
+        length: edges.len() as u32,
     })
 }
 

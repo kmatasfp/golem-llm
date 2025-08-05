@@ -1,4 +1,5 @@
 use crate::{Graph, Transaction};
+use crate::client::{Neo4jStatement, Neo4jStatements};
 use golem_graph::{
     durability::ProviderGraph,
     golem::graph::{
@@ -7,6 +8,7 @@ use golem_graph::{
         transactions::Transaction as TransactionResource,
     },
 };
+use std::collections::HashMap;
 
 impl ProviderGraph for Graph {
     type Transaction = Transaction;
@@ -37,39 +39,34 @@ impl GuestGraph for Graph {
     fn get_statistics(&self) -> Result<GraphStatistics, GraphError> {
         let transaction_url = self.api.begin_transaction()?;
 
-        let node_count_stmt = serde_json::json!({
-            "statement": "MATCH (n) RETURN count(n) as nodeCount",
-            "parameters": {}
-        });
-        let node_count_resp = self.api.execute_in_transaction(
+        let node_count_stmt = Neo4jStatement::with_row_only(
+            "MATCH (n) RETURN count(n) as nodeCount".to_string(),
+            HashMap::new(),
+        );
+        let node_count_resp = self.api.execute_typed_transaction(
             &transaction_url,
-            serde_json::json!({ "statements": [node_count_stmt] }),
+            &Neo4jStatements::single(node_count_stmt),
         )?;
-        let node_count = node_count_resp["results"]
-            .as_array()
-            .and_then(|r| r.first())
-            .and_then(|result| result["data"].as_array())
-            .and_then(|d| d.first())
-            .and_then(|data| data["row"].as_array())
-            .and_then(|row| row.first())
+        
+        let node_count = node_count_resp
+            .first_result()?
+            .first_row()?
+            .first()
             .and_then(|v| v.as_u64());
 
-        // Query for relationship count
-        let rel_count_stmt = serde_json::json!({
-            "statement": "MATCH ()-[r]->() RETURN count(r) as relCount",
-            "parameters": {}
-        });
-        let rel_count_resp = self.api.execute_in_transaction(
+        let rel_count_stmt = Neo4jStatement::with_row_only(
+            "MATCH ()-[r]->() RETURN count(r) as relCount".to_string(),
+            HashMap::new(),
+        );
+        let rel_count_resp = self.api.execute_typed_transaction(
             &transaction_url,
-            serde_json::json!({ "statements": [rel_count_stmt] }),
+            &Neo4jStatements::single(rel_count_stmt),
         )?;
-        let rel_count = rel_count_resp["results"]
-            .as_array()
-            .and_then(|r| r.first())
-            .and_then(|result| result["data"].as_array())
-            .and_then(|d| d.first())
-            .and_then(|data| data["row"].as_array())
-            .and_then(|row| row.first())
+        
+        let rel_count = rel_count_resp
+            .first_result()?
+            .first_row()?
+            .first()
             .and_then(|v| v.as_u64());
 
         self.api.rollback_transaction(&transaction_url)?;

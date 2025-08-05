@@ -1,8 +1,9 @@
-use crate::helpers::parse_vertex_from_graph_data;
+use crate::helpers::{element_id_to_key, ElementIdHelper, VertexListProcessor, Neo4jResponseProcessor};
+use crate::client::{Neo4jStatement, Neo4jStatements};
 use crate::{
-    helpers::{element_id_to_key, parse_path_from_data},
     GraphNeo4jComponent, Transaction,
 };
+
 use golem_graph::golem::graph::{
     errors::GraphError,
     traversal::{
@@ -10,7 +11,6 @@ use golem_graph::golem::graph::{
     },
     types::{Edge, ElementId, Vertex},
 };
-use serde_json::json;
 use std::collections::HashMap;
 
 impl Transaction {
@@ -20,54 +20,48 @@ impl Transaction {
         to_vertex: ElementId,
         _options: Option<PathOptions>,
     ) -> Result<Option<Path>, GraphError> {
-        let from_id = match from_vertex {
-            ElementId::StringValue(s) => s,
-            _ => return Err(GraphError::InvalidQuery("expected string elementId".into())),
+        let mut params = std::collections::HashMap::new();
+        params.insert("from_id".to_string(), serde_json::Value::String(ElementIdHelper::to_cypher_value(&from_vertex)));
+        params.insert("to_id".to_string(), serde_json::Value::String(ElementIdHelper::to_cypher_value(&to_vertex)));
+
+        let query = r#"
+            MATCH (a), (b)
+            WHERE
+              (elementId(a) = $from_id OR id(a) = toInteger($from_id))
+              AND
+              (elementId(b) = $to_id   OR id(b) = toInteger($to_id))
+            MATCH p = shortestPath((a)-[*]-(b))
+            RETURN p
+        "#.to_string();
+
+        let statement = Neo4jStatement::new(query, params);
+        let statements = Neo4jStatements::single(statement);
+
+        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+
+        let result = match response.first_result() {
+            Ok(r) => r,
+            Err(_) => return Ok(None),
         };
-        let to_id = match to_vertex {
-            ElementId::StringValue(s) => s,
-            _ => return Err(GraphError::InvalidQuery("expected string elementId".into())),
-        };
 
-        let statement = json!({
-            "statement": r#"
-                MATCH (a), (b)
-                WHERE
-                  (elementId(a) = $from_id OR id(a) = toInteger($from_id))
-                  AND
-                  (elementId(b) = $to_id   OR id(b) = toInteger($to_id))
-                MATCH p = shortestPath((a)-[*]-(b))
-                RETURN p
-            "#,
-            "resultDataContents": ["row","graph"],
-            "parameters": { "from_id": from_id, "to_id": to_id }
-        });
-
-        let response = self.api.execute_in_transaction(
-            &self.transaction_url,
-            json!({
-                "statements": [statement]
-            }),
-        )?;
-
-        let result = response["results"]
-            .as_array()
-            .and_then(|r| r.first())
-            .ok_or_else(|| GraphError::InternalError("Missing 'results'".into()))?;
-
-        if let Some(errors) = result["errors"].as_array() {
-            if !errors.is_empty() {
-                return Err(GraphError::InternalError(format!(
-                    "Neo4j error: {}",
-                    errors[0]
-                )));
-            }
+        if !result.errors.is_empty() {
+            return Err(GraphError::InternalError(format!(
+                "Neo4j error: {:?}",
+                result.errors[0]
+            )));
         }
 
-        let data_opt = result["data"].as_array().and_then(|d| d.first());
-        if let Some(data) = data_opt {
-            let path = parse_path_from_data(data)?;
-            Ok(Some(path))
+        if result.data.is_empty() {
+            return Ok(None);
+        }
+
+        if let Some(row_data) = result.data.first() {
+            if let Some(graph_data) = &row_data.graph {
+                let path = crate::helpers::parse_path_from_graph_data(graph_data)?;
+                Ok(Some(path))
+            } else {
+                Ok(None)
+            }
         } else {
             Ok(None)
         }
@@ -80,18 +74,6 @@ impl Transaction {
         options: Option<PathOptions>,
         limit: Option<u32>,
     ) -> Result<Vec<Path>, GraphError> {
-        let from_id = match from_vertex {
-            ElementId::StringValue(s) => s,
-            ElementId::Int64(i) => i.to_string(),
-            ElementId::Uuid(u) => u,
-        };
-
-        let to_id = match to_vertex {
-            ElementId::StringValue(s) => s,
-            ElementId::Int64(i) => i.to_string(),
-            ElementId::Uuid(u) => u,
-        };
-
         let path_spec = match options {
             Some(opts) => {
                 if opts.vertex_types.is_some()
@@ -119,45 +101,34 @@ impl Transaction {
         };
 
         let limit_clause = limit.map_or("".to_string(), |l| format!("LIMIT {l}"));
-        let statement_str = format!(
+        let query = format!(
             "MATCH p = (a){path_spec}(b) WHERE elementId(a) = $from_id AND elementId(b) = $to_id RETURN p {limit_clause}"
         );
 
-        let statement = json!({
-            "statement": statement_str,
-            "parameters": {
-                "from_id": from_id,
-                "to_id": to_id,
-            },
-            "resultDataContents": ["row","graph"]
-        });
+        let mut params = std::collections::HashMap::new();
+        params.insert("from_id".to_string(), serde_json::Value::String(ElementIdHelper::to_cypher_value(&from_vertex)));
+        params.insert("to_id".to_string(), serde_json::Value::String(ElementIdHelper::to_cypher_value(&to_vertex)));
 
-        let statements = json!({ "statements": [statement] });
-        let response = self
-            .api
-            .execute_in_transaction(&self.transaction_url, statements)?;
+        let statement = Neo4jStatement::new(query, params);
+        let statements = Neo4jStatements::single(statement);
 
-        let result = response["results"]
-            .as_array()
-            .and_then(|r| r.first())
-            .ok_or_else(|| {
-                GraphError::InternalError(
-                    "Invalid response from Neo4j for find_all_paths".to_string(),
-                )
-            })?;
+        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
 
-        if let Some(errors) = result["errors"].as_array() {
-            if !errors.is_empty() {
-                return Err(GraphError::InvalidQuery(errors[0].to_string()));
-            }
+        let result = match response.first_result() {
+            Ok(r) => r,
+            Err(_) => return Ok(vec![]),
+        };
+
+        if !result.errors.is_empty() {
+            return Err(GraphError::InvalidQuery(format!("{:?}", result.errors[0])));
         }
 
-        let empty_vec = vec![];
-        let data = result["data"].as_array().unwrap_or(&empty_vec);
         let mut paths = Vec::new();
-        for item in data {
-            let path = parse_path_from_data(item)?;
-            paths.push(path);
+        for row_data in &result.data {
+            if let Some(graph_data) = &row_data.graph {
+                let path = crate::helpers::parse_path_from_graph_data(graph_data)?;
+                paths.push(path);
+            }
         }
 
         Ok(paths)
@@ -168,12 +139,6 @@ impl Transaction {
         center: ElementId,
         options: NeighborhoodOptions,
     ) -> Result<Subgraph, GraphError> {
-        let center_id = match center {
-            ElementId::StringValue(s) => s,
-            ElementId::Int64(i) => i.to_string(),
-            ElementId::Uuid(u) => u,
-        };
-
         let (left_arrow, right_arrow) = match options.direction {
             Direction::Outgoing => ("", "->"),
             Direction::Incoming => ("<-", ""),
@@ -193,50 +158,39 @@ impl Transaction {
             .max_vertices
             .map_or("".to_string(), |l| format!("LIMIT {l}"));
 
-        let full_query = format!(
+        let query = format!(
             "MATCH p = (c){left_arrow}[r{edge_type_str}*1..{depth}]{right_arrow}(n)\
           WHERE ( elementId(c) = $id OR id(c) = toInteger($id) )\
           RETURN p {limit_clause}"
         );
 
-        let statement = json!({
-            "statement": full_query,
-          "resultDataContents": ["row","graph"],
-          "parameters": { "id": center_id }
-        });
+        let params = ElementIdHelper::to_cypher_parameter(&center);
+        let statement = Neo4jStatement::new(query, params);
+        let statements = Neo4jStatements::single(statement);
 
-        let statements = json!({ "statements": [statement] });
-        let response = self
-            .api
-            .execute_in_transaction(&self.transaction_url, statements)?;
+        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
 
-        let result = response["results"]
-            .as_array()
-            .and_then(|r| r.first())
-            .ok_or_else(|| {
-                GraphError::InternalError(
-                    "Invalid response from Neo4j for get_neighborhood".to_string(),
-                )
-            })?;
+        let result = match response.first_result() {
+            Ok(r) => r,
+            Err(_) => return Ok(Subgraph { vertices: vec![], edges: vec![] }),
+        };
 
-        if let Some(errors) = result["errors"].as_array() {
-            if !errors.is_empty() {
-                return Err(GraphError::InvalidQuery(errors[0].to_string()));
-            }
+        if !result.errors.is_empty() {
+            return Err(GraphError::InvalidQuery(format!("{:?}", result.errors[0])));
         }
 
-        let empty_vec = vec![];
-        let data = result["data"].as_array().unwrap_or(&empty_vec);
         let mut all_vertices: HashMap<String, Vertex> = HashMap::new();
         let mut all_edges: HashMap<String, Edge> = HashMap::new();
 
-        for item in data {
-            let path = parse_path_from_data(item)?;
-            for v in path.vertices {
-                all_vertices.insert(element_id_to_key(&v.id), v);
-            }
-            for e in path.edges {
-                all_edges.insert(element_id_to_key(&e.id), e);
+        for row_data in &result.data {
+            if let Some(graph_data) = &row_data.graph {
+                let path = crate::helpers::parse_path_from_graph_data(graph_data)?;
+                for v in path.vertices {
+                    all_vertices.insert(element_id_to_key(&v.id), v);
+                }
+                for e in path.edges {
+                    all_edges.insert(element_id_to_key(&e.id), e);
+                }
             }
         }
 
@@ -263,8 +217,6 @@ impl Transaction {
         direction: Direction,
         edge_types: Option<Vec<String>>,
     ) -> Result<Vec<Vertex>, GraphError> {
-        let source_id = element_id_to_key(&source);
-
         let (left_arrow, right_arrow) = match direction {
             Direction::Outgoing => ("", "->"),
             Direction::Incoming => ("<-", ""),
@@ -283,36 +235,12 @@ impl Transaction {
             "MATCH (a){left_arrow}[{edge_type_str}*{distance}]{right_arrow}(b) WHERE elementId(a) = $id RETURN DISTINCT b"
         );
 
-        let statement = json!({
-            "statement": query,
-            "parameters": { "id": source_id }
-        });
+        let params = ElementIdHelper::to_cypher_parameter(&source);
+        let statement = Neo4jStatement::new(query, params);
+        let statements = Neo4jStatements::single(statement);
 
-        let statements = json!({ "statements": [statement] });
-        let response = self
-            .api
-            .execute_in_transaction(&self.transaction_url, statements)?;
-
-        let result = response["results"]
-            .as_array()
-            .and_then(|r| r.first())
-            .ok_or_else(|| {
-                GraphError::InternalError(
-                    "Invalid response from Neo4j for get_vertices_at_distance".to_string(),
-                )
-            })?;
-
-        let empty_vec = vec![];
-        let data = result["data"].as_array().unwrap_or(&empty_vec);
-        let mut vertices = Vec::new();
-        for item in data {
-            if let Some(graph_node) = item["graph"]["nodes"].as_array().and_then(|n| n.first()) {
-                let vertex = parse_vertex_from_graph_data(graph_node, None)?;
-                vertices.push(vertex);
-            }
-        }
-
-        Ok(vertices)
+        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+        VertexListProcessor::process_response(response)
     }
 }
 

@@ -2,7 +2,157 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use golem_graph::golem::graph::errors::GraphError;
 use log::trace;
 use reqwest::{Client, Response};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
+
+#[derive(Debug, Deserialize, Clone)]
+pub(crate) struct Neo4jResponse {
+    pub results: Vec<QueryResult>,
+    #[serde(default)]
+    pub errors: Vec<Neo4jError>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub(crate) struct QueryResult {
+    #[serde(default)]
+    pub columns: Option<Vec<String>>,
+    #[serde(default)]
+    pub data: Vec<ResultData>,
+    #[serde(default)]
+    pub errors: Vec<Neo4jError>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub(crate) struct ResultData {
+    #[serde(default)]
+    pub row: Option<Vec<Value>>,
+    #[serde(default)]
+    pub graph: Option<GraphData>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub(crate) struct GraphData {
+    #[serde(default)]
+    pub nodes: Vec<Neo4jNode>,
+    #[serde(default)]
+    pub relationships: Vec<Neo4jRelationship>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub(crate) struct Neo4jNode {
+    #[serde(rename = "elementId")]
+    pub element_id: String,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    #[serde(default)]
+    pub properties: HashMap<String, Value>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub(crate) struct Neo4jRelationship {
+    #[serde(rename = "elementId")]
+    pub element_id: String,
+    #[serde(rename = "type")]
+    pub relationship_type: String,
+    #[serde(default)]
+    pub properties: HashMap<String, Value>,
+    #[serde(rename = "startNode")]
+    pub start_node: String,
+    #[serde(rename = "endNode")]
+    pub end_node: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub(crate) struct Neo4jError {
+    pub _code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub(crate) struct Neo4jStatement {
+    pub statement: String,
+    pub parameters: HashMap<String, Value>,
+    #[serde(rename = "resultDataContents")]
+    pub result_data_contents: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub(crate) struct Neo4jStatements {
+    pub statements: Vec<Neo4jStatement>,
+}
+
+impl Neo4jStatement {
+    pub fn new(statement: String, parameters: HashMap<String, Value>) -> Self {
+        Self {
+            statement,
+            parameters,
+            result_data_contents: vec!["row".to_string(), "graph".to_string()],
+        }
+    }
+
+    pub fn with_row_only(statement: String, parameters: HashMap<String, Value>) -> Self {
+        Self {
+            statement,
+            parameters,
+            result_data_contents: vec!["row".to_string()],
+        }
+    }
+}
+
+impl Neo4jStatements {
+    pub fn single(statement: Neo4jStatement) -> Self {
+        Self {
+            statements: vec![statement],
+        }
+    }
+
+    pub fn batch(statements: Vec<Neo4jStatement>) -> Self {
+        Self { statements }
+    }
+}
+
+impl Neo4jResponse {
+    pub fn first_result(&self) -> Result<&QueryResult, GraphError> {
+        self.results.first().ok_or_else(|| {
+            GraphError::InternalError("No results in Neo4j response".to_string())
+        })
+    }
+}
+
+impl QueryResult {
+    pub fn check_errors(&self) -> Result<(), GraphError> {
+        if !self.errors.is_empty() {
+            return Err(GraphError::InvalidQuery(self.errors[0].message.clone()));
+        }
+        Ok(())
+    }
+
+    pub fn first_data(&self) -> Result<&ResultData, GraphError> {
+        self.data.first().ok_or_else(|| {
+            GraphError::InternalError("No data in Neo4j result".to_string())
+        })
+    }
+
+    pub fn first_graph_node(&self) -> Result<&Neo4jNode, GraphError> {
+        self.first_data()?
+            .graph
+            .as_ref()
+            .and_then(|g| g.nodes.first())
+            .ok_or_else(|| {
+                GraphError::InternalError("No graph nodes in Neo4j result".to_string())
+            })
+    }
+
+    pub fn first_row(&self) -> Result<&Vec<Value>, GraphError> {
+        self.first_data()?
+            .row
+            .as_ref()
+            .ok_or_else(|| {
+                GraphError::InternalError("No row data in Neo4j result".to_string())
+            })
+    }
+}
 
 #[derive(Clone)]
 pub(crate) struct Neo4jApi {
@@ -88,26 +238,30 @@ impl Neo4jApi {
         Self::ensure_success_and_get_location(resp)
     }
 
-    pub(crate) fn execute_in_transaction(
+    pub(crate) fn execute_typed_transaction(
         &self,
         tx_url: &str,
-        statements: Value,
-    ) -> Result<Value, GraphError> {
-        trace!("Execute in Neo4j transaction: {tx_url}");
-        trace!("[Neo4jApi] Cypher request: {statements}");
+        statements: &Neo4jStatements,
+    ) -> Result<Neo4jResponse, GraphError> {
+        trace!("Execute typed Neo4j transaction: {tx_url}");
+        let statements_json = serde_json::to_string(statements)
+            .map_err(|e| GraphError::InternalError(format!("Failed to serialize statements: {e}")))?;
+        trace!("[Neo4jApi] Cypher request: {statements_json}");
+        
         let resp = self
             .client
             .post(tx_url)
             .header("Authorization", &self.auth_header)
             .header("Content-Type", "application/json")
-            .body(statements.to_string())
+            .body(statements_json)
             .send()
             .map_err(|e| {
                 self.handle_neo4j_reqwest_error("Neo4j execute in transaction failed", e)
             })?;
-        let json = Self::ensure_success_and_json(resp)?;
-        trace!("[Neo4jApi] Cypher response: {json}");
-        Ok(json)
+        
+        let response = Self::ensure_success_and_typed_json(resp)?;
+        trace!("[Neo4jApi] Cypher response received");
+        Ok(response)
     }
 
     pub(crate) fn commit_transaction(&self, tx_url: &str) -> Result<(), GraphError> {
@@ -155,10 +309,17 @@ impl Neo4jApi {
         }
     }
 
-    fn ensure_success_and_json(response: Response) -> Result<Value, GraphError> {
+    fn ensure_success_and_typed_json(response: Response) -> Result<Neo4jResponse, GraphError> {
         if response.status().is_success() {
-            response.json().map_err(|e| {
-                GraphError::InternalError(format!("Failed to parse Neo4j response JSON: {e}"))
+            let text = response.text().map_err(|e| {
+                GraphError::InternalError(format!("Failed to read Neo4j response body: {e}"))
+            })?;
+            
+            serde_json::from_str::<Neo4jResponse>(&text).map_err(|e| {
+                GraphError::InternalError(format!(
+                    "Failed to parse Neo4j response JSON: {e}\nResponse body (first 1000 chars): {}",
+                    text.chars().take(1000).collect::<String>()
+                ))
             })
         } else {
             let status_code = response.status().as_u16();
