@@ -55,7 +55,6 @@ fn parse_gremlin_response(response: Value) -> Result<QueryResult, GraphError> {
                 if obj.get("@type") == Some(&Value::String("g:Vertex".to_string()))
                     || obj.get("@type") == Some(&Value::String("g:Edge".to_string()))
                 {
-                    eprintln!("DEBUG: Detected GraphSON Vertex/Edge format, converting to maps");
                     let mut maps = Vec::new();
                     for item in arr {
                         if let Some(vertex_obj) = item.as_object() {
