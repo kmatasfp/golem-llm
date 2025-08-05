@@ -72,12 +72,13 @@ impl Transaction {
         let result_array = if let Some(array) = response.as_array() {
             array.clone()
         } else {
-            let structured_response: Result<ArangoQueryResponse, _> = serde_json::from_value(response.clone());
+            let structured_response: Result<ArangoQueryResponse, _> =
+                serde_json::from_value(response.clone());
             match structured_response {
                 Ok(resp) => resp.result.into_iter().collect(),
                 Err(_) => {
                     return Err(GraphError::InternalError(
-                        "Unexpected AQL query response format".to_string()
+                        "Unexpected AQL query response format".to_string(),
                     ));
                 }
             }
@@ -119,7 +120,10 @@ impl Transaction {
                             for (key, value) in doc.properties {
                                 doc_map.insert(key, value);
                             }
-                            edges.push(crate::helpers::parse_edge_from_document(&doc_map, &collection)?);
+                            edges.push(crate::helpers::parse_edge_from_document(
+                                &doc_map,
+                                &collection,
+                            )?);
                         }
                     }
                     return Ok(QueryResult::Edges(edges));
@@ -138,7 +142,10 @@ impl Transaction {
                             for (key, value) in doc.properties {
                                 doc_map.insert(key, value);
                             }
-                            vertices.push(crate::helpers::parse_vertex_from_document(&doc_map, &collection)?);
+                            vertices.push(crate::helpers::parse_vertex_from_document(
+                                &doc_map,
+                                &collection,
+                            )?);
                         }
                     }
                     return Ok(QueryResult::Vertices(vertices));

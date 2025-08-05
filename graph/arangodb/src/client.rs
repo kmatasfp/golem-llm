@@ -95,7 +95,10 @@ impl ArangoDbApi {
                 GraphError::InternalError(format!("Failed to read error response: {e}"))
             })?;
 
-            let error_msg = error_body.error_message.as_deref().unwrap_or("Unknown error");
+            let error_msg = error_body
+                .error_message
+                .as_deref()
+                .unwrap_or("Unknown error");
 
             let mut error = if let Some(code) = error_body.error_num {
                 from_arangodb_error_code(code, error_msg)
@@ -125,7 +128,8 @@ impl ArangoDbApi {
         };
 
         let body = json!({ "collections": collections });
-        let result: TransactionBeginResponse = self.execute(Method::POST, "/_api/transaction/begin", Some(&body))?;
+        let result: TransactionBeginResponse =
+            self.execute(Method::POST, "/_api/transaction/begin", Some(&body))?;
         Ok(result.id)
     }
 
@@ -145,7 +149,8 @@ impl ArangoDbApi {
         };
 
         let body = json!({ "collections": collections_spec });
-        let result: TransactionBeginResponse = self.execute(Method::POST, "/_api/transaction/begin", Some(&body))?;
+        let result: TransactionBeginResponse =
+            self.execute(Method::POST, "/_api/transaction/begin", Some(&body))?;
         Ok(result.id)
     }
 
@@ -302,11 +307,7 @@ impl ArangoDbApi {
                     id: None,
                     key: None,
                 };
-                return map_arangodb_http_status(
-                    status.as_u16(),
-                    &error_msg,
-                    &error_body,
-                );
+                return map_arangodb_http_status(status.as_u16(), &error_msg, &error_body);
             }
         }
         GraphError::InternalError(format!("ArangoDB request error ({details}): {err}"))
@@ -330,7 +331,8 @@ impl ArangoDbApi {
 
     pub fn list_collections(&self) -> Result<Vec<ContainerInfo>, GraphError> {
         trace!("List collections");
-        let collections: Vec<CollectionInfo> = self.execute(Method::GET, "/_api/collection", None)?;
+        let collections: Vec<CollectionInfo> =
+            self.execute(Method::GET, "/_api/collection", None)?;
 
         let collections = collections
             .into_iter()
@@ -364,7 +366,7 @@ impl ArangoDbApi {
         );
         let type_str = match index_type {
             IndexType::Exact => "persistent",
-            IndexType::Range => "persistent", 
+            IndexType::Range => "persistent",
             IndexType::Text => "inverted",
             IndexType::Geospatial => "geo",
         };
@@ -444,9 +446,7 @@ impl ArangoDbApi {
                             format!("idx_{}_{}", collection.name, index.fields.join("_"))
                         };
 
-                        let final_name = index.name
-                            .or(index.id)
-                            .unwrap_or(logical_name);
+                        let final_name = index.name.or(index.id).unwrap_or(logical_name);
 
                         all_indexes.push(IndexDefinition {
                             name: final_name,
@@ -513,8 +513,8 @@ impl ArangoDbApi {
             .filter(|c| matches!(c.container_type, ContainerType::EdgeContainer))
             .map(|c| EdgeTypeDefinition {
                 collection: c.name,
-                from_collections: vec![], 
-                to_collections: vec![],   // ArangoDB doesn't store these constraints
+                from_collections: vec![],
+                to_collections: vec![], // ArangoDB doesn't store these constraints
             })
             .collect();
         Ok(edge_types)
@@ -576,7 +576,8 @@ impl ArangoDbApi {
         };
 
         let body = json!({ "collections": collections });
-        let result: TransactionBeginResponse = self.execute(Method::POST, "/_api/transaction/begin", Some(&body))?;
+        let result: TransactionBeginResponse =
+            self.execute(Method::POST, "/_api/transaction/begin", Some(&body))?;
         Ok(result.id)
     }
 }
@@ -832,9 +833,7 @@ fn map_arangodb_http_status(
         _ => {
             let debug_info = format!(
                 "ArangoDB HTTP error [{}]: {} | Error code: {:?}",
-                status,
-                message,
-                error_body.error_num
+                status, message, error_body.error_num
             );
             GraphError::InternalError(debug_info)
         }
