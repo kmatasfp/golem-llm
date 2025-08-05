@@ -137,7 +137,7 @@ impl Guest for Component {
         let graph_connection = match connection::connect(&config) {
             Ok(conn) => conn,
             Err(error) => {
-                return format!("Connection failed please ensure you are connected: {:?}", error);
+                return format!("ERROR: Connection failed please ensure you are connected: {:?}", error);
             }
         };
         if let Err(error) = ensure_arangodb_collections(&graph_connection) {
@@ -148,7 +148,7 @@ impl Guest for Component {
         let transaction = match graph_connection.begin_transaction() {
             Ok(tx) => tx,
             Err(error) => {
-                return format!("Transaction creation failed: {:?}", error);
+                return format!("ERROR: Transaction creation failed: {:?}", error);
             }
         };
 
@@ -161,7 +161,7 @@ impl Guest for Component {
         println!("Creating vertex...");
         let vertex = match transaction.create_vertex("Person", &properties) {
             Ok(v) => v,
-            Err(error) => return format!("Vertex creation failed: {:?}", error),
+            Err(error) => return format!("ERROR: Vertex creation failed: {:?}", error),
         };
 
         println!("Created vertex with ID: {:?}", vertex.id);
@@ -169,14 +169,14 @@ impl Guest for Component {
         // Retrieving the vertex by ID
         let retrieved_vertex = match transaction.get_vertex(&vertex.id.clone()) {
             Ok(Some(v)) => v,
-            Ok(None) => return "Vertex not found after creation".to_string(),
-            Err(error) => return format!("Vertex retrieval failed: {:?}", error),
+            Ok(None) => return "ERROR: Vertex not found after creation".to_string(),
+            Err(error) => return format!("ERROR: Vertex retrieval failed: {:?}", error),
         };
 
         // Committing the transaction
         match transaction.commit() {
             Ok(_) => println!("Transaction committed successfully"),
-            Err(error) => return format!("Commit failed: {:?}", error),
+            Err(error) => return format!("ERROR: Commit failed: {:?}", error),
         };
 
         let _ = graph_connection.close();
@@ -209,7 +209,7 @@ impl Guest for Component {
         let graph_connection = match connect(&config) {
             Ok(conn) => conn,
             Err(error) => {
-                return format!("Connection failed: {:?}", error);
+                return format!("ERROR: Connection failed: {:?}", error);
             }
         };
 
@@ -220,7 +220,7 @@ impl Guest for Component {
         let transaction = match graph_connection.begin_transaction() {
             Ok(tx) => tx,
             Err(error) => {
-                return format!("Transaction creation failed: {:?}", error);
+                return format!("ERROR: Transaction creation failed: {:?}", error);
             }
         };
 
@@ -237,12 +237,12 @@ impl Guest for Component {
 
         let vertex1 = match transaction.create_vertex("Person", &person1_props) {
             Ok(v) => v,
-            Err(error) => return format!("First vertex creation failed: {:?}", error),
+            Err(error) => return format!("ERROR: First vertex creation failed: {:?}", error),
         };
 
         let vertex2 = match transaction.create_vertex("Person", &person2_props) {
             Ok(v) => v,
-            Err(error) => return format!("Second vertex creation failed: {:?}", error),
+            Err(error) => return format!("ERROR: Second vertex creation failed: {:?}", error),
         };
 
         let edge_props = vec![
@@ -261,7 +261,7 @@ impl Guest for Component {
                 println!("INFO: Successfully created edge: {:?} -> {:?} (type: {})", e.from_vertex, e.to_vertex, e.edge_type);
                 e
             },
-            Err(error) => return format!("Edge creation failed: {:?}", error),
+            Err(error) => return format!("ERROR: Edge creation failed: {:?}", error),
         };
 
         // Retrieve adjacent vertices
@@ -279,14 +279,14 @@ impl Guest for Component {
             Err(error) => {
                 println!("ERROR: get_adjacent_vertices failed: {:?}", error);
                 results.push("get_adjacent_vertices failed".to_string());
-                return format!("Adjacent vertices retrieval failed: {:?} | Provider: {} | Edge: {:?} -> {:?} | Results: {:?}", 
+                return format!("ERROR: Adjacent vertices retrieval failed: {:?} | Provider: {} | Edge: {:?} -> {:?} | Results: {:?}", 
                     error, PROVIDER, vertex1.id, vertex2.id, results);
             }
         };
 
         match transaction.commit() {
             Ok(_) => (),
-            Err(error) => return format!("Commit failed: {:?}", error),
+            Err(error) => return format!("ERROR: Commit failed: {:?}", error),
         };
 
         let _ = graph_connection.close();
@@ -317,7 +317,7 @@ impl Guest for Component {
         let graph_connection = match connect(&config) {
             Ok(conn) => conn,
             Err(error) => {
-                return format!("Connection failed: {:?}", error);
+                return format!("ERROR: Connection failed: {:?}", error);
             }
         };
 
@@ -328,7 +328,7 @@ impl Guest for Component {
         let transaction = match graph_connection.begin_transaction() {
             Ok(tx) => tx,
             Err(error) => {
-                return format!("Transaction creation failed: {:?}", error);
+                return format!("ERROR: Transaction creation failed: {:?}", error);
             }
         };
 
@@ -340,7 +340,7 @@ impl Guest for Component {
 
         let vertex = match transaction.create_vertex("TempUser", &properties) {
             Ok(v) => v,
-            Err(error) => return format!("Vertex creation failed: {:?}", error),
+            Err(error) => return format!("ERROR: Vertex creation failed: {:?}", error),
         };
 
         let is_active_before = transaction.is_active();
@@ -348,7 +348,7 @@ impl Guest for Component {
         // Intentionally rolling-back the transaction
         match transaction.rollback() {
             Ok(_) => println!("Transaction rolled back successfully"),
-            Err(error) => return format!("Rollback failed: {:?}", error),
+            Err(error) => return format!("ERROR: Rollback failed: {:?}", error),
         };
 
         let is_active_after = transaction.is_active();
@@ -383,7 +383,7 @@ impl Guest for Component {
         let graph_connection = match connect(&config) {
             Ok(conn) => conn,
             Err(error) => {
-                return format!("Connection failed: {:?}", error);
+                return format!("ERROR: Connection failed: {:?}", error);
             }
         };
 
@@ -394,7 +394,7 @@ impl Guest for Component {
         let transaction = match graph_connection.begin_transaction() {
             Ok(tx) => tx,
             Err(error) => {
-                return format!("Transaction creation failed: {:?}", error);
+                return format!("ERROR: Transaction creation failed: {:?}", error);
             }
         };
 
@@ -433,7 +433,7 @@ impl Guest for Component {
             },
             Err(error) => {
                 results.push("Batch vertex creation failed".to_string());
-                return format!("Batch vertex creation failed: {:?} | Results: {:?}", error, results);
+                return format!("ERROR: Batch vertex creation failed: {:?} | Results: {:?}", error, results);
             }
         };
 
@@ -458,13 +458,13 @@ impl Guest for Component {
                 },
                 Err(error) => {
                     results.push("Batch edge creation failed".to_string());
-                    return format!("Batch edge creation failed: {:?} | Results: {:?}", error, results);
+                    return format!("ERROR: Batch edge creation failed: {:?} | Results: {:?}", error, results);
                 }
             };
 
             match transaction.commit() {
                 Ok(_) => (),
-                Err(error) => return format!("Commit failed: {:?}", error),
+                Err(error) => return format!("ERROR: Commit failed: {:?}", error),
             };
 
             let _ = graph_connection.close();
@@ -499,7 +499,7 @@ impl Guest for Component {
 
         let graph_connection = match connect(&config) {
             Ok(conn) => conn,
-            Err(error) => return format!("Connection failed: {:?}", error),
+            Err(error) => return format!("ERROR: Connection failed: {:?}", error),
         };
 
         if let Err(error) = ensure_arangodb_collections(&graph_connection) {
@@ -508,7 +508,7 @@ impl Guest for Component {
 
         let transaction = match graph_connection.begin_transaction() {
             Ok(tx) => tx,
-            Err(error) => return format!("Transaction creation failed: {:?}", error),
+            Err(error) => return format!("ERROR: Transaction creation failed: {:?}", error),
         };
 
         // Create a small network: A -> B -> C
@@ -516,21 +516,21 @@ impl Guest for Component {
             ("name".to_string(), PropertyValue::StringValue("A".to_string())),
         ]) {
             Ok(v) => v,
-            Err(error) => return format!("Vertex A creation failed: {:?}", error),
+            Err(error) => return format!("ERROR: Vertex A creation failed: {:?}", error),
         };
 
         let vertex_b = match transaction.create_vertex("Node", &vec![
             ("name".to_string(), PropertyValue::StringValue("B".to_string())),
         ]) {
             Ok(v) => v,
-            Err(error) => return format!("Vertex B creation failed: {:?}", error),
+            Err(error) => return format!("ERROR: Vertex B creation failed: {:?}", error),
         };
 
         let vertex_c = match transaction.create_vertex("Node", &vec![
             ("name".to_string(), PropertyValue::StringValue("C".to_string())),
         ]) {
             Ok(v) => v,
-            Err(error) => return format!("Vertex C creation failed: {:?}", error),
+            Err(error) => return format!("ERROR: Vertex C creation failed: {:?}", error),
         };
 
         // Creating edges
@@ -554,7 +554,7 @@ impl Guest for Component {
             },
             Err(error) => {
                 results.push("Neighborhood exploration failed".to_string());
-                return format!("Neighborhood exploration failed: {:?} | Results: {:?}", error, results);
+                return format!("ERROR: Neighborhood exploration failed: {:?} | Results: {:?}", error, results);
             }
         };
 
@@ -577,13 +577,13 @@ impl Guest for Component {
             },
             Err(error) => {
                 results.push("Path existence check failed".to_string());
-                return format!("Path existence check failed: {:?} | Results: {:?}", error, results);
+                return format!("ERROR: Path existence check failed: {:?} | Results: {:?}", error, results);
             }
         };
 
         match transaction.commit() {
             Ok(_) => (),
-            Err(error) => return format!("Commit failed: {:?}", error),
+            Err(error) => return format!("ERROR: Commit failed: {:?}", error),
         };
 
         let _ = graph_connection.close();
@@ -616,7 +616,7 @@ impl Guest for Component {
 
         let graph_connection = match connect(&config) {
             Ok(conn) => conn,
-            Err(error) => return format!("Connection failed: {:?}", error),
+            Err(error) => return format!("ERROR: Connection failed: {:?}", error),
         };
         if let Err(error) = ensure_arangodb_collections(&graph_connection) {
             println!("Warning: Collection setup failed: {}", error);
@@ -624,7 +624,7 @@ impl Guest for Component {
 
         let transaction = match graph_connection.begin_transaction() {
             Ok(tx) => tx,
-            Err(error) => return format!("Transaction creation failed: {:?}", error),
+            Err(error) => return format!("ERROR: Transaction creation failed: {:?}", error),
         };
 
         // Creating some test data first
@@ -678,13 +678,13 @@ impl Guest for Component {
             },
             Err(error) => {
                 results.push("Query execution failed".to_string());
-                return format!("Query execution failed: {:?} | Results: {:?}", error, results);
+                return format!("ERROR: Query execution failed: {:?} | Results: {:?}", error, results);
             }
         };
 
         match transaction.commit() {
             Ok(_) => (),
-            Err(error) => return format!("Commit failed: {:?}", error),
+            Err(error) => return format!("ERROR: Commit failed: {:?}", error),
         };
 
         let _ = graph_connection.close();
@@ -713,7 +713,7 @@ impl Guest for Component {
         let schema_manager = match schema::get_schema_manager(None) {
             Ok(manager) => manager,
             Err(error) => {
-                return format!("Schema manager creation failed: {:?}", error);
+                return format!("ERROR: Schema manager creation failed: {:?}", error);
             }
         };
 
