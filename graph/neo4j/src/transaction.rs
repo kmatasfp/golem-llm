@@ -1,6 +1,9 @@
-use crate::conversions::{self};
-use crate::helpers::{parse_edge_from_row, parse_vertex_from_neo4j_node, ElementIdHelper, VertexProcessor, EdgeProcessor, VertexListProcessor, EdgeListProcessor, Neo4jResponseProcessor};
 use crate::client::{Neo4jStatement, Neo4jStatements};
+use crate::conversions::{self};
+use crate::helpers::{
+    parse_edge_from_row, parse_vertex_from_neo4j_node, EdgeListProcessor, EdgeProcessor,
+    ElementIdHelper, Neo4jResponseProcessor, VertexListProcessor, VertexProcessor,
+};
 use crate::Transaction;
 use golem_graph::golem::graph::{
     errors::GraphError,
@@ -98,19 +101,22 @@ impl GuestTransaction for Transaction {
     ) -> Result<Vertex, GraphError> {
         let mut labels = vec![vertex_type];
         labels.extend(additional_labels);
-        
+
         let properties_map = conversions::to_cypher_properties(properties)?;
         let mut params = HashMap::new();
-        params.insert("props".to_string(), serde_json::Value::Object(
-            properties_map.into_iter().collect()
-        ));
+        params.insert(
+            "props".to_string(),
+            serde_json::Value::Object(properties_map.into_iter().collect()),
+        );
 
         let query = format!("CREATE (n:`{}`) SET n = $props RETURN n", labels.join(":"));
-        
+
         let statement = Neo4jStatement::new(query, params);
         let statements = Neo4jStatements::single(statement);
-        
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
         VertexProcessor::process_response(response)
     }
 
@@ -121,56 +127,63 @@ impl GuestTransaction for Transaction {
                 .and_then(|rest| rest.split_once(":"))
             {
                 let mut params = HashMap::new();
-                params.insert("value".to_string(), serde_json::Value::String(value.to_string()));
-                
-                let query = format!("MATCH (n) WHERE n.`{}` = $value RETURN n", prop);
+                params.insert(
+                    "value".to_string(),
+                    serde_json::Value::String(value.to_string()),
+                );
+
+                let query = format!("MATCH (n) WHERE n.`{prop}` = $value RETURN n");
                 let statement = Neo4jStatement::new(query, params);
                 let statements = Neo4jStatements::single(statement);
-                
-                let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
-                
+
+                let response = self
+                    .api
+                    .execute_typed_transaction(&self.transaction_url, &statements)?;
+
                 let result = match response.first_result() {
                     Ok(r) => r,
                     Err(_) => return Ok(None),
                 };
-                
+
                 if !result.errors.is_empty() {
                     return Ok(None);
                 }
-                
+
                 if result.data.is_empty() {
                     return Ok(None);
                 }
-                
+
                 return match VertexProcessor::process_response(response) {
                     Ok(vertex) => Ok(Some(vertex)),
                     Err(_) => Ok(None),
                 };
             }
         }
-        
+
         let params = ElementIdHelper::to_cypher_parameter(&id);
         let statement = Neo4jStatement::new(
             "MATCH (n) WHERE elementId(n) = $id RETURN n".to_string(),
             params,
         );
         let statements = Neo4jStatements::single(statement);
-        
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
-        
+
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
+
         let result = match response.first_result() {
             Ok(r) => r,
             Err(_) => return Ok(None),
         };
-        
+
         if !result.errors.is_empty() {
             return Ok(None);
         }
-        
+
         if result.data.is_empty() {
             return Ok(None);
         }
-        
+
         match VertexProcessor::process_response(response) {
             Ok(vertex) => Ok(Some(vertex)),
             Err(_) => Ok(None),
@@ -179,19 +192,22 @@ impl GuestTransaction for Transaction {
 
     fn update_vertex(&self, id: ElementId, properties: PropertyMap) -> Result<Vertex, GraphError> {
         let properties_map = conversions::to_cypher_properties(properties)?;
-        
+
         let mut params = ElementIdHelper::to_cypher_parameter(&id);
-        params.insert("props".to_string(), serde_json::Value::Object(
-            properties_map.into_iter().collect()
-        ));
-        
+        params.insert(
+            "props".to_string(),
+            serde_json::Value::Object(properties_map.into_iter().collect()),
+        );
+
         let statement = Neo4jStatement::new(
             "MATCH (n) WHERE elementId(n) = $id SET n = $props RETURN n".to_string(),
             params,
         );
         let statements = Neo4jStatements::single(statement);
-        
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
         VertexProcessor::process_response(response)
     }
 
@@ -201,31 +217,35 @@ impl GuestTransaction for Transaction {
         updates: PropertyMap,
     ) -> Result<Vertex, GraphError> {
         let properties_map = conversions::to_cypher_properties(updates)?;
-        
+
         let mut params = ElementIdHelper::to_cypher_parameter(&id);
-        params.insert("props".to_string(), serde_json::Value::Object(
-            properties_map.into_iter().collect()
-        ));
-        
+        params.insert(
+            "props".to_string(),
+            serde_json::Value::Object(properties_map.into_iter().collect()),
+        );
+
         let statement = Neo4jStatement::new(
             "MATCH (n) WHERE elementId(n) = $id SET n += $props RETURN n".to_string(),
             params,
         );
         let statements = Neo4jStatements::single(statement);
-        
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
         VertexProcessor::process_response(response)
     }
 
     fn delete_vertex(&self, id: ElementId, delete_edges: bool) -> Result<(), GraphError> {
         let params = ElementIdHelper::to_cypher_parameter(&id);
         let detach_str = if delete_edges { "DETACH" } else { "" };
-        
-        let query = format!("MATCH (n) WHERE elementId(n) = $id {} DELETE n", detach_str);
+
+        let query = format!("MATCH (n) WHERE elementId(n) = $id {detach_str} DELETE n");
         let statement = Neo4jStatement::with_row_only(query, params);
         let statements = Neo4jStatements::single(statement);
-        
-        self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+
+        self.api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
         Ok(())
     }
 
@@ -257,13 +277,12 @@ impl GuestTransaction for Transaction {
             "{match_clause} {where_clause} RETURN n {sort_clause} {offset_clause} {limit_clause}"
         );
 
-        let statement = Neo4jStatement::new(
-            full_query, 
-            params.into_iter().collect()
-        );
+        let statement = Neo4jStatement::new(full_query, params.into_iter().collect());
         let statements = Neo4jStatements::single(statement);
-        
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
         VertexListProcessor::process_response(response)
     }
 
@@ -275,55 +294,66 @@ impl GuestTransaction for Transaction {
         properties: PropertyMap,
     ) -> Result<Edge, GraphError> {
         let properties_map = conversions::to_cypher_properties(properties)?;
-        
+
         let mut params = HashMap::new();
-        params.insert("from_id".to_string(), serde_json::Value::String(ElementIdHelper::to_cypher_value(&from_vertex)));
-        params.insert("to_id".to_string(), serde_json::Value::String(ElementIdHelper::to_cypher_value(&to_vertex)));
-        params.insert("props".to_string(), serde_json::Value::Object(
-            properties_map.into_iter().collect()
-        ));
+        params.insert(
+            "from_id".to_string(),
+            serde_json::Value::String(ElementIdHelper::to_cypher_value(&from_vertex)),
+        );
+        params.insert(
+            "to_id".to_string(),
+            serde_json::Value::String(ElementIdHelper::to_cypher_value(&to_vertex)),
+        );
+        params.insert(
+            "props".to_string(),
+            serde_json::Value::Object(properties_map.into_iter().collect()),
+        );
 
         let query = format!(
             "MATCH (a) WHERE elementId(a) = $from_id \
              MATCH (b) WHERE elementId(b) = $to_id \
-             CREATE (a)-[r:`{}`]->(b) SET r = $props \
+             CREATE (a)-[r:`{edge_type}`]->(b) SET r = $props \
              RETURN elementId(r), type(r), properties(r), \
-                    elementId(startNode(r)), elementId(endNode(r))",
-            edge_type
+                    elementId(startNode(r)), elementId(endNode(r))"
         );
-        
+
         let statement = Neo4jStatement::with_row_only(query, params);
         let statements = Neo4jStatements::single(statement);
-        
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
         EdgeProcessor::process_response(response)
     }
 
     fn get_edge(&self, id: ElementId) -> Result<Option<Edge>, GraphError> {
         let params = ElementIdHelper::to_cypher_parameter(&id);
-        
+
         let query = "MATCH ()-[r]-() WHERE elementId(r) = $id \
                      RETURN elementId(r), type(r), properties(r), \
-                            elementId(startNode(r)), elementId(endNode(r))".to_string();
-        
+                            elementId(startNode(r)), elementId(endNode(r))"
+            .to_string();
+
         let statement = Neo4jStatement::with_row_only(query, params);
         let statements = Neo4jStatements::single(statement);
-        
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
-        
+
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
+
         let result = match response.first_result() {
             Ok(r) => r,
             Err(_) => return Ok(None),
         };
-        
+
         if !result.errors.is_empty() {
             return Ok(None);
         }
-        
+
         if result.data.is_empty() {
             return Ok(None);
         }
-        
+
         match EdgeProcessor::process_response(response) {
             Ok(edge) => Ok(Some(edge)),
             Err(_) => Ok(None),
@@ -332,20 +362,24 @@ impl GuestTransaction for Transaction {
 
     fn update_edge(&self, id: ElementId, properties: PropertyMap) -> Result<Edge, GraphError> {
         let properties_map = conversions::to_cypher_properties(properties)?;
-        
+
         let mut params = ElementIdHelper::to_cypher_parameter(&id);
-        params.insert("props".to_string(), serde_json::Value::Object(
-            properties_map.into_iter().collect()
-        ));
-        
+        params.insert(
+            "props".to_string(),
+            serde_json::Value::Object(properties_map.into_iter().collect()),
+        );
+
         let query = "MATCH ()-[r]-() WHERE elementId(r) = $id SET r = $props \
                      RETURN elementId(r), type(r), properties(r), \
-                            elementId(startNode(r)), elementId(endNode(r))".to_string();
-        
+                            elementId(startNode(r)), elementId(endNode(r))"
+            .to_string();
+
         let statement = Neo4jStatement::with_row_only(query, params);
         let statements = Neo4jStatements::single(statement);
-        
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
         EdgeProcessor::process_response(response)
     }
 
@@ -355,31 +389,36 @@ impl GuestTransaction for Transaction {
         updates: PropertyMap,
     ) -> Result<Edge, GraphError> {
         let properties_map = conversions::to_cypher_properties(updates)?;
-        
+
         let mut params = ElementIdHelper::to_cypher_parameter(&id);
-        params.insert("props".to_string(), serde_json::Value::Object(
-            properties_map.into_iter().collect()
-        ));
-        
+        params.insert(
+            "props".to_string(),
+            serde_json::Value::Object(properties_map.into_iter().collect()),
+        );
+
         let query = "MATCH ()-[r]-() WHERE elementId(r) = $id SET r += $props \
                      RETURN elementId(r), type(r), properties(r), \
-                            elementId(startNode(r)), elementId(endNode(r))".to_string();
-        
+                            elementId(startNode(r)), elementId(endNode(r))"
+            .to_string();
+
         let statement = Neo4jStatement::with_row_only(query, params);
         let statements = Neo4jStatements::single(statement);
-        
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
         EdgeProcessor::process_response(response)
     }
 
     fn delete_edge(&self, id: ElementId) -> Result<(), GraphError> {
         let params = ElementIdHelper::to_cypher_parameter(&id);
-        
+
         let query = "MATCH ()-[r]-() WHERE elementId(r) = $id DELETE r".to_string();
         let statement = Neo4jStatement::with_row_only(query, params);
         let statements = Neo4jStatements::single(statement);
-        
-        self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+
+        self.api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
         Ok(())
     }
 
@@ -416,13 +455,12 @@ impl GuestTransaction for Transaction {
             "{match_clause} {where_clause} RETURN elementId(r), type(r), properties(r), elementId(startNode(r)), elementId(endNode(r)) {sort_clause} {offset_clause} {limit_clause}"
         );
 
-        let statement = Neo4jStatement::with_row_only(
-            full_query, 
-            params.into_iter().collect()
-        );
+        let statement = Neo4jStatement::with_row_only(full_query, params.into_iter().collect());
         let statements = Neo4jStatements::single(statement);
-        
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
         EdgeListProcessor::process_response(response)
     }
 
@@ -456,8 +494,10 @@ impl GuestTransaction for Transaction {
         let params = ElementIdHelper::to_cypher_parameter(&vertex_id);
         let statement = Neo4jStatement::new(full_query, params);
         let statements = Neo4jStatements::single(statement);
-        
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
         VertexListProcessor::process_response(response)
     }
 
@@ -491,8 +531,10 @@ impl GuestTransaction for Transaction {
         let params = ElementIdHelper::to_cypher_parameter(&vertex_id);
         let statement = Neo4jStatement::with_row_only(full_query, params);
         let statements = Neo4jStatements::single(statement);
-        
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
         EdgeListProcessor::process_response(response)
     }
 
@@ -510,17 +552,22 @@ impl GuestTransaction for Transaction {
             let cypher_labels = labels.join(":");
             let properties_map = conversions::to_cypher_properties(spec.properties)?;
 
-            let query = format!("CREATE (n:`{}`) SET n = $props RETURN n", cypher_labels);
-            let params = [("props".to_string(), serde_json::Value::Object(
-                properties_map.into_iter().collect()
-            ))].into_iter().collect();
-            
+            let query = format!("CREATE (n:`{cypher_labels}`) SET n = $props RETURN n");
+            let params = [(
+                "props".to_string(),
+                serde_json::Value::Object(properties_map.into_iter().collect()),
+            )]
+            .into_iter()
+            .collect();
+
             statements.push(Neo4jStatement::new(query, params));
         }
 
         let statements_obj = Neo4jStatements::batch(statements);
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements_obj)?;
-        
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements_obj)?;
+
         let mut created_vertices = Vec::new();
         for result in response.results.iter() {
             if !result.errors.is_empty() {
@@ -551,26 +598,35 @@ impl GuestTransaction for Transaction {
         let mut statements = Vec::new();
         for spec in edges {
             let properties_map = conversions::to_cypher_properties(spec.properties)?;
-            
+
             let mut params = HashMap::new();
-            params.insert("from_id".to_string(), serde_json::Value::String(ElementIdHelper::to_cypher_value(&spec.from_vertex)));
-            params.insert("to_id".to_string(), serde_json::Value::String(ElementIdHelper::to_cypher_value(&spec.to_vertex)));
-            params.insert("props".to_string(), serde_json::Value::Object(
-                properties_map.into_iter().collect()
-            ));
+            params.insert(
+                "from_id".to_string(),
+                serde_json::Value::String(ElementIdHelper::to_cypher_value(&spec.from_vertex)),
+            );
+            params.insert(
+                "to_id".to_string(),
+                serde_json::Value::String(ElementIdHelper::to_cypher_value(&spec.to_vertex)),
+            );
+            params.insert(
+                "props".to_string(),
+                serde_json::Value::Object(properties_map.into_iter().collect()),
+            );
 
             let query = format!(
                 "MATCH (a), (b) WHERE elementId(a) = $from_id AND elementId(b) = $to_id \
                  CREATE (a)-[r:`{}`]->(b) SET r = $props \
-                 RETURN elementId(r), type(r), properties(r), elementId(a), elementId(b)", 
+                 RETURN elementId(r), type(r), properties(r), elementId(a), elementId(b)",
                 spec.edge_type
             );
-            
+
             statements.push(Neo4jStatement::with_row_only(query, params));
         }
 
         let statements_obj = Neo4jStatements::batch(statements);
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements_obj)?;
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements_obj)?;
 
         let mut created_edges = Vec::new();
         for result in response.results.iter() {
@@ -627,15 +683,14 @@ impl GuestTransaction for Transaction {
 
         params.insert("set_props".to_string(), json!(set_props));
 
-        let query = format!(
-            "MERGE (n:`{}` {}) SET n = $set_props RETURN n",
-            vertex_type, merge_clause
-        );
-        
+        let query = format!("MERGE (n:`{vertex_type}` {merge_clause}) SET n = $set_props RETURN n");
+
         let statement = Neo4jStatement::new(query, params);
         let statements = Neo4jStatements::single(statement);
-        
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
         VertexProcessor::process_response(response)
     }
 
@@ -656,7 +711,7 @@ impl GuestTransaction for Transaction {
         }
 
         let set_props = conversions::to_cypher_properties(properties)?;
-        
+
         let mut params = HashMap::new();
         let merge_prop_clauses: Vec<String> = set_props
             .keys()
@@ -673,22 +728,29 @@ impl GuestTransaction for Transaction {
             format!("{{ {} }}", merge_prop_clauses.join(", "))
         };
 
-        params.insert("from_id".to_string(), serde_json::Value::String(ElementIdHelper::to_cypher_value(&from_vertex)));
-        params.insert("to_id".to_string(), serde_json::Value::String(ElementIdHelper::to_cypher_value(&to_vertex)));
+        params.insert(
+            "from_id".to_string(),
+            serde_json::Value::String(ElementIdHelper::to_cypher_value(&from_vertex)),
+        );
+        params.insert(
+            "to_id".to_string(),
+            serde_json::Value::String(ElementIdHelper::to_cypher_value(&to_vertex)),
+        );
         params.insert("set_props".to_string(), json!(set_props));
 
         let query = format!(
             "MATCH (a), (b) WHERE elementId(a) = $from_id AND elementId(b) = $to_id \
-            MERGE (a)-[r:`{}` {}]->(b) \
+            MERGE (a)-[r:`{edge_type}` {merge_clause}]->(b) \
             SET r = $set_props \
-            RETURN elementId(r), type(r), properties(r), elementId(startNode(r)), elementId(endNode(r))",
-            edge_type, merge_clause
+            RETURN elementId(r), type(r), properties(r), elementId(startNode(r)), elementId(endNode(r))"
         );
-        
+
         let statement = Neo4jStatement::with_row_only(query, params);
         let statements = Neo4jStatements::single(statement);
-        
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
         EdgeProcessor::process_response(response)
     }
 

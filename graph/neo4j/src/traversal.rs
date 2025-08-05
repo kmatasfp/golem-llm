@@ -1,8 +1,8 @@
-use crate::helpers::{element_id_to_key, ElementIdHelper, VertexListProcessor, Neo4jResponseProcessor};
 use crate::client::{Neo4jStatement, Neo4jStatements};
-use crate::{
-    GraphNeo4jComponent, Transaction,
+use crate::helpers::{
+    element_id_to_key, ElementIdHelper, Neo4jResponseProcessor, VertexListProcessor,
 };
+use crate::{GraphNeo4jComponent, Transaction};
 
 use golem_graph::golem::graph::{
     errors::GraphError,
@@ -21,8 +21,14 @@ impl Transaction {
         _options: Option<PathOptions>,
     ) -> Result<Option<Path>, GraphError> {
         let mut params = std::collections::HashMap::new();
-        params.insert("from_id".to_string(), serde_json::Value::String(ElementIdHelper::to_cypher_value(&from_vertex)));
-        params.insert("to_id".to_string(), serde_json::Value::String(ElementIdHelper::to_cypher_value(&to_vertex)));
+        params.insert(
+            "from_id".to_string(),
+            serde_json::Value::String(ElementIdHelper::to_cypher_value(&from_vertex)),
+        );
+        params.insert(
+            "to_id".to_string(),
+            serde_json::Value::String(ElementIdHelper::to_cypher_value(&to_vertex)),
+        );
 
         let query = r#"
             MATCH (a), (b)
@@ -32,12 +38,15 @@ impl Transaction {
               (elementId(b) = $to_id   OR id(b) = toInteger($to_id))
             MATCH p = shortestPath((a)-[*]-(b))
             RETURN p
-        "#.to_string();
+        "#
+        .to_string();
 
         let statement = Neo4jStatement::new(query, params);
         let statements = Neo4jStatements::single(statement);
 
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
 
         let result = match response.first_result() {
             Ok(r) => r,
@@ -106,13 +115,21 @@ impl Transaction {
         );
 
         let mut params = std::collections::HashMap::new();
-        params.insert("from_id".to_string(), serde_json::Value::String(ElementIdHelper::to_cypher_value(&from_vertex)));
-        params.insert("to_id".to_string(), serde_json::Value::String(ElementIdHelper::to_cypher_value(&to_vertex)));
+        params.insert(
+            "from_id".to_string(),
+            serde_json::Value::String(ElementIdHelper::to_cypher_value(&from_vertex)),
+        );
+        params.insert(
+            "to_id".to_string(),
+            serde_json::Value::String(ElementIdHelper::to_cypher_value(&to_vertex)),
+        );
 
         let statement = Neo4jStatement::new(query, params);
         let statements = Neo4jStatements::single(statement);
 
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
 
         let result = match response.first_result() {
             Ok(r) => r,
@@ -168,11 +185,18 @@ impl Transaction {
         let statement = Neo4jStatement::new(query, params);
         let statements = Neo4jStatements::single(statement);
 
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
 
         let result = match response.first_result() {
             Ok(r) => r,
-            Err(_) => return Ok(Subgraph { vertices: vec![], edges: vec![] }),
+            Err(_) => {
+                return Ok(Subgraph {
+                    vertices: vec![],
+                    edges: vec![],
+                })
+            }
         };
 
         if !result.errors.is_empty() {
@@ -239,7 +263,9 @@ impl Transaction {
         let statement = Neo4jStatement::new(query, params);
         let statements = Neo4jStatements::single(statement);
 
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
         VertexListProcessor::process_response(response)
     }
 }

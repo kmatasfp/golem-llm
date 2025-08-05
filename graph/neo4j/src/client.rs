@@ -114,9 +114,9 @@ impl Neo4jStatements {
 
 impl Neo4jResponse {
     pub fn first_result(&self) -> Result<&QueryResult, GraphError> {
-        self.results.first().ok_or_else(|| {
-            GraphError::InternalError("No results in Neo4j response".to_string())
-        })
+        self.results
+            .first()
+            .ok_or_else(|| GraphError::InternalError("No results in Neo4j response".to_string()))
     }
 }
 
@@ -129,9 +129,9 @@ impl QueryResult {
     }
 
     pub fn first_data(&self) -> Result<&ResultData, GraphError> {
-        self.data.first().ok_or_else(|| {
-            GraphError::InternalError("No data in Neo4j result".to_string())
-        })
+        self.data
+            .first()
+            .ok_or_else(|| GraphError::InternalError("No data in Neo4j result".to_string()))
     }
 
     pub fn first_graph_node(&self) -> Result<&Neo4jNode, GraphError> {
@@ -139,18 +139,14 @@ impl QueryResult {
             .graph
             .as_ref()
             .and_then(|g| g.nodes.first())
-            .ok_or_else(|| {
-                GraphError::InternalError("No graph nodes in Neo4j result".to_string())
-            })
+            .ok_or_else(|| GraphError::InternalError("No graph nodes in Neo4j result".to_string()))
     }
 
     pub fn first_row(&self) -> Result<&Vec<Value>, GraphError> {
         self.first_data()?
             .row
             .as_ref()
-            .ok_or_else(|| {
-                GraphError::InternalError("No row data in Neo4j result".to_string())
-            })
+            .ok_or_else(|| GraphError::InternalError("No row data in Neo4j result".to_string()))
     }
 }
 
@@ -244,10 +240,11 @@ impl Neo4jApi {
         statements: &Neo4jStatements,
     ) -> Result<Neo4jResponse, GraphError> {
         trace!("Execute typed Neo4j transaction: {tx_url}");
-        let statements_json = serde_json::to_string(statements)
-            .map_err(|e| GraphError::InternalError(format!("Failed to serialize statements: {e}")))?;
+        let statements_json = serde_json::to_string(statements).map_err(|e| {
+            GraphError::InternalError(format!("Failed to serialize statements: {e}"))
+        })?;
         trace!("[Neo4jApi] Cypher request: {statements_json}");
-        
+
         let resp = self
             .client
             .post(tx_url)
@@ -258,7 +255,7 @@ impl Neo4jApi {
             .map_err(|e| {
                 self.handle_neo4j_reqwest_error("Neo4j execute in transaction failed", e)
             })?;
-        
+
         let response = Self::ensure_success_and_typed_json(resp)?;
         trace!("[Neo4jApi] Cypher response received");
         Ok(response)
@@ -314,7 +311,7 @@ impl Neo4jApi {
             let text = response.text().map_err(|e| {
                 GraphError::InternalError(format!("Failed to read Neo4j response body: {e}"))
             })?;
-            
+
             serde_json::from_str::<Neo4jResponse>(&text).map_err(|e| {
                 GraphError::InternalError(format!(
                     "Failed to parse Neo4j response JSON: {e}\nResponse body (first 1000 chars): {}",

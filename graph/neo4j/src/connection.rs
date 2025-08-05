@@ -1,5 +1,5 @@
-use crate::{Graph, Transaction};
 use crate::client::{Neo4jStatement, Neo4jStatements};
+use crate::{Graph, Transaction};
 use golem_graph::{
     durability::ProviderGraph,
     golem::graph::{
@@ -47,7 +47,7 @@ impl GuestGraph for Graph {
             &transaction_url,
             &Neo4jStatements::single(node_count_stmt),
         )?;
-        
+
         let node_count = node_count_resp
             .first_result()?
             .first_row()?
@@ -62,7 +62,7 @@ impl GuestGraph for Graph {
             &transaction_url,
             &Neo4jStatements::single(rel_count_stmt),
         )?;
-        
+
         let rel_count = rel_count_resp
             .first_result()?
             .first_row()?

@@ -47,8 +47,11 @@ impl GuestSchemaManager for SchemaManager {
                 let tx = self.graph.begin_transaction()?;
                 let statement = Neo4jStatement::with_row_only(q, HashMap::new());
                 let statements = Neo4jStatements::single(statement);
-                
-                match tx.api.execute_typed_transaction(&tx.transaction_url, &statements) {
+
+                match tx
+                    .api
+                    .execute_typed_transaction(&tx.transaction_url, &statements)
+                {
                     Err(e) => {
                         let is_enterprise_error = matches!(
                             &e,
@@ -75,7 +78,8 @@ impl GuestSchemaManager for SchemaManager {
                 let tx = self.graph.begin_transaction()?;
                 let statement = Neo4jStatement::with_row_only(q, HashMap::new());
                 let statements = Neo4jStatements::single(statement);
-                tx.api.execute_typed_transaction(&tx.transaction_url, &statements)?;
+                tx.api
+                    .execute_typed_transaction(&tx.transaction_url, &statements)?;
                 tx.commit()?;
             }
         }
@@ -97,8 +101,7 @@ impl GuestSchemaManager for SchemaManager {
                 );
                 statements.push(Neo4jStatement::with_row_only(query, HashMap::new()));
             }
-            if prop.unique {
-            }
+            if prop.unique {}
         }
 
         if statements.is_empty() {
@@ -144,7 +147,9 @@ impl GuestSchemaManager for SchemaManager {
             return Err(GraphError::InvalidQuery(response.errors[0].message.clone()));
         }
 
-        let props_result = response.results.get(0)
+        let props_result = response
+            .results
+            .first()
             .ok_or_else(|| GraphError::InternalError("Missing property schema response".into()))?;
         props_result.check_errors()?;
 
@@ -165,8 +170,7 @@ impl GuestSchemaManager for SchemaManager {
                 if row.len() >= 3 {
                     let info = PropertyInfo {
                         property_name: row[0].as_str().unwrap_or("").to_string(),
-                        property_types: serde_json::from_value(row[1].clone())
-                            .unwrap_or_default(),
+                        property_types: serde_json::from_value(row[1].clone()).unwrap_or_default(),
                         mandatory: row[2].as_bool().unwrap_or(false),
                     };
                     defs.insert(
@@ -226,8 +230,10 @@ impl GuestSchemaManager for SchemaManager {
         params.insert("label".to_string(), json!(&label));
         let props_statement = Neo4jStatement::with_row_only(props_query.to_string(), params);
         let statements = Neo4jStatements::single(props_statement);
-        
-        let response = tx.api.execute_typed_transaction(&tx.transaction_url, &statements)?;
+
+        let response = tx
+            .api
+            .execute_typed_transaction(&tx.transaction_url, &statements)?;
         tx.commit()?;
 
         let props_result = response.first_result()?;
@@ -250,8 +256,7 @@ impl GuestSchemaManager for SchemaManager {
                 if row.len() >= 3 {
                     let info = Neo4jPropertyInfo {
                         property_name: row[0].as_str().unwrap_or("").to_string(),
-                        property_types: serde_json::from_value(row[1].clone())
-                            .unwrap_or_default(),
+                        property_types: serde_json::from_value(row[1].clone()).unwrap_or_default(),
                         mandatory: row[2].as_bool().unwrap_or(false),
                     };
 
@@ -264,7 +269,7 @@ impl GuestSchemaManager for SchemaManager {
                                 .map(|s| map_neo4j_type_to_wit(s))
                                 .unwrap_or(PropertyType::StringType),
                             required: info.mandatory,
-                            unique: false, 
+                            unique: false,
                             default_value: None,
                         });
                     }

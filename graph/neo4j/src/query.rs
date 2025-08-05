@@ -1,5 +1,5 @@
-use crate::conversions;
 use crate::client::{Neo4jStatement, Neo4jStatements};
+use crate::conversions;
 use crate::{GraphNeo4jComponent, Transaction};
 use golem_graph::golem::graph::{
     errors::GraphError,
@@ -23,14 +23,16 @@ impl Transaction {
 
         let statement = Neo4jStatement::new(query, params);
         let statements = Neo4jStatements::single(statement);
-        
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
         let result = response.first_result()?;
         result.check_errors()?;
 
         let columns: Vec<String> = result.columns.clone().unwrap_or_default();
         let mut rows = Vec::new();
-        
+
         for data_item in &result.data {
             if let Some(row_data) = &data_item.row {
                 rows.push(row_data.clone());
@@ -75,8 +77,10 @@ impl Transaction {
     ) -> Result<Vec<String>, GraphError> {
         let statement = Neo4jStatement::with_row_only(query.to_string(), HashMap::new());
         let statements = Neo4jStatements::single(statement);
-        
-        let response = self.api.execute_typed_transaction(&self.transaction_url, &statements)?;
+
+        let response = self
+            .api
+            .execute_typed_transaction(&self.transaction_url, &statements)?;
         let result = response.first_result()?;
         result.check_errors()?;
 
