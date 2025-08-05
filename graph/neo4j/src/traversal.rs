@@ -20,7 +20,6 @@ impl Transaction {
         to_vertex: ElementId,
         _options: Option<PathOptions>,
     ) -> Result<Option<Path>, GraphError> {
-        // from_vertex/to_vertex are ElementId::StringValue(s)
         let from_id = match from_vertex {
             ElementId::StringValue(s) => s,
             _ => return Err(GraphError::InvalidQuery("expected string elementId".into())),
@@ -30,7 +29,6 @@ impl Transaction {
             _ => return Err(GraphError::InvalidQuery("expected string elementId".into())),
         };
 
-        // Combine both matching strategies
         let statement = json!({
             "statement": r#"
                 MATCH (a), (b)
@@ -66,7 +64,6 @@ impl Transaction {
             }
         }
 
-        // If no row, return Ok(None)
         let data_opt = result["data"].as_array().and_then(|d| d.first());
         if let Some(data) = data_opt {
             let path = parse_path_from_data(data)?;

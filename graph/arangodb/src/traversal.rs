@@ -58,7 +58,6 @@ impl Transaction {
             return Ok(None);
         }
 
-        // Build vertices and edges from the traversal result
         let mut vertices = vec![];
         let mut edges = vec![];
 

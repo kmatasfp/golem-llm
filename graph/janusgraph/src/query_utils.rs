@@ -4,8 +4,6 @@ use golem_graph::golem::graph::{
 };
 use serde_json::{Map, Value};
 
-/// Builds a Gremlin `has()` step chain from a WIT FilterCondition.
-/// Returns the query segment and the bound values.
 pub(crate) fn build_gremlin_filter_step(
     condition: &FilterCondition,
     binding_map: &mut Map<String, Value>,

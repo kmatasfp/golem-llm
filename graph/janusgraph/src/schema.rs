@@ -366,7 +366,6 @@ impl SchemaManager {
         };
 
         for item in items {
-            // Handling GraphSON map format: {"@type": "g:Map", "@value": [key1, value1, key2, value2, ...]}
             let map_data = if let Some(graphson_map) = item.as_object() {
                 if let Some(map_array) = graphson_map.get("@value").and_then(|v| v.as_array()) {
                     let mut map = std::collections::HashMap::new();

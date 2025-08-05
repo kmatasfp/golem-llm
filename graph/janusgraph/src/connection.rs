@@ -29,7 +29,6 @@ impl GuestGraph for Graph {
     }
 
     fn close(&self) -> Result<(), GraphError> {
-        // The underlying HTTP client doesn't need explicit closing for this implementation.
         Ok(())
     }
 
@@ -41,7 +40,6 @@ impl GuestGraph for Graph {
             val.get("result")
                 .and_then(|r| r.get("data"))
                 .and_then(|d| {
-                    // JanusGraph returns: { "@type": "g:List", "@value": [ { ... } ] }
                     if let Some(list) = d.get("@value").and_then(|v| v.as_array()) {
                         list.first()
                     } else if let Some(arr) = d.as_array() {
@@ -51,7 +49,6 @@ impl GuestGraph for Graph {
                     }
                 })
                 .and_then(|v| {
-                    // The count is usually a number or an object with @type/@value
                     if let Some(n) = v.as_u64() {
                         Some(n)
                     } else if let Some(obj) = v.as_object() {

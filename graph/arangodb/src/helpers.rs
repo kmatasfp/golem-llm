@@ -119,7 +119,6 @@ pub(crate) fn parse_path_from_document(doc: &Map<String, Value>) -> Result<Path,
 pub(crate) fn element_id_to_key(id: &ElementId) -> Result<String, GraphError> {
     match id {
         ElementId::StringValue(s) => {
-            // ArangoDB document keys are part of the _id field, e.g., "collection/key"
             if let Some(key) = s.split('/').nth(1) {
                 Ok(key.to_string())
             } else {
@@ -202,7 +201,6 @@ mod tests {
     use serde_json::{json, Map, Value};
     use std::env;
 
-    /// Helper to construct a JSON document map
     fn make_doc(map: Vec<(&str, Value)>) -> Map<String, Value> {
         let mut m = Map::new();
         for (k, v) in map {
@@ -300,7 +298,6 @@ mod tests {
 
     #[test]
     fn test_config_from_env_success_and_failure() {
-        // Preserve original environment variables
         let orig_host = env::var_os("ARANGODB_HOST");
         let orig_user = env::var_os("ARANGODB_USER");
         let orig_pass = env::var_os("ARANGODB_PASSWORD");
@@ -312,7 +309,6 @@ mod tests {
         let orig_arango_port = env::var_os("ARANGO_PORT");
         let orig_arango_db = env::var_os("ARANGO_DATABASE");
 
-        // Test missing host scenario - remove both variants
         env::remove_var("ARANGODB_HOST");
         env::remove_var("ARANGO_HOST");
         env::remove_var("ARANGODB_USER");
@@ -334,7 +330,6 @@ mod tests {
         env::set_var("ARANGODB_USER", "user1");
         env::set_var("ARANGODB_PASSWORD", "pass1");
         env::set_var("ARANGODB_PORT", "8529");
-        // Don't set database - should remain None
         let cfg = config_from_env().unwrap();
         assert_eq!(cfg.hosts, vec!["localhost".to_string()]);
         assert_eq!(cfg.port, Some(8529));
@@ -342,7 +337,6 @@ mod tests {
         assert_eq!(cfg.password, Some("pass1".to_string()));
         assert!(cfg.database_name.is_none());
 
-        // Restore original environment variables
         if let Some(val) = orig_host {
             env::set_var("ARANGODB_HOST", val);
         } else {
@@ -369,7 +363,6 @@ mod tests {
             env::remove_var("ARANGODB_DATABASE");
         }
 
-        // Restore ARANGO_* variants
         if let Some(val) = orig_arango_host {
             env::set_var("ARANGO_HOST", val);
         } else {

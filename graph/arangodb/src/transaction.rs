@@ -265,7 +265,7 @@ impl GuestTransaction for Transaction {
             query_parts.push(sort_clause);
         }
 
-        let limit_val = limit.unwrap_or(100); // Default limit
+        let limit_val = limit.unwrap_or(100);
         let offset_val = offset.unwrap_or(0);
         query_parts.push(format!("LIMIT {offset_val}, {limit_val}"));
         query_parts.push("RETURN v".to_string());
@@ -377,13 +377,11 @@ impl GuestTransaction for Transaction {
         let key = helpers::element_id_to_key(&id)?;
         let collection = helpers::collection_from_element_id(&id)?;
 
-        // First getting the current edge to preserve _from and _to
         let current_edge = self
             .get_edge(id.clone())?
             .ok_or_else(|| GraphError::ElementNotFound(id.clone()))?;
 
         let mut props = conversions::to_arango_properties(properties)?;
-        // Preserving _from and _to for edge replacement
         props.insert(
             "_from".to_string(),
             json!(helpers::element_id_to_string(&current_edge.from_vertex)),

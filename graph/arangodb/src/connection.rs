@@ -30,7 +30,6 @@ impl GuestGraph for Graph {
     }
 
     fn close(&self) -> Result<(), GraphError> {
-        // The ArangoDB client uses a connection pool, so a specific close is not needed.
         Ok(())
     }
 

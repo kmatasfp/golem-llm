@@ -9,7 +9,6 @@ use serde_json::{json, Value};
 use std::env;
 
 pub(crate) fn config_from_env() -> Result<ConnectionConfig, GraphError> {
-    // todo dotenvy::dotenv().ok();
     let host = env::var("JANUSGRAPH_HOST")
         .map_err(|_| GraphError::ConnectionFailed("Missing JANUSGRAPH_HOST env var".to_string()))?;
     let port = env::var("JANUSGRAPH_PORT").map_or(Ok(None), |p| {
@@ -33,15 +32,12 @@ pub(crate) fn config_from_env() -> Result<ConnectionConfig, GraphError> {
 }
 
 pub(crate) fn parse_vertex_from_gremlin(value: &Value) -> Result<Vertex, GraphError> {
-    // Handling g:Vertex (GraphSON vertex from path traversals)
     let obj = if value.get("@type") == Some(&json!("g:Vertex")) {
         value
             .get("@value")
             .ok_or_else(|| GraphError::InternalError("g:Vertex missing @value".to_string()))?
             .clone()
-    }
-    // Handling g:Map (alternating key-value pairs in @value array)
-    else if value.get("@type") == Some(&json!("g:Map")) {
+    } else if value.get("@type") == Some(&json!("g:Map")) {
         let arr = value
             .get("@value")
             .and_then(Value::as_array)
@@ -49,7 +45,6 @@ pub(crate) fn parse_vertex_from_gremlin(value: &Value) -> Result<Vertex, GraphEr
         let mut map = serde_json::Map::new();
         let mut it = arr.iter();
         while let (Some(kv), Some(vv)) = (it.next(), it.next()) {
-            // key:
             let key = if let Some(s) = kv.as_str() {
                 s.to_string()
             } else if kv.get("@type") == Some(&json!("g:T")) {
@@ -129,11 +124,9 @@ fn from_gremlin_id(value: &Value) -> Result<ElementId, GraphError> {
     } else if let Some(id) = value.as_str() {
         Ok(ElementId::StringValue(id.to_string()))
     } else if let Some(id_obj) = value.as_object() {
-        // Handling GraphSON wrapped values with @type and @value
         if let Some(type_val) = id_obj.get("@type") {
             if let Some(type_str) = type_val.as_str() {
                 if type_str == "janusgraph:RelationIdentifier" {
-                    // Handl JanusGraph's RelationIdentifier
                     if let Some(rel_obj) = id_obj.get("@value").and_then(Value::as_object) {
                         if let Some(rel_id) = rel_obj.get("relationId").and_then(Value::as_str) {
                             return Ok(ElementId::StringValue(rel_id.to_string()));
@@ -203,7 +196,6 @@ pub(crate) fn parse_edge_from_gremlin(value: &Value) -> Result<Edge, GraphError>
         let mut map = serde_json::Map::new();
         let mut it = arr.iter();
         while let (Some(kv), Some(vv)) = (it.next(), it.next()) {
-            // key:
             let key = if let Some(s) = kv.as_str() {
                 s.to_string()
             } else if kv.get("@type") == Some(&json!("g:T"))
@@ -352,7 +344,6 @@ pub(crate) fn parse_path_from_gremlin(value: &Value) -> Result<Path, GraphError>
                                 let mut edges = Vec::new();
 
                                 for element_value in objects_array {
-                                    // Check if this element is a vertex or edge by examining GraphSON type
                                     if let Some(obj) = element_value.as_object() {
                                         if let Some(type_value) = obj.get("@type") {
                                             match type_value.as_str() {
@@ -367,7 +358,6 @@ pub(crate) fn parse_path_from_gremlin(value: &Value) -> Result<Path, GraphError>
                                                     )?);
                                                 }
                                                 _ => {
-                                                    // Fall back to old logic for non-GraphSON format
                                                     if obj.contains_key("inV")
                                                         && obj.contains_key("outV")
                                                     {
@@ -381,15 +371,13 @@ pub(crate) fn parse_path_from_gremlin(value: &Value) -> Result<Path, GraphError>
                                                     }
                                                 }
                                             }
+                                        } else if obj.contains_key("inV")
+                                            && obj.contains_key("outV")
+                                        {
+                                            edges.push(parse_edge_from_gremlin(element_value)?);
                                         } else {
-                                            // Fall back to old logic for non-GraphSON format
-                                            if obj.contains_key("inV") && obj.contains_key("outV") {
-                                                edges.push(parse_edge_from_gremlin(element_value)?);
-                                            } else {
-                                                vertices.push(parse_vertex_from_gremlin(
-                                                    element_value,
-                                                )?);
-                                            }
+                                            vertices
+                                                .push(parse_vertex_from_gremlin(element_value)?);
                                         }
                                     }
                                 }

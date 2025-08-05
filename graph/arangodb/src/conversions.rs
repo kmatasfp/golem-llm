@@ -53,9 +53,7 @@ pub(crate) fn to_arango_value(value: PropertyValue) -> Result<Value, GraphError>
             };
             Value::String(format!("{date_str}T{time_str}{tz_str}"))
         }
-        PropertyValue::Duration(d) => {
-            Value::String(format!("P{}S", d.seconds)) // Simplified ISO 8601 for duration
-        }
+        PropertyValue::Duration(d) => Value::String(format!("P{}S", d.seconds)),
         PropertyValue::Point(p) => json!({
             "type": "Point",
             "coordinates": if let Some(alt) = p.altitude {
@@ -155,10 +153,6 @@ pub(crate) fn from_arango_value(value: Value) -> Result<PropertyValue, GraphErro
                     .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
             {
                 if let Ok(bytes) = general_purpose::STANDARD.decode(&s) {
-                    // Only treating as base64 bytes in these cases:
-                    // 1. String contains base64 padding or special characters
-                    // 2. String is relatively long (likely encoded data)
-                    // 3. String starts with common base64 prefixes or patterns
                     if s.contains('=')
                         || s.contains('+')
                         || s.contains('/')

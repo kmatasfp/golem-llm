@@ -14,13 +14,10 @@ pub(crate) fn parse_vertex_from_graph_data(
 ) -> Result<Vertex, GraphError> {
     let id = if let Some(id_val) = id_override {
         id_val
+    } else if let Some(element_id) = node_val.get("elementId") {
+        from_cypher_element_id(element_id)?
     } else {
-        // Use elementId first (Neo4j 5.x), fallback to id (Neo4j 4.x)
-        if let Some(element_id) = node_val.get("elementId") {
-            from_cypher_element_id(element_id)?
-        } else {
-            from_cypher_element_id(&node_val["id"])?
-        }
+        from_cypher_element_id(&node_val["id"])?
     };
 
     let labels: Vec<String> = node_val["labels"]
@@ -133,7 +130,7 @@ pub(crate) fn map_neo4j_type_to_wit(neo4j_type: &str) -> PropertyType {
         "DateTime" => PropertyType::Datetime,
         "Point" => PropertyType::Point,
         "ByteArray" => PropertyType::Bytes,
-        _ => PropertyType::StringType, // Default for mixed or unknown types
+        _ => PropertyType::StringType,
     }
 }
 

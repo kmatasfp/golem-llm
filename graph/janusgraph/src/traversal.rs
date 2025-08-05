@@ -12,7 +12,6 @@ use golem_graph::golem::graph::{
 use log::trace;
 use serde_json::{json, Value};
 
-/// Convert our ElementId into a JSON binding for Gremlin
 fn id_to_json(id: ElementId) -> Value {
     match id {
         ElementId::StringValue(s) => json!(s),
@@ -60,13 +59,11 @@ impl Transaction {
         bindings.insert("from_id".to_string(), id_to_json(from_vertex));
         bindings.insert("to_id".to_string(), id_to_json(to_vertex));
 
-        // Use outE().inV() to include both vertices and edges in the path traversal
         let gremlin =
             "g.V(from_id).repeat(outE().inV().simplePath()).until(hasId(to_id)).path().limit(1)";
 
         let resp = self.api.execute(gremlin, Some(Value::Object(bindings)))?;
 
-        // Handle GraphSON g:List format
         let data_array = if let Some(data) = resp["result"]["data"].as_object() {
             if data.get("@type") == Some(&Value::String("g:List".to_string())) {
                 data.get("@value").and_then(|v| v.as_array())
@@ -247,7 +244,6 @@ impl Transaction {
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
-        // Handle GraphSON g:List format (same as other methods)
         let data_array = if let Some(data) = response["result"]["data"].as_object() {
             if data.get("@type") == Some(&Value::String("g:List".to_string())) {
                 data.get("@value").and_then(|v| v.as_array())

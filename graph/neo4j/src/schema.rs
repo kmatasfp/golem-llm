@@ -44,7 +44,6 @@ impl GuestSchemaManager for SchemaManager {
                     name = prop.name
                 );
                 let tx = self.graph.begin_transaction()?;
-                // run and swallow the EE‐only error
                 match tx.api.execute_in_transaction(
                     &tx.transaction_url,
                     json!({ "statements": [ { "statement": q } ] }),
@@ -73,7 +72,6 @@ impl GuestSchemaManager for SchemaManager {
                     name = prop.name
                 );
                 let tx = self.graph.begin_transaction()?;
-                // unique constraints work on CE
                 tx.api.execute_in_transaction(
                     &tx.transaction_url,
                     json!({ "statements": [ { "statement": q } ] }),
@@ -99,9 +97,7 @@ impl GuestSchemaManager for SchemaManager {
                 );
                 statements.push(json!({ "statement": query, "parameters": {} }));
             }
-            if prop.unique {
-                // Neo4j does not support uniqueness constraints on relationship properties.
-            }
+            if prop.unique {}
         }
 
         if statements.is_empty() {
@@ -121,7 +117,6 @@ impl GuestSchemaManager for SchemaManager {
     ) -> Result<Option<VertexLabelSchema>, GraphError> {
         let tx = self.graph.begin_transaction()?;
 
-        // Fetch node‐property metadata
         let props_query =
             "CALL db.schema.nodeTypeProperties() YIELD nodeLabels, propertyName, propertyTypes, mandatory \
              WHERE $label IN nodeLabels \
@@ -134,7 +129,6 @@ impl GuestSchemaManager for SchemaManager {
             .api
             .execute_in_transaction(&tx.transaction_url, json!({ "statements": [props_stmt] }))?;
 
-        // Fetch uniqueness constraints
         let cons_query = "SHOW CONSTRAINTS YIELD name, type, properties, labelsOrTypes \
              WHERE type = 'UNIQUENESS' AND $label IN labelsOrTypes \
              RETURN properties";
@@ -148,7 +142,6 @@ impl GuestSchemaManager for SchemaManager {
 
         tx.commit()?;
 
-        // Parse properties
         let props_block = props_resp["results"]
             .as_array()
             .and_then(|r| r.first())
@@ -189,7 +182,7 @@ impl GuestSchemaManager for SchemaManager {
                                     .map(|s| map_neo4j_type_to_wit(s))
                                     .unwrap_or(PropertyType::StringType),
                                 required: info.mandatory,
-                                unique: false, // will flip next
+                                unique: false,
                                 default_value: None,
                             },
                         );
@@ -198,7 +191,6 @@ impl GuestSchemaManager for SchemaManager {
             }
         }
 
-        // Parse uniqueness constraints
         let cons_block = cons_resp["results"]
             .as_array()
             .and_then(|r| r.first())
@@ -225,7 +217,6 @@ impl GuestSchemaManager for SchemaManager {
             }
         }
 
-        // Ensure any unique property is also required
         for def in defs.values_mut() {
             if def.unique {
                 def.required = true;
@@ -297,7 +288,7 @@ impl GuestSchemaManager for SchemaManager {
                                     .map(|s| map_neo4j_type_to_wit(s))
                                     .unwrap_or(PropertyType::StringType),
                                 required: info.mandatory,
-                                unique: false, // Not supported for relationships in Neo4j
+                                unique: false,
                                 default_value: None,
                             });
                         }

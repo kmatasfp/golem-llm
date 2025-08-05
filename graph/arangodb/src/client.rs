@@ -105,7 +105,6 @@ impl ArangoDbApi {
             let mut error = if let Some(code) = error_num {
                 from_arangodb_error_code(code, error_msg)
             } else {
-                // Fallback for cases without ArangoDB error codes - use basic HTTP status mapping
                 map_arangodb_http_status(status_code, error_msg, &error_body)
             };
 
@@ -229,7 +228,6 @@ impl ArangoDbApi {
                     error
                 }
             }
-            // ArangoDB unique constraint violations (error code 1210)
             GraphError::ConstraintViolation(_)
                 if self.is_arangodb_unique_constraint_error(error_body) =>
             {
@@ -275,7 +273,6 @@ impl ArangoDbApi {
     }
 
     fn extract_arangodb_id_from_message(&self, message: &str) -> Option<ElementId> {
-        // ArangoDB uses collection/key format for document handles
         if let Some(start) = message.find('"') {
             if let Some(end) = message[start + 1..].find('"') {
                 let potential_id = &message[start + 1..start + 1 + end];
@@ -368,7 +365,7 @@ impl ArangoDbApi {
 
         let collections = collections_array
             .iter()
-            .filter(|v| !v["isSystem"].as_bool().unwrap_or(false)) // Filter out system collections
+            .filter(|v| !v["isSystem"].as_bool().unwrap_or(false))
             .map(|v| {
                 let name = v["name"].as_str().unwrap_or_default().to_string();
                 let coll_type = v["type"].as_u64().unwrap_or(2);
@@ -411,7 +408,6 @@ impl ArangoDbApi {
             "unique": unique,
         });
 
-        // Add name if provided
         if let Some(index_name) = name {
             body["name"] = json!(index_name);
         }
@@ -423,7 +419,6 @@ impl ArangoDbApi {
 
     pub fn drop_index(&self, name: &str) -> Result<(), GraphError> {
         trace!("Drop index: {name}");
-        // First, find the index by name to get its ID
         let collections = self.list_collections()?;
 
         for collection in collections {
@@ -454,7 +449,6 @@ impl ArangoDbApi {
 
     pub fn list_indexes(&self) -> Result<Vec<IndexDefinition>, GraphError> {
         trace!("List indexes");
-        // Get all collections first
         let collections = self.list_collections()?;
         let mut all_indexes = Vec::new();
 
@@ -465,7 +459,6 @@ impl ArangoDbApi {
                 Ok(response) => {
                     if let Some(indexes) = response["indexes"].as_array() {
                         for index in indexes {
-                            // Skip primary and edge indexes
                             if let Some(index_type) = index["type"].as_str() {
                                 if index_type == "primary" || index_type == "edge" {
                                     continue;
@@ -497,14 +490,12 @@ impl ArangoDbApi {
                                 _ => golem_graph::golem::graph::schema::IndexType::Exact,
                             };
 
-                            // Use a combination of collection and fields as logical name for matching
                             let logical_name = if fields.len() == 1 {
                                 format!("idx_{}_{}", collection.name, fields[0])
                             } else {
                                 format!("idx_{}_{}", collection.name, fields.join("_"))
                             };
 
-                            // Prefer the ArangoDB generated name, but fall back to our logical name
                             let final_name = if !name.is_empty() {
                                 name
                             } else if !id.is_empty() {
@@ -541,7 +532,6 @@ impl ArangoDbApi {
             return Ok(Some(index.clone()));
         }
 
-        // If the requested name follows our pattern (idx_collection_field)
         if name.starts_with("idx_") {
             let parts: Vec<&str> = name.split('_').collect();
             if parts.len() >= 3 {
@@ -629,32 +619,12 @@ impl ArangoDbApi {
 
     pub fn begin_dynamic_transaction(&self, read_only: bool) -> Result<String, GraphError> {
         trace!("Begin dynamic transaction (read_only={read_only})");
-        let common_collections = vec![
-            "Person".to_string(),
-            "TempUser".to_string(),
-            "Company".to_string(),
-            "Employee".to_string(),
-            "Node".to_string(),
-            "Product".to_string(),
-            "User".to_string(),
-            "KNOWS".to_string(),
-            "WORKS_FOR".to_string(),
-            "CONNECTS".to_string(),
-            "FOLLOWS".to_string(),
-        ];
 
         let existing_collections = self.list_collections().unwrap_or_default();
-        let mut all_collections: Vec<String> = existing_collections
+        let all_collections: Vec<String> = existing_collections
             .iter()
             .map(|c| c.name.clone())
             .collect();
-
-        // Add common collections that might not exist yet
-        for common in common_collections {
-            if !all_collections.contains(&common) {
-                all_collections.push(common);
-            }
-        }
 
         let collections = if read_only {
             json!({ "read": all_collections })

@@ -82,7 +82,6 @@ pub(crate) fn from_gremlin_value(value: &Value) -> Result<PropertyValue, GraphEr
             Ok(PropertyValue::StringValue(s.clone()))
         }
         Value::Object(obj) => {
-            // Handle GraphSON wrapped values like {"@type": "g:Int64", "@value": 29}
             if let (Some(Value::String(gtype)), Some(gvalue)) =
                 (obj.get("@type"), obj.get("@value"))
             {
@@ -105,10 +104,7 @@ pub(crate) fn from_gremlin_value(value: &Value) -> Result<PropertyValue, GraphEr
                             ))
                         }
                     }
-                    _ => {
-                        // For other GraphSON types, try to parse the @value recursively
-                        from_gremlin_value(gvalue)
-                    }
+                    _ => from_gremlin_value(gvalue),
                 }
             } else {
                 Err(GraphError::InvalidPropertyType(
@@ -162,7 +158,6 @@ fn parse_iso_date(s: &str) -> Result<Date, ()> {
 }
 
 fn parse_iso_datetime(s: &str) -> Result<Datetime, ()> {
-    // Try multiple datetime formats commonly used by Gremlin/JanusGraph
     let formats = [
         "%Y-%m-%dT%H:%M:%S%.fZ", // ISO format with milliseconds and Z
         "%Y-%m-%dT%H:%M:%SZ",    // ISO format without milliseconds and Z
@@ -186,7 +181,7 @@ fn parse_iso_datetime(s: &str) -> Result<Datetime, ()> {
             return Ok(Datetime {
                 date,
                 time,
-                timezone_offset_minutes: Some(0), // Gremlin dates are timezone-aware
+                timezone_offset_minutes: Some(0),
             });
         }
     }

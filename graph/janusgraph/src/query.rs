@@ -10,9 +10,7 @@ use serde_json::{json, Map, Value};
 fn to_bindings(parameters: QueryParameters) -> Result<Map<String, Value>, GraphError> {
     let mut bindings = Map::new();
     for (key, value) in parameters {
-        // For JanusGraph, we need to be more careful with GraphSON format
         let json_value = match value {
-            // For numeric types, use simple JSON values (not GraphSON wrapped)
             PropertyValue::Float32Value(f) => json!(f),
             PropertyValue::Float64Value(f) => json!(f),
             PropertyValue::Int32(i) => json!(i),
@@ -35,7 +33,6 @@ fn parse_gremlin_response(response: Value) -> Result<QueryResult, GraphError> {
             GraphError::InternalError("Invalid response structure from Gremlin".to_string())
         })?;
 
-    // Handling GraphSON format: {"@type": "g:List", "@value": [...]}
     let arr = if let Some(graphson_obj) = result_data.as_object() {
         if let Some(value_array) = graphson_obj.get("@value").and_then(|v| v.as_array()) {
             value_array

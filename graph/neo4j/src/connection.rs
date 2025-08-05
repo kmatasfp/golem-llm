@@ -37,7 +37,6 @@ impl GuestGraph for Graph {
     fn get_statistics(&self) -> Result<GraphStatistics, GraphError> {
         let transaction_url = self.api.begin_transaction()?;
 
-        // Query for node count
         let node_count_stmt = serde_json::json!({
             "statement": "MATCH (n) RETURN count(n) as nodeCount",
             "parameters": {}

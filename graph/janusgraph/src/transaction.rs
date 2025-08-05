@@ -10,7 +10,6 @@ use golem_graph::golem::graph::{
 use log::trace;
 use serde_json::{json, Value};
 
-/// Given a GraphSON Map element, turn it into a serde_json::Value::Object
 fn graphson_map_to_object(data: &Value) -> Result<Value, GraphError> {
     let arr = data
         .get("@value")
@@ -234,7 +233,6 @@ impl GuestTransaction for Transaction {
             let vals = row.get("@value").and_then(Value::as_array).unwrap();
             let mut it = vals.iter();
             while let (Some(kv), Some(vv)) = (it.next(), it.next()) {
-                // key: plain string or wrapped
                 let key = if kv.is_string() {
                     kv.as_str().unwrap().to_string()
                 } else {
@@ -318,10 +316,9 @@ impl GuestTransaction for Transaction {
 
         let mut flat = serde_json::Map::new();
         if row.get("@type") == Some(&json!("g:Map")) {
-            let vals = row.get("@value").and_then(Value::as_array).unwrap(); // we know it's an array
+            let vals = row.get("@value").and_then(Value::as_array).unwrap();
             let mut it = vals.iter();
             while let (Some(kv), Some(vv)) = (it.next(), it.next()) {
-                // key:
                 let key = if let Some(s) = kv.as_str() {
                     s.to_string()
                 } else if kv.get("@type") == Some(&json!("g:T")) {
@@ -373,7 +370,6 @@ impl GuestTransaction for Transaction {
     }
 
     fn delete_vertex(&self, id: ElementId, _detach: bool) -> Result<(), GraphError> {
-        // Note: JanusGraph handles edge cleanup automatically during vertex deletion
         let gremlin = "g.V(vertex_id).drop().toList()";
         let mut bindings = serde_json::Map::new();
         bindings.insert(
@@ -470,7 +466,6 @@ impl GuestTransaction for Transaction {
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
         trace!("[DEBUG][find_vertices] Raw Gremlin response: {response:?}");
 
-        // Handle GraphSON g:List structure
         let data = &response["result"]["data"];
         let result_data = if let Some(arr) = data.as_array() {
             arr.clone()
@@ -712,7 +707,6 @@ impl GuestTransaction for Transaction {
             ElementId::Uuid(u) => json!(u.to_string()),
         };
 
-        // 2) STEP 1: Drop all props & set the new ones
         let mut gremlin_update = "g.E(edge_id).sideEffect(properties().drop())".to_string();
         let mut bindings = serde_json::Map::new();
         bindings.insert("edge_id".to_string(), id_json.clone());
@@ -1156,7 +1150,6 @@ impl GuestTransaction for Transaction {
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
-        // Handle GraphSON g:List structure
         let data = &response["result"]["data"];
         let result_data = if let Some(arr) = data.as_array() {
             arr.clone()
@@ -1233,7 +1226,6 @@ impl GuestTransaction for Transaction {
 
         let response = self.api.execute(&gremlin, Some(Value::Object(bindings)))?;
 
-        // Handle GraphSON g:List structure
         let data = &response["result"]["data"];
         let result_data = if let Some(arr) = data.as_array() {
             arr.clone()
@@ -1368,13 +1360,9 @@ impl GuestTransaction for Transaction {
     }
 
     fn is_active(&self) -> bool {
-        // Check the transaction state first
         let state = self.state.read().unwrap();
         match *state {
-            crate::TransactionState::Active => {
-                // If transaction state is active, also check if the session is still active
-                self.api.is_session_active()
-            }
+            crate::TransactionState::Active => self.api.is_session_active(),
             crate::TransactionState::Committed | crate::TransactionState::RolledBack => false,
         }
     }

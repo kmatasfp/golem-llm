@@ -232,7 +232,6 @@ pub(crate) fn from_json_value(value: Value) -> Result<PropertyValue, GraphError>
             Ok(PropertyValue::StringValue(s))
         }
         Value::Object(map) => {
-            // First, try to parse as GeoJSON if it has the right structure
             if let Some(typ) = map.get("type").and_then(Value::as_str) {
                 if let Some(coords_val) = map.get("coordinates") {
                     match typ {
@@ -315,7 +314,6 @@ pub(crate) fn from_json_value(value: Value) -> Result<PropertyValue, GraphError>
                 }
             }
 
-            // This handles cases where Neo4j returns complex objects that aren't GeoJSON
             Ok(PropertyValue::StringValue(
                 serde_json::to_string(&Value::Object(map)).unwrap_or_else(|_| "{}".to_string()),
             ))

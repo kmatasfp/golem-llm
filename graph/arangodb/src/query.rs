@@ -93,7 +93,7 @@ impl Transaction {
 
         Ok(QueryExecutionResult {
             query_result_value,
-            execution_time_ms: None, // ArangoDB response can contain this, but it's an enterprise feature.
+            execution_time_ms: None,
             rows_affected: None,
             explanation: None,
             profile_data: None,

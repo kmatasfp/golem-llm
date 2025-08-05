@@ -60,7 +60,7 @@ impl GuestTransaction for Transaction {
         {
             let state = self.state.read().unwrap();
             match *state {
-                crate::TransactionState::RolledBack => return Ok(()), // Already rolled back
+                crate::TransactionState::RolledBack => return Ok(()),
                 crate::TransactionState::Committed => {
                     return Err(GraphError::TransactionFailed(
                         "Cannot rollback a transaction that has been committed".to_string(),
@@ -424,7 +424,6 @@ impl GuestTransaction for Transaction {
         to_vertex: ElementId,
         properties: PropertyMap,
     ) -> Result<Edge, GraphError> {
-        // Convert ElementId to string for elementId() queries
         let from_id_str = match from_vertex.clone() {
             ElementId::StringValue(s) => s,
             ElementId::Int64(i) => i.to_string(),
@@ -636,7 +635,6 @@ impl GuestTransaction for Transaction {
             ElementId::Uuid(u) => u,
         };
 
-        // Use elementId() for edge matching
         let stmt = json!({
             "statement": "MATCH ()-[r]-() WHERE elementId(r) = $id DELETE r",
             "parameters": { "id": cypher_id }
