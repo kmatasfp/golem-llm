@@ -316,6 +316,8 @@ jobs:
           echo "ArangoDB tests completed successfully"
           
           echo "Testing JanusGraph integration..."
+          golem server clean
+          golem server run
           golem app deploy -b janusgraph-debug test:graph test:helper
           golem worker new -e JANUSGRAPH_HOST=localhost -e JANUSGRAPH_USER="" -e JANUSGRAPH_PASSWORD="" -e JANUSGRAPH_PORT="8182" test:graph/janusgraph-1
           golem worker invoke test:graph/janusgraph-1 test1 | grep -v "ERROR: "
@@ -328,6 +330,8 @@ jobs:
           echo "JanusGraph tests completed successfully"
           
           echo "Testing Neo4j integration..."
+          golem server clean
+          golem server run
           golem app deploy -b neo4j-debug test:graph test:helper
           golem worker new -e NEO4J_HOST=localhost -e NEO4J_USER=neo4j -e NEO4J_PASSWORD=password -e NEO4J_PORT="7474" -e NEO4J_DATABASE=neo4j test:graph/neo4j-1
           golem worker invoke test:graph/neo4j-1 test1 | grep -v "ERROR: "
