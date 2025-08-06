@@ -318,6 +318,7 @@ jobs:
           
           echo "Testing JanusGraph integration..."
           golem app deploy -b janusgraph-debug test:graph test:helper
+          sleep 10
           golem worker new -e JANUSGRAPH_HOST=localhost -e JANUSGRAPH_USER="" -e JANUSGRAPH_PASSWORD="" -e JANUSGRAPH_PORT="8182" test:graph/janusgraph-1
           golem worker invoke test:graph/janusgraph-1 test1 | grep -v "ERROR: "
           golem worker invoke test:graph/janusgraph-1 test2 | grep -v "ERROR: "
@@ -331,6 +332,7 @@ jobs:
           
           echo "Testing Neo4j integration..."
           golem app deploy -b neo4j-debug test:graph test:helper
+          sleep 10
           golem worker new -e NEO4J_HOST=localhost -e NEO4J_USER=neo4j -e NEO4J_PASSWORD=password -e NEO4J_PORT="7474" -e NEO4J_DATABASE=neo4j test:graph/neo4j-1
           golem worker invoke test:graph/neo4j-1 test1 | grep -v "ERROR: "
           golem worker invoke test:graph/neo4j-1 test2 | grep -v "ERROR: "
@@ -341,7 +343,7 @@ jobs:
           golem worker invoke test:graph/neo4j-1 test7 | grep -v "ERROR: "
           echo "Neo4j tests completed successfully"
           golem app clean -b neo4j-debug 
-          
+
           echo "All graph integration tests completed successfully!"
 
   publish-all:
