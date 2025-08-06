@@ -314,6 +314,7 @@ jobs:
           golem worker invoke test:graph/arangodb-1 test6 | grep -v "ERROR: "
           golem worker invoke test:graph/arangodb-1 test7 | grep -v "ERROR: "
           echo "ArangoDB tests completed successfully"
+          golem app clean -b arangodb-debug 
           
           echo "Testing JanusGraph integration..."
           golem app deploy -b janusgraph-debug test:graph test:helper
@@ -326,6 +327,7 @@ jobs:
           golem worker invoke test:graph/janusgraph-1 test6 | grep -v "ERROR: "
           golem worker invoke test:graph/janusgraph-1 test7 | grep -v "ERROR: "
           echo "JanusGraph tests completed successfully"
+          golem app clean -b janusgraph-debug 
           
           echo "Testing Neo4j integration..."
           golem app deploy -b neo4j-debug test:graph test:helper
@@ -338,6 +340,7 @@ jobs:
           golem worker invoke test:graph/neo4j-1 test6 | grep -v "ERROR: "
           golem worker invoke test:graph/neo4j-1 test7 | grep -v "ERROR: "
           echo "Neo4j tests completed successfully"
+          golem app clean -b neo4j-debug 
           
           echo "All graph integration tests completed successfully!"
 
