@@ -84,7 +84,7 @@ fn ensure_arangodb_collections(graph_connection: &crate::bindings::golem::graph:
     let existing_containers = match schema_manager.list_containers() {
         Ok(containers) => containers,
         Err(error) => {
-            println!("Warning: Could not list existing containers: {:?}", error);
+            println!("ERROR: Could not list existing containers: {:?}", error);
             vec![] 
         }
     };
@@ -103,7 +103,7 @@ fn ensure_arangodb_collections(graph_connection: &crate::bindings::golem::graph:
         match schema_manager.create_container(name, container_type) {
             Ok(_) => println!("Collection '{}' created successfully", name),
             Err(error) => {
-                println!("Warning: Could not create collection '{}': {:?}", name, error);
+                println!("ERROR: Could not create collection '{}': {:?}", name, error);
             }
         }
     }
@@ -141,7 +141,7 @@ impl Guest for Component {
             }
         };
         if let Err(error) = ensure_arangodb_collections(&graph_connection) {
-            println!("Warning: Collection setup failed: {}", error);
+            println!("ERROR: Collection setup failed: {}", error);
         }
 
         println!("Beginning transaction...");
@@ -214,7 +214,7 @@ impl Guest for Component {
         };
 
         if let Err(error) = ensure_arangodb_collections(&graph_connection) {
-            println!("Warning: Collection setup failed: {}", error);
+            println!("ERROR: Collection setup failed: {}", error);
         } 
 
         let transaction = match graph_connection.begin_transaction() {
@@ -322,7 +322,7 @@ impl Guest for Component {
         };
 
         if let Err(error) = ensure_arangodb_collections(&graph_connection) {
-            println!("Warning: Collection setup failed: {}", error);
+            println!("ERROR: Collection setup failed: {}", error);
         }
 
         let transaction = match graph_connection.begin_transaction() {
@@ -388,7 +388,7 @@ impl Guest for Component {
         };
 
         if let Err(error) = ensure_arangodb_collections(&graph_connection) {
-            println!("Warning: Collection setup failed: {}", error);
+            println!("ERROR: Collection setup failed: {}", error);
         }
 
         let transaction = match graph_connection.begin_transaction() {
@@ -503,7 +503,7 @@ impl Guest for Component {
         };
 
         if let Err(error) = ensure_arangodb_collections(&graph_connection) {
-            println!("Warning: Collection setup failed: {}", error);
+            println!("ERROR: Collection setup failed: {}", error);
         }
 
         let transaction = match graph_connection.begin_transaction() {
@@ -619,7 +619,7 @@ impl Guest for Component {
             Err(error) => return format!("ERROR: Connection failed: {:?}", error),
         };
         if let Err(error) = ensure_arangodb_collections(&graph_connection) {
-            println!("Warning: Collection setup failed: {}", error);
+            println!("ERROR: Collection setup failed: {}", error);
         }
 
         let transaction = match graph_connection.begin_transaction() {
@@ -727,7 +727,7 @@ impl Guest for Component {
                 println!("Found {} vertex labels", vertex_count);
             }
             Err(error) => {
-                println!("Warning: Could not list vertex labels: {:?}", error);
+                println!("ERROR: Could not list vertex labels: {:?}", error);
             }
         }
 
@@ -737,7 +737,7 @@ impl Guest for Component {
                 println!("Found {} edge labels", edge_count);
             }
             Err(error) => {
-                println!("Warning: Could not list edge labels: {:?}", error);
+                println!("ERROR: Could not list edge labels: {:?}", error);
             }
         }
 
@@ -748,7 +748,7 @@ impl Guest for Component {
                 println!("Found {} indexes", index_count);
             }
             Err(error) => {
-                println!("Warning: Could not list indexes: {:?}", error);
+                println!("ERROR: Could not list indexes: {:?}", error);
             }
         }
 
