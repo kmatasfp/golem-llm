@@ -295,10 +295,12 @@ jobs:
           golem profile switch local
           nohup golem server run >golem-server.log 2>&1 &
           echo "Golem server started."
-      - name: Build and test arangodb graph integration
+      - name: Build and test graph integration
         run: |
           set -eo pipefail
           cargo make --cwd graph build-arangodb
+          cargo make --cwd graph build-janusgraph
+          cargo make --cwd graph build-neo4j
           cd test/graph
           
           echo "Testing ArangoDB integration..."
@@ -312,19 +314,7 @@ jobs:
           golem worker invoke test:graph/arangodb-1 test6 | grep -v "ERROR: "
           golem worker invoke test:graph/arangodb-1 test7 | grep -v "ERROR: "
           echo "ArangoDB tests completed successfully"
-      - name: Restart golem server
-        run: |   
-          set -e
-          echo "Restarting Golem server..."
-          golem server clean
-          nohup golem server run >golem-server.log 2>&1 &
-          echo "Golem server restarted."
-      - name: Build and test janusgraph graph integration
-        run: |
-          set -eo pipefail
-          cargo make --cwd graph build-janusgraph
-          cd test/graph
-
+          
           echo "Testing JanusGraph integration..."
           golem app deploy -b janusgraph-debug test:graph test:helper
           golem worker new -e JANUSGRAPH_HOST=localhost -e JANUSGRAPH_USER="" -e JANUSGRAPH_PASSWORD="" -e JANUSGRAPH_PORT="8182" test:graph/janusgraph-1
@@ -336,18 +326,6 @@ jobs:
           golem worker invoke test:graph/janusgraph-1 test6 | grep -v "ERROR: "
           golem worker invoke test:graph/janusgraph-1 test7 | grep -v "ERROR: "
           echo "JanusGraph tests completed successfully"
-      - name: Restart golem server
-        run: |   
-          set -e
-          echo "Restarting Golem server..."
-          golem server clean
-          nohup golem server run >golem-server.log 2>&1 &
-          echo "Golem server restarted."
-      - name: Build and test neo4j graph integration
-        run: |
-          set -eo pipefail
-          cargo make --cwd graph build-neo4j
-          cd test/graph
           
           echo "Testing Neo4j integration..."
           golem app deploy -b neo4j-debug test:graph test:helper
