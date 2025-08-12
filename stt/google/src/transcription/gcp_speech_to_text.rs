@@ -16,6 +16,27 @@ use super::{
 
 const BASE_URL: &str = "https://speech.googleapis.com/v2";
 
+// New structures for synchronous recognize endpoint
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct RecognizeRequest {
+    pub config: RecognitionConfig,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_mask: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>, // base64 encoded audio
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>, // GCS URI (not used for content-based requests)
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RecognizeResponse {
+    pub results: Vec<SpeechRecognitionResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<RecognitionResponseMetadata>,
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct StartBatchRecognizeRequest {
@@ -88,7 +109,7 @@ pub struct BatchRecognizeFileResult {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct BatchRecognizeResults {
+pub struct RecognizeResults {
     pub results: Vec<SpeechRecognitionResult>,
     pub metadata: Option<RecognitionResponseMetadata>,
 }
@@ -96,7 +117,7 @@ pub struct BatchRecognizeResults {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct InlineResult {
-    pub transcript: BatchRecognizeResults,
+    pub transcript: RecognizeResults,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -232,6 +253,14 @@ pub struct WordInfo {
 }
 
 pub trait SpeechToTextService {
+    async fn recognize(
+        &self,
+        request_id: &str,
+        audio_content: &[u8],
+        audio_config: &AudioConfig,
+        transcription_config: Option<&TranscriptionConfig>,
+    ) -> Result<RecognizeResponse, SttError>;
+
     async fn start_batch_recognize(
         &self,
         operation_name: &str,
@@ -279,6 +308,107 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextClient<HC, RT> {
             auth,
             location: location.unwrap_or_else(|| "global".to_string()),
             runtime,
+        }
+    }
+
+    fn create_recognition_config(
+        audio_config: &AudioConfig,
+        transcription_config: Option<&TranscriptionConfig>,
+    ) -> RecognitionConfig {
+        let (auto_decoding_config, explicit_decoding_config) = match audio_config.format {
+            AudioFormat::Wav
+            | AudioFormat::Flac
+            | AudioFormat::Mp3
+            | AudioFormat::OggOpus
+            | AudioFormat::WebmOpus
+            | AudioFormat::AmrNb
+            | AudioFormat::AmrWb
+            | AudioFormat::Mp4
+            | AudioFormat::M4a
+            | AudioFormat::Mov => (Some(AutoDetectDecodingConfig {}), None),
+            AudioFormat::LinearPcm => (
+                None,
+                Some(ExplicitDecodingConfig {
+                    encoding: "LINEAR16".to_string(),
+                    sample_rate_hertz: audio_config.sample_rate_hertz,
+                    audio_channel_count: audio_config.channels,
+                }),
+            ),
+        };
+
+        let mut features = RecognitionFeatures {
+            profanity_filter: None,
+            enable_word_time_offsets: Some(true),
+            enable_word_confidence: Some(true),
+            enable_automatic_punctuation: Some(true),
+            multi_channel_mode: None,
+            diarization_config: None,
+            max_alternatives: None,
+        };
+
+        if let Some(config) = transcription_config {
+            if config.enable_profanity_filter {
+                features.profanity_filter = Some(true);
+            }
+
+            // Check if multi-channel mode is enabled and model is not "short"
+            if audio_config.channels.as_ref().is_some_and(|c| *c > 1)
+                && config.enable_multi_channel
+                && config
+                    .model
+                    .as_ref()
+                    .is_some_and(|m| !m.eq_ignore_ascii_case("short"))
+            {
+                features.multi_channel_mode = Some("SEPARATE_RECOGNITION_PER_CHANNEL".to_string());
+            }
+
+            if let Some(ref diarization_config) = config.diarization {
+                let min_speakers = diarization_config.min_speaker_count.unwrap_or(2);
+                let max_speakers = diarization_config.max_speaker_count.unwrap_or(6);
+                features.diarization_config = Some(SpeakerDiarizationConfig {
+                    min_speaker_count: min_speakers,
+                    max_speaker_count: max_speakers,
+                });
+            }
+        }
+
+        features.max_alternatives = Some(1); // Get the best alternative only
+
+        let adaptation = if let Some(config) = transcription_config {
+            if !config.phrases.is_empty() {
+                let phrase_items: Vec<PhraseItem> = config
+                    .phrases
+                    .iter()
+                    .map(|phrase| PhraseItem {
+                        value: phrase.value.clone(),
+                        boost: phrase.boost,
+                    })
+                    .collect();
+
+                Some(SpeechAdaptation {
+                    phrase_sets: vec![AdaptationPhraseSet {
+                        inline_phrase_set: PhraseSet {
+                            phrases: phrase_items,
+                        },
+                    }],
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let language_codes = transcription_config.and_then(|c| c.language_codes.clone());
+        let model = transcription_config.and_then(|c| c.model.clone());
+
+        RecognitionConfig {
+            auto_decoding_config,
+            explicit_decoding_config,
+            model,
+            language_codes,
+            features,
+            adaptation,
         }
     }
 
@@ -373,6 +503,45 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextClient<HC, RT> {
 }
 
 impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextService for SpeechToTextClient<HC, RT> {
+    async fn recognize(
+        &self,
+        request_id: &str,
+        audio_content: &[u8],
+        audio_config: &AudioConfig,
+        transcription_config: Option<&TranscriptionConfig>,
+    ) -> Result<RecognizeResponse, SttError> {
+        use base64::{engine::general_purpose, Engine as _};
+
+        let base64_content = general_purpose::STANDARD.encode(audio_content);
+
+        let config = Self::create_recognition_config(audio_config, transcription_config);
+
+        let recognizer_path = format!(
+            "projects/{}/locations/{}/recognizers/_",
+            self.auth.project_id(),
+            self.location
+        );
+
+        let request_body = RecognizeRequest {
+            config,
+            config_mask: None,
+            content: Some(base64_content),
+            uri: None,
+        };
+
+        let uri = format!("{}/{}:recognize", BASE_URL, recognizer_path);
+
+        let body = serde_json::to_vec(&request_body).map_err(|e| {
+            (
+                request_id.to_string(),
+                golem_stt::http::Error::Generic(format!("Failed to serialize request: {}", e)),
+            )
+        })?;
+
+        self.make_authenticated_request(&uri, request_id, Method::POST, Some(body))
+            .await
+    }
+
     async fn start_batch_recognize(
         &self,
         request_id: &str,
@@ -380,102 +549,7 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextService for SpeechToTextClien
         audio_config: &AudioConfig,
         transcription_config: Option<&TranscriptionConfig>,
     ) -> Result<BatchRecognizeOperationResponse, SttError> {
-        let (auto_decoding_config, explicit_decoding_config) = match audio_config.format {
-            AudioFormat::Wav
-            | AudioFormat::Flac
-            | AudioFormat::Mp3
-            | AudioFormat::OggOpus
-            | AudioFormat::WebmOpus
-            | AudioFormat::AmrNb
-            | AudioFormat::AmrWb
-            | AudioFormat::Mp4
-            | AudioFormat::M4a
-            | AudioFormat::Mov => (Some(AutoDetectDecodingConfig {}), None),
-            AudioFormat::LinearPcm => (
-                None,
-                Some(ExplicitDecodingConfig {
-                    encoding: "LINEAR16".to_string(),
-                    sample_rate_hertz: audio_config.sample_rate_hertz,
-                    audio_channel_count: audio_config.channels,
-                }),
-            ),
-        };
-
-        let mut features = RecognitionFeatures {
-            profanity_filter: None,
-            enable_word_time_offsets: Some(true),
-            enable_word_confidence: Some(true),
-            enable_automatic_punctuation: Some(true),
-            multi_channel_mode: None,
-            diarization_config: None,
-            max_alternatives: None,
-        };
-
-        if let Some(config) = transcription_config {
-            if config.enable_profanity_filter {
-                features.profanity_filter = Some(true);
-            }
-
-            // Check if multi-channel mode is enabled and model is not `short`
-            if audio_config.channels.as_ref().is_some_and(|c| *c > 1)
-                && config.enable_multi_channel
-                && !config
-                    .model
-                    .as_ref()
-                    .is_some_and(|m| m.eq_ignore_ascii_case("short"))
-            {
-                features.multi_channel_mode = Some("SEPARATE_RECOGNITION_PER_CHANNEL".to_string());
-            }
-
-            if let Some(ref diarization_config) = config.diarization {
-                let min_speakers = diarization_config.min_speaker_count.unwrap_or(2);
-                let max_speakers = diarization_config.max_speaker_count.unwrap_or(6);
-                features.diarization_config = Some(SpeakerDiarizationConfig {
-                    min_speaker_count: min_speakers,
-                    max_speaker_count: max_speakers,
-                });
-            }
-        }
-
-        features.max_alternatives = Some(1); //get the best alternative only
-
-        let adaptation = if let Some(config) = transcription_config {
-            if !config.phrases.is_empty() {
-                let phrase_items: Vec<PhraseItem> = config
-                    .phrases
-                    .iter()
-                    .map(|phrase| PhraseItem {
-                        value: phrase.value.clone(),
-                        boost: phrase.boost,
-                    })
-                    .collect();
-
-                Some(SpeechAdaptation {
-                    phrase_sets: vec![AdaptationPhraseSet {
-                        inline_phrase_set: PhraseSet {
-                            phrases: phrase_items,
-                        },
-                    }],
-                })
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        let language_codes = transcription_config.and_then(|c| c.language_codes.clone());
-
-        let model = transcription_config.and_then(|c| c.model.clone());
-
-        let config = RecognitionConfig {
-            auto_decoding_config,
-            explicit_decoding_config,
-            model,
-            language_codes,
-            features,
-            adaptation,
-        };
+        let config = Self::create_recognition_config(audio_config, transcription_config);
 
         let files: Vec<BatchRecognizeFileMetadata> = audio_gcs_uris
             .into_iter()

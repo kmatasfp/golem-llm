@@ -4,9 +4,11 @@ use golem_stt::{error::Error as SttError, languages::Language, transcription::St
 
 use super::{
     gcp_cloud_storage::CloudStorageService,
-    gcp_speech_to_text::{BatchRecognizeOperationResponse, SpeechToTextService},
+    gcp_speech_to_text::{BatchRecognizeOperationResponse, RecognizeResults, SpeechToTextService},
     request::TranscriptionRequest,
 };
+
+const MAX_SHORT_AUDIO_SIZE: usize = 10 * 1024 * 1024; // 10MB
 
 // https://cloud.google.com/speech-to-text/v2/docs/speech-to-text-supported-languages
 // different models support different languages so here is a common set of languages Google Speech to Text supports accross regions
@@ -163,6 +165,32 @@ impl<GC: CloudStorageService, ST: SpeechToTextService> SpeechToTextApi<GC, ST> {
         }
     }
 
+    async fn run_synchronous_transcription(
+        &self,
+        request_id: &str,
+        audio_content: &[u8],
+        audio_config: &super::request::AudioConfig,
+        transcription_config: Option<&super::request::TranscriptionConfig>,
+    ) -> Result<RecognizeResults, SttError> {
+        let recognize_response = self
+            .speech_to_text_service
+            .recognize(
+                request_id,
+                audio_content,
+                audio_config,
+                transcription_config,
+            )
+            .await?;
+
+        // Convert RecognizeResults for consistency
+        let batch_results = RecognizeResults {
+            results: recognize_response.results,
+            metadata: recognize_response.metadata,
+        };
+
+        Ok(batch_results)
+    }
+
     async fn upload_audio_to_gcs(
         &self,
         request_id: &str,
@@ -177,7 +205,7 @@ impl<GC: CloudStorageService, ST: SpeechToTextService> SpeechToTextApi<GC, ST> {
     async fn run_transcription_job(
         &self,
         operation_name: &str,
-        gcs_uri: String,
+        gcs_uri: &str,
         audio_config: &super::request::AudioConfig,
         transcription_config: Option<&super::request::TranscriptionConfig>,
     ) -> Result<BatchRecognizeOperationResponse, SttError> {
@@ -185,7 +213,7 @@ impl<GC: CloudStorageService, ST: SpeechToTextService> SpeechToTextApi<GC, ST> {
             .speech_to_text_service
             .start_batch_recognize(
                 operation_name,
-                vec![gcs_uri],
+                vec![gcs_uri.to_string()],
                 audio_config,
                 transcription_config,
             )
@@ -221,37 +249,84 @@ impl<GC: CloudStorageService, ST: SpeechToTextService>
         })?;
 
         let audio_size = request.audio.len();
-        let extension = determine_audio_extension(&request.audio_config.format);
-        let object_name = format!("{}/audio{}", request_id.clone(), extension);
 
-        self.upload_audio_to_gcs(&request_id, &object_name, request.audio)
-            .await?;
-
-        let gcs_uri = format!("gs://{}/{}", self.bucket_name, object_name);
-        let transcription_result = self
-            .run_transcription_job(
+        let use_sync_recognition = audio_size < MAX_SHORT_AUDIO_SIZE
+            && request
+                .transcription_config
+                .as_ref()
+                .and_then(|config| config.model.as_ref())
+                .map(|model| model.eq_ignore_ascii_case("short"))
+                .unwrap_or(false);
+        let gcp_transcription = if use_sync_recognition {
+            self.run_synchronous_transcription(
                 &request_id,
-                gcs_uri,
+                &request.audio,
                 &request.audio_config,
                 request.transcription_config.as_ref(),
             )
-            .await;
+            .await?
+        } else {
+            let extension = determine_audio_extension(&request.audio_config.format);
+            let object_name = format!("{}/audio{}", request_id.clone(), extension);
 
-        let cleanup_result = self
-            .cloud_storage_service
-            .delete_object(&request_id, &self.bucket_name, &object_name)
-            .await;
+            self.upload_audio_to_gcs(&request_id, &object_name, request.audio)
+                .await?;
 
-        let gcp_transcription = transcription_result?;
+            let gcs_uri = format!("gs://{}/{}", self.bucket_name, object_name);
+            let transcription_result = self
+                .run_transcription_job(
+                    &request_id,
+                    &gcs_uri,
+                    &request.audio_config,
+                    request.transcription_config.as_ref(),
+                )
+                .await;
 
-        if let Err(cleanup_error) = cleanup_result {
-            // Log cleanup error but don't fail the operation
-            log::warn!(
-                "Failed to cleanup audio file for request {}: {:?}",
-                request_id,
-                cleanup_error
-            );
-        }
+            let cleanup_result = self
+                .cloud_storage_service
+                .delete_object(&request_id, &self.bucket_name, &object_name)
+                .await;
+
+            if let Err(cleanup_error) = cleanup_result {
+                // Log cleanup error but don't fail the operation
+                log::warn!(
+                    "Failed to cleanup audio file for request {}: {:?}",
+                    request_id,
+                    cleanup_error
+                );
+            }
+
+            let gcp_transcription = transcription_result?;
+
+            let mut transcription_response =
+                gcp_transcription
+                    .response
+                    .ok_or_else(|| golem_stt::error::Error::APIUnknown {
+                        request_id: request_id.to_string(),
+                        provider_error: "Transcription completed but no transcript found"
+                            .to_string(),
+                    })?;
+
+            let transcription =
+                transcription_response
+                    .results
+                    .remove(&gcs_uri)
+                    .ok_or_else(|| golem_stt::error::Error::APIUnknown {
+                        request_id: request_id.to_string(),
+                        provider_error: format!(
+                        "Transcription completed but no transcript found for expected file path {}",
+                        gcs_uri
+                    ),
+                    })?;
+
+            transcription
+                .inline_result
+                .ok_or_else(|| golem_stt::error::Error::APIUnknown {
+                    request_id: request_id.to_string(),
+                    provider_error: "Transcription completed but no InlineResult found".to_string(),
+                })?
+                .transcript
+        };
 
         // Determine language from response or use the first provided language
         let language = request
@@ -346,7 +421,7 @@ pub struct TranscriptionResponse {
     pub audio_size_bytes: usize,
     pub language: String,
     pub model: Option<String>,
-    pub gcp_transcription: BatchRecognizeOperationResponse,
+    pub gcp_transcription: RecognizeResults,
 }
 
 #[cfg(test)]
@@ -532,6 +607,14 @@ mod tests {
     }
 
     #[derive(Debug, PartialEq)]
+    struct RecognizeOperation {
+        request_id: String,
+        audio_size: usize,
+        audio_config: AudioConfig,
+        transcription_config: Option<TranscriptionConfig>,
+    }
+
+    #[derive(Debug, PartialEq)]
     struct StartBatchRecognizeOperation {
         request_id: String,
         audio_gcs_uris: Vec<String>,
@@ -640,10 +723,12 @@ mod tests {
     }
 
     struct MockSpeechToTextService {
+        pub recognize_responses: RefCell<VecDeque<Result<RecognizeResponse, SttError>>>,
         pub start_batch_recognize_responses:
             RefCell<VecDeque<Result<BatchRecognizeOperationResponse, SttError>>>,
         pub wait_for_completion_responses:
             RefCell<VecDeque<Result<BatchRecognizeOperationResponse, SttError>>>,
+        pub captured_recognize: RefCell<Vec<RecognizeOperation>>,
         pub captured_start_batch_recognize: RefCell<Vec<StartBatchRecognizeOperation>>,
         pub captured_wait_for_completion: RefCell<Vec<WaitForCompletionOperation>>,
     }
@@ -651,11 +736,17 @@ mod tests {
     impl MockSpeechToTextService {
         pub fn new() -> Self {
             Self {
+                recognize_responses: RefCell::new(VecDeque::new()),
                 start_batch_recognize_responses: RefCell::new(VecDeque::new()),
                 wait_for_completion_responses: RefCell::new(VecDeque::new()),
+                captured_recognize: RefCell::new(Vec::new()),
                 captured_start_batch_recognize: RefCell::new(Vec::new()),
                 captured_wait_for_completion: RefCell::new(Vec::new()),
             }
+        }
+
+        pub fn expect_recognize_response(&self, response: Result<RecognizeResponse, SttError>) {
+            self.recognize_responses.borrow_mut().push_back(response);
         }
 
         pub fn expect_start_batch_recognize_response(
@@ -676,6 +767,10 @@ mod tests {
                 .push_back(response);
         }
 
+        pub fn get_captured_recognize(&self) -> Ref<Vec<RecognizeOperation>> {
+            self.captured_recognize.borrow()
+        }
+
         pub fn get_captured_start_batch_recognize(&self) -> Ref<Vec<StartBatchRecognizeOperation>> {
             self.captured_start_batch_recognize.borrow()
         }
@@ -685,12 +780,39 @@ mod tests {
         }
 
         pub fn clear_captured_operations(&self) {
+            self.captured_recognize.borrow_mut().clear();
             self.captured_start_batch_recognize.borrow_mut().clear();
             self.captured_wait_for_completion.borrow_mut().clear();
         }
     }
 
     impl SpeechToTextService for MockSpeechToTextService {
+        async fn recognize(
+            &self,
+            request_id: &str,
+            audio_content: &[u8],
+            audio_config: &AudioConfig,
+            transcription_config: Option<&TranscriptionConfig>,
+        ) -> Result<RecognizeResponse, SttError> {
+            self.captured_recognize
+                .borrow_mut()
+                .push(RecognizeOperation {
+                    request_id: request_id.to_string(),
+                    audio_size: audio_content.len(),
+                    audio_config: audio_config.clone(),
+                    transcription_config: transcription_config.cloned(),
+                });
+
+            self.recognize_responses
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(Err((
+                    request_id.to_string(),
+                    golem_stt::http::Error::Generic("unexpected error".to_string()),
+                )
+                    .into()))
+        }
+
         async fn start_batch_recognize(
             &self,
             request_id: &str,
@@ -771,6 +893,25 @@ mod tests {
         }
     }
 
+    fn create_successful_recognize_response() -> RecognizeResponse {
+        RecognizeResponse {
+            results: vec![SpeechRecognitionResult {
+                alternatives: vec![SpeechRecognitionAlternative {
+                    transcript: "Hello world from sync".to_string(),
+                    confidence: Some(0.98),
+                    words: vec![],
+                }],
+                channel_tag: None,
+                result_end_offset: None,
+                language_code: Some("en-US".to_string()),
+            }],
+            metadata: Some(RecognitionResponseMetadata {
+                request_id: Some("sync-test-request".to_string()),
+                total_billed_duration: None,
+            }),
+        }
+    }
+
     fn create_successful_batch_response_for_request(
         request_id: &str,
         bucket_name: &str,
@@ -782,7 +923,7 @@ mod tests {
 
         // Generate the GCS URI that matches what the actual implementation creates
         let extension = determine_audio_extension(audio_format);
-        let object_name = format!("{}.audio.{}", request_id, extension);
+        let object_name = format!("{}/audio{}", request_id, extension);
         let gcs_uri = format!("gs://{}/{}", bucket_name, object_name);
 
         let file_result = BatchRecognizeFileResult {
@@ -792,7 +933,7 @@ mod tests {
                 total_billed_duration: None,
             }),
             inline_result: Some(InlineResult {
-                transcript: BatchRecognizeResults {
+                transcript: RecognizeResults {
                     results: vec![SpeechRecognitionResult {
                         alternatives: vec![SpeechRecognitionAlternative {
                             transcript: "Hello world".to_string(),
@@ -897,7 +1038,7 @@ mod tests {
         let expected_put_op = GcsPutOperation {
             request_id: "test-123".to_string(),
             bucket: "test-bucket".to_string(),
-            object_name: "test-123.audio.mp3".to_string(),
+            object_name: "test-123/audio.mp3".to_string(),
             content_size: 15,
         };
         assert_eq!(captured_puts[0], expected_put_op);
@@ -917,7 +1058,11 @@ mod tests {
                 response: None,
             }));
         api.speech_to_text_service
-            .expect_wait_for_completion_response(Ok(create_successful_batch_response()));
+            .expect_wait_for_completion_response(Ok(create_successful_batch_response_for_request(
+                "test-456",
+                "test-bucket",
+                &AudioFormat::Wav,
+            )));
         api.cloud_storage_service
             .expect_delete_object_response(Ok(()));
 
@@ -957,7 +1102,7 @@ mod tests {
 
         let expected_start_op = StartBatchRecognizeOperation {
             request_id: "test-456".to_string(),
-            audio_gcs_uris: vec!["gs://test-bucket/test-456.audio.wav".to_string()],
+            audio_gcs_uris: vec!["gs://test-bucket/test-456/audio.wav".to_string()],
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 sample_rate_hertz: Some(44100),
@@ -966,6 +1111,85 @@ mod tests {
             transcription_config: Some(transcription_config),
         };
         assert_eq!(captured_starts[0], expected_start_op);
+    }
+
+    #[wstd::test]
+    async fn test_transcribe_audio_uses_synchronous_transcription_for_short_model() {
+        let api = create_mock_speech_to_text_api();
+
+        let expected_recognize_response = create_successful_recognize_response();
+        api.speech_to_text_service
+            .expect_recognize_response(Ok(expected_recognize_response.clone()));
+
+        // Create a small audio file (< 10MB) with "short" model
+        let small_audio = vec![0u8; 1024]; // 1KB audio file
+        let request = TranscriptionRequest {
+            request_id: "sync-test".to_string(),
+            audio: small_audio,
+            audio_config: AudioConfig {
+                format: AudioFormat::Wav,
+                sample_rate_hertz: Some(16000),
+                channels: Some(1),
+            },
+            transcription_config: Some(TranscriptionConfig {
+                language_codes: Some(vec!["en-US".to_string()]),
+                model: Some("short".to_string()),
+                enable_profanity_filter: false,
+                diarization: None,
+                enable_multi_channel: false,
+                phrases: vec![],
+            }),
+        };
+
+        let result = api.transcribe_audio(request).await.unwrap();
+
+        // Verify that synchronous recognize was called
+        let captured_recognize = api.speech_to_text_service.get_captured_recognize();
+        assert_eq!(captured_recognize.len(), 1);
+
+        let expected_recognize_op = RecognizeOperation {
+            request_id: "sync-test".to_string(),
+            audio_size: 1024,
+            audio_config: AudioConfig {
+                format: AudioFormat::Wav,
+                sample_rate_hertz: Some(16000),
+                channels: Some(1),
+            },
+            transcription_config: Some(TranscriptionConfig {
+                language_codes: Some(vec!["en-US".to_string()]),
+                model: Some("short".to_string()),
+                enable_profanity_filter: false,
+                diarization: None,
+                enable_multi_channel: false,
+                phrases: vec![],
+            }),
+        };
+        assert_eq!(captured_recognize[0], expected_recognize_op);
+
+        // Verify that no batch operations were called
+        let captured_batch = api
+            .speech_to_text_service
+            .get_captured_start_batch_recognize();
+        assert_eq!(captured_batch.len(), 0);
+
+        // Verify that no GCS operations were called
+        let captured_puts = api.cloud_storage_service.get_captured_put_operations();
+        let captured_deletes = api.cloud_storage_service.get_captured_delete_operations();
+        assert_eq!(captured_puts.len(), 0);
+        assert_eq!(captured_deletes.len(), 0);
+
+        // Verify the response is correct
+        let expected_response = TranscriptionResponse {
+            request_id: "sync-test".to_string(),
+            audio_size_bytes: 1024,
+            language: "en-US".to_string(),
+            model: Some("short".to_string()),
+            gcp_transcription: RecognizeResults {
+                results: expected_recognize_response.results,
+                metadata: expected_recognize_response.metadata,
+            },
+        };
+        assert_eq!(result, expected_response);
     }
 
     #[wstd::test]
@@ -982,7 +1206,11 @@ mod tests {
                 response: None,
             }));
 
-        let expected_gcp_response = create_successful_batch_response();
+        let expected_gcp_response = create_successful_batch_response_for_request(
+            "test-789",
+            "test-bucket",
+            &AudioFormat::Flac,
+        );
         api.speech_to_text_service
             .expect_wait_for_completion_response(Ok(expected_gcp_response.clone()));
         api.cloud_storage_service
@@ -998,7 +1226,7 @@ mod tests {
             },
             transcription_config: Some(TranscriptionConfig {
                 language_codes: Some(vec!["fr-FR".to_string()]),
-                model: Some("phone_call".to_string()),
+                model: Some("long".to_string()),
                 enable_profanity_filter: false,
                 diarization: None,
                 enable_multi_channel: false,
@@ -1008,12 +1236,24 @@ mod tests {
 
         let result = api.transcribe_audio(request).await.unwrap();
 
+        let expected_gcp_transcription = expected_gcp_response
+            .response
+            .unwrap()
+            .results
+            .into_iter()
+            .next()
+            .unwrap()
+            .1
+            .inline_result
+            .unwrap()
+            .transcript;
+
         let expected_response = TranscriptionResponse {
             request_id: "test-789".to_string(),
             audio_size_bytes: 13,
             language: "fr-FR".to_string(),
-            model: Some("phone_call".to_string()),
-            gcp_transcription: expected_gcp_response,
+            model: Some("long".to_string()),
+            gcp_transcription: expected_gcp_transcription,
         };
         assert_eq!(result, expected_response);
     }
@@ -1032,7 +1272,11 @@ mod tests {
                 response: None,
             }));
         api.speech_to_text_service
-            .expect_wait_for_completion_response(Ok(create_successful_batch_response()));
+            .expect_wait_for_completion_response(Ok(create_successful_batch_response_for_request(
+                "cleanup-test",
+                "test-bucket",
+                &AudioFormat::Mp4,
+            )));
         api.cloud_storage_service
             .expect_delete_object_response(Ok(()));
 
@@ -1056,7 +1300,7 @@ mod tests {
         let expected_delete_op = GcsDeleteOperation {
             request_id: "cleanup-test".to_string(),
             bucket: "test-bucket".to_string(),
-            object_name: "cleanup-test.audio.mp4".to_string(),
+            object_name: "cleanup-test/audio.mp4".to_string(),
         };
         assert_eq!(captured_deletes[0], expected_delete_op);
     }
@@ -1138,7 +1382,7 @@ mod tests {
         let expected_delete_op = GcsDeleteOperation {
             request_id: "batch-fail".to_string(),
             bucket: "test-bucket".to_string(),
-            object_name: "batch-fail.audio.wav".to_string(),
+            object_name: "batch-fail/audio.wav".to_string(),
         };
         assert_eq!(captured_deletes[0], expected_delete_op);
     }
@@ -1195,7 +1439,7 @@ mod tests {
         let expected_delete_op = GcsDeleteOperation {
             request_id: "timeout-test".to_string(),
             bucket: "test-bucket".to_string(),
-            object_name: "timeout-test.audio.wav".to_string(),
+            object_name: "timeout-test/audio.wav".to_string(),
         };
 
         assert_eq!(captured_deletes[0], expected_delete_op);
