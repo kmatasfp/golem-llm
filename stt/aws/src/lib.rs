@@ -1,4 +1,6 @@
-use golem_stt::golem::stt::languages::{Guest as LanguageGuest, LanguageInfo};
+use golem_stt::golem::stt::languages::{
+    Guest as WitLanguageGuest, LanguageInfo as WitLanguageInfo,
+};
 
 use golem_stt::error::Error;
 
@@ -32,14 +34,14 @@ mod transcription;
 #[allow(unused)]
 struct Component;
 
-impl LanguageGuest for Component {
-    fn list_languages() -> Result<Vec<LanguageInfo>, WitSttError> {
+impl WitLanguageGuest for Component {
+    fn list_languages() -> Result<Vec<WitLanguageInfo>, WitSttError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
         let supported_languages = transcription::api::get_supported_languages();
         Ok(supported_languages
             .iter()
-            .map(|lang| LanguageInfo {
+            .map(|lang| WitLanguageInfo {
                 code: lang.code.to_string(),
                 name: lang.name.to_string(),
                 native_name: lang.native_name.to_string(),
