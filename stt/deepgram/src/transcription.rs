@@ -91,27 +91,26 @@ pub fn get_supported_languages() -> &'static [Language] {
     &DEEPGRAM_SUPPORTED_LANGUAGES
 }
 
-#[allow(non_camel_case_types)]
 #[allow(unused)]
 #[derive(Debug, Clone)]
 pub enum AudioFormat {
-    wav,
-    mp3,
-    flac,
-    ogg,
-    aac,
-    pcm,
+    Wav,
+    Mp3,
+    Flac,
+    Ogg,
+    Aac,
+    Pcm,
 }
 
 impl core::fmt::Display for AudioFormat {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let string_representation = match self {
-            AudioFormat::wav => "wav",
-            AudioFormat::mp3 => "mp3",
-            AudioFormat::flac => "flac",
-            AudioFormat::ogg => "ogg",
-            AudioFormat::aac => "aac",
-            AudioFormat::pcm => "pcm",
+            AudioFormat::Wav => "wav",
+            AudioFormat::Mp3 => "mp3",
+            AudioFormat::Flac => "flac",
+            AudioFormat::Ogg => "ogg",
+            AudioFormat::Aac => "aac",
+            AudioFormat::Pcm => "pcm",
         };
         write!(fmt, "{string_representation}")
     }
@@ -563,7 +562,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: None,
             },
             transcription_config: None,
@@ -593,7 +592,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: audio_data.clone(),
             audio_config: AudioConfig {
-                format: AudioFormat::mp3,
+                format: AudioFormat::Mp3,
                 channels: Some(2),
             },
             transcription_config: None,
@@ -632,7 +631,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: Some(2), // Should add multichannel=true
             },
             transcription_config: Some(TranscriptionConfig {
@@ -680,7 +679,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: Some(2),
             },
             transcription_config: Some(TranscriptionConfig {
@@ -728,7 +727,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: Some(2),
             },
             transcription_config: Some(TranscriptionConfig {
@@ -788,7 +787,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: Some(2),
             },
             transcription_config: Some(TranscriptionConfig {
@@ -895,7 +894,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: audio_data.clone(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: None,
             },
             transcription_config: None,
@@ -1068,7 +1067,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: audio_data.clone(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: None,
             },
             transcription_config: None,
@@ -1179,7 +1178,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: None,
             },
             transcription_config: None,
@@ -1223,7 +1222,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: None,
             },
             transcription_config: None,
@@ -1266,7 +1265,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: None,
             },
             transcription_config: None,
@@ -1310,7 +1309,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: None,
             },
             transcription_config: None,
@@ -1349,7 +1348,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: None,
             },
             transcription_config: None,
@@ -1388,7 +1387,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: b"fake audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: None,
             },
             transcription_config: None,

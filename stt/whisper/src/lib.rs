@@ -4,7 +4,9 @@ use golem_stt::transcription::SttProviderClient;
 use golem_stt::LOGGING_STATE;
 use itertools::Itertools;
 
-use golem_stt::error::Error;
+use once_cell::sync::OnceCell;
+
+use golem_stt::error::Error as SttError;
 use golem_stt::golem::stt::types::{
     AudioFormat as WitAudioFormat, SttError as WitSttError, TimingInfo as WitTimingInfo,
     TranscriptionChannel as WitTranscriptionChannel,
@@ -29,10 +31,29 @@ use wstd::time::Duration;
 
 mod transcription;
 
-#[allow(unused)]
-struct Component;
+static API_CLIENT: OnceCell<TranscriptionsApi<WstdHttpClient>> = OnceCell::new();
 
-impl LanguageGuest for Component {
+#[allow(unused)]
+struct SttComponent;
+
+impl SttComponent {
+    fn create_or_get_client() -> Result<&'static TranscriptionsApi<WstdHttpClient>, SttError> {
+        API_CLIENT.get_or_try_init(|| {
+            let api_key = std::env::var("OPENAI_API_KEY").map_err(|err| {
+                SttError::EnvVariablesNotSet(format!("Failed to load OPENAI_API_KEY: {}", err))
+            })?;
+
+            let api_client = TranscriptionsApi::new(
+                api_key,
+                WstdHttpClient::new_with_timeout(Duration::from_secs(60), Duration::from_secs(600)),
+            );
+
+            Ok(api_client)
+        })
+    }
+}
+
+impl LanguageGuest for SttComponent {
     fn list_languages() -> Result<Vec<LanguageInfo>, WitSttError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
@@ -48,19 +69,12 @@ impl LanguageGuest for Component {
     }
 }
 
-impl TranscriptionGuest for Component {
+impl TranscriptionGuest for SttComponent {
     fn transcribe(req: WitTranscriptionRequest) -> Result<WitTranscriptionResult, WitSttError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
-        let api_key = std::env::var("OPENAI_API_KEY").map_err(|err| {
-            Error::EnvVariablesNotSet(format!("Failed to load OPENAI_API_KEY: {}", err))
-        })?;
-
         block_on(async {
-            let api_client = TranscriptionsApi::new(
-                api_key,
-                WstdHttpClient::new_with_timeout(Duration::from_secs(60), Duration::from_secs(600)),
-            );
+            let api_client = Self::create_or_get_client()?;
 
             let api_response = api_client.transcribe_audio(req.try_into()?).await?;
 
@@ -73,16 +87,8 @@ impl TranscriptionGuest for Component {
     ) -> Result<WitMultiTranscriptionResult, WitSttError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
-        let api_key = std::env::var("OPENAI_API_KEY").map_err(|err| {
-            Error::EnvVariablesNotSet(format!("Failed to load OPENAI_API_KEY: {}", err))
-        })?;
-
         block_on(async {
-            let api_client = TranscriptionsApi::new(
-                api_key,
-                WstdHttpClient::new_with_timeout(Duration::from_secs(60), Duration::from_secs(600)),
-            );
-
+            let api_client = Self::create_or_get_client()?;
             let mut successes: Vec<WitTranscriptionResult> = Vec::new();
             let mut failures: Vec<WitFailedTranscription> = Vec::new();
 
@@ -135,10 +141,10 @@ impl TryFrom<WitAudioFormat> for AudioFormat {
 
     fn try_from(wit_format: WitAudioFormat) -> Result<Self, Self::Error> {
         match wit_format {
-            WitAudioFormat::Wav => Ok(AudioFormat::wav),
-            WitAudioFormat::Mp3 => Ok(AudioFormat::mp3),
-            WitAudioFormat::Flac => Ok(AudioFormat::flac),
-            WitAudioFormat::Ogg => Ok(AudioFormat::ogg),
+            WitAudioFormat::Wav => Ok(AudioFormat::Wav),
+            WitAudioFormat::Mp3 => Ok(AudioFormat::Mp3),
+            WitAudioFormat::Flac => Ok(AudioFormat::Flac),
+            WitAudioFormat::Ogg => Ok(AudioFormat::Ogg),
             format => Err(WitSttError::UnsupportedFormat(format!(
                 "{format:?}is not supported"
             ))),
@@ -237,4 +243,4 @@ impl From<TranscriptionResponse> for WitTranscriptionResult {
     }
 }
 
-golem_stt::export_stt!(Component with_types_in golem_stt);
+golem_stt::export_stt!(SttComponent with_types_in golem_stt);

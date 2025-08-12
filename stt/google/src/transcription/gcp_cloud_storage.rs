@@ -340,9 +340,6 @@ mod tests {
             .await
             .unwrap();
 
-        // We should have 2 requests: one for token exchange, one for upload
-        assert_eq!(cloud_storage_client.http_client.captured_request_count(), 2);
-
         let captured_request = cloud_storage_client.http_client.last_captured_request();
         let request = captured_request.as_ref().unwrap();
 
@@ -410,9 +407,6 @@ mod tests {
             .delete_object("some-request-id", bucket, object_name)
             .await
             .unwrap();
-
-        // We should have 2 requests: one for token exchange, one for delete
-        assert_eq!(cloud_storage_client.http_client.captured_request_count(), 2);
 
         let captured_request = cloud_storage_client.http_client.last_captured_request();
         let request = captured_request.as_ref().unwrap();

@@ -1,4 +1,6 @@
-use golem_stt::error::Error;
+use once_cell::sync::OnceCell;
+
+use golem_stt::error::Error as SttError;
 use golem_stt::http::WstdHttpClient;
 use golem_stt::transcription::SttProviderClient;
 use golem_stt::LOGGING_STATE;
@@ -33,10 +35,29 @@ use wstd::time::Duration;
 
 mod transcription;
 
-#[allow(unused)]
-struct Component;
+static API_CLIENT: OnceCell<PreRecordedAudioApi<WstdHttpClient>> = OnceCell::new();
 
-impl WitLanguageGuest for Component {
+#[allow(unused)]
+struct SttComponent;
+
+impl SttComponent {
+    fn create_or_get_client() -> Result<&'static PreRecordedAudioApi<WstdHttpClient>, SttError> {
+        API_CLIENT.get_or_try_init(|| {
+            let api_key = std::env::var("DEEPGRAM_API_TOKEN").map_err(|err| {
+                SttError::EnvVariablesNotSet(format!("Failed to load DEEPGRAM_API_TOKEN: {}", err))
+            })?;
+
+            let api_client = PreRecordedAudioApi::new(
+                api_key,
+                WstdHttpClient::new_with_timeout(Duration::from_secs(60), Duration::from_secs(600)),
+            );
+
+            Ok(api_client)
+        })
+    }
+}
+
+impl WitLanguageGuest for SttComponent {
     fn list_languages() -> Result<Vec<WitLanguageInfo>, WitSttError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
@@ -52,19 +73,12 @@ impl WitLanguageGuest for Component {
     }
 }
 
-impl TranscriptionGuest for Component {
+impl TranscriptionGuest for SttComponent {
     fn transcribe(req: WitTranscriptionRequest) -> Result<WitTranscriptionResult, WitSttError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
-        let api_key = std::env::var("DEEPGRAM_API_TOKEN").map_err(|err| {
-            Error::EnvVariablesNotSet(format!("Failed to load DEEPGRAM_API_TOKEN: {}", err))
-        })?;
-
         block_on(async {
-            let api_client = PreRecordedAudioApi::new(
-                api_key,
-                WstdHttpClient::new_with_timeout(Duration::from_secs(60), Duration::from_secs(600)),
-            );
+            let api_client = Self::create_or_get_client()?;
 
             let api_response = api_client.transcribe_audio(req.try_into()?).await?;
 
@@ -77,15 +91,8 @@ impl TranscriptionGuest for Component {
     ) -> Result<WitMultiTranscriptionResult, WitSttError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
-        let api_key = std::env::var("DEEPGRAM_API_TOKEN").map_err(|err| {
-            Error::EnvVariablesNotSet(format!("Failed to load DEEPGRAM_API_TOKEN: {}", err))
-        })?;
-
         block_on(async {
-            let api_client = PreRecordedAudioApi::new(
-                api_key,
-                WstdHttpClient::new_with_timeout(Duration::from_secs(60), Duration::from_secs(600)),
-            );
+            let api_client = Self::create_or_get_client()?;
 
             let mut successes: Vec<WitTranscriptionResult> = Vec::new();
             let mut failures: Vec<WitFailedTranscription> = Vec::new();
@@ -137,12 +144,12 @@ impl TranscriptionGuest for Component {
 impl From<WitAudioFormat> for AudioFormat {
     fn from(wit_format: WitAudioFormat) -> Self {
         match wit_format {
-            WitAudioFormat::Wav => AudioFormat::wav,
-            WitAudioFormat::Mp3 => AudioFormat::mp3,
-            WitAudioFormat::Flac => AudioFormat::flac,
-            WitAudioFormat::Ogg => AudioFormat::ogg,
-            WitAudioFormat::Aac => AudioFormat::aac,
-            WitAudioFormat::Pcm => AudioFormat::pcm,
+            WitAudioFormat::Wav => AudioFormat::Wav,
+            WitAudioFormat::Mp3 => AudioFormat::Mp3,
+            WitAudioFormat::Flac => AudioFormat::Flac,
+            WitAudioFormat::Ogg => AudioFormat::Ogg,
+            WitAudioFormat::Aac => AudioFormat::Aac,
+            WitAudioFormat::Pcm => AudioFormat::Pcm,
         }
     }
 }
@@ -317,4 +324,4 @@ impl From<TranscriptionResponse> for WitTranscriptionResult {
     }
 }
 
-golem_stt::export_stt!(Component with_types_in golem_stt);
+golem_stt::export_stt!(SttComponent with_types_in golem_stt);

@@ -963,10 +963,6 @@ mod tests {
         }
     }
 
-    fn create_successful_batch_response() -> BatchRecognizeOperationResponse {
-        create_successful_batch_response_for_request("test-123", "test-bucket", &AudioFormat::Wav)
-    }
-
     #[wstd::test]
     async fn test_transcribe_audio_invalid_request_id_returns_error() {
         let api = create_mock_speech_to_text_api();

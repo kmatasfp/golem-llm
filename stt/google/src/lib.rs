@@ -46,9 +46,9 @@ static API_CLIENT: OnceCell<
 > = OnceCell::new();
 
 #[allow(unused)]
-struct Component;
+struct SttComponent;
 
-impl Component {
+impl SttComponent {
     fn create_or_get_client() -> Result<
         &'static SpeechToTextApi<
             CloudStorageClient<WstdHttpClient>,
@@ -108,7 +108,7 @@ impl Component {
     }
 }
 
-impl WitLanguageGuest for Component {
+impl WitLanguageGuest for SttComponent {
     fn list_languages() -> Result<Vec<WitLanguageInfo>, WitSttError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
@@ -124,7 +124,7 @@ impl WitLanguageGuest for Component {
     }
 }
 
-impl TranscriptionGuest for Component {
+impl TranscriptionGuest for SttComponent {
     fn transcribe(req: WitTranscriptionRequest) -> Result<WitTranscriptionResult, WitSttError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 

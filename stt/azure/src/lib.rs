@@ -1,6 +1,7 @@
 use futures_concurrency::future::Join;
 use golem_stt::transcription::SttProviderClient;
 use itertools::Itertools;
+use once_cell::sync::OnceCell;
 use wstd::runtime::block_on;
 
 mod transcription;
@@ -30,10 +31,37 @@ use transcription::{
 };
 use wstd::time::Duration;
 
-#[allow(unused)]
-struct Component;
+static API_CLIENT: OnceCell<FastTranscriptionApi<WstdHttpClient>> = OnceCell::new();
 
-impl LanguageGuest for Component {
+#[allow(unused)]
+struct SttComponent;
+
+impl SttComponent {
+    fn create_or_get_client() -> Result<&'static FastTranscriptionApi<WstdHttpClient>, SttError> {
+        API_CLIENT.get_or_try_init(|| {
+            let region = std::env::var("AZURE_REGION").map_err(|err| {
+                SttError::EnvVariablesNotSet(format!("Failed to load AZURE_REGION: {}", err))
+            })?;
+
+            let subscription_key = std::env::var("AZURE_SUBSCRIPTION_KEY").map_err(|err| {
+                SttError::EnvVariablesNotSet(format!(
+                    "Failed to load AZURE_SUBSCRIPTION_KEY: {}",
+                    err
+                ))
+            })?;
+
+            let api_client = FastTranscriptionApi::new(
+                subscription_key,
+                region,
+                WstdHttpClient::new_with_timeout(Duration::from_secs(60), Duration::from_secs(600)),
+            );
+
+            Ok(api_client)
+        })
+    }
+}
+
+impl LanguageGuest for SttComponent {
     fn list_languages() -> Result<Vec<LanguageInfo>, WitSttError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
@@ -49,24 +77,12 @@ impl LanguageGuest for Component {
     }
 }
 
-impl TranscriptionGuest for Component {
+impl TranscriptionGuest for SttComponent {
     fn transcribe(req: WitTranscriptionRequest) -> Result<WitTranscriptionResult, WitSttError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
-        let region = std::env::var("AZURE_REGION").map_err(|err| {
-            SttError::EnvVariablesNotSet(format!("Failed to load AZURE_REGION: {}", err))
-        })?;
-
-        let subscription_key = std::env::var("AZURE_SUBSCRIPTION_KEY").map_err(|err| {
-            SttError::EnvVariablesNotSet(format!("Failed to load AZURE_SUBSCRIPTION_KEY: {}", err))
-        })?;
-
         block_on(async {
-            let api_client = FastTranscriptionApi::new(
-                subscription_key,
-                region,
-                WstdHttpClient::new_with_timeout(Duration::from_secs(60), Duration::from_secs(600)),
-            );
+            let api_client = Self::create_or_get_client()?;
 
             let api_response = api_client.transcribe_audio(req.try_into()?).await?;
 
@@ -79,20 +95,8 @@ impl TranscriptionGuest for Component {
     ) -> Result<WitMultiTranscriptionResult, WitSttError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
-        let region = std::env::var("AZURE_REGION").map_err(|err| {
-            SttError::EnvVariablesNotSet(format!("Failed to load AZURE_REGION: {}", err))
-        })?;
-
-        let subscription_key = std::env::var("AZURE_SUBSCRIPTION_KEY").map_err(|err| {
-            SttError::EnvVariablesNotSet(format!("Failed to load AZURE_SUBSCRIPTION_KEY: {}", err))
-        })?;
-
         block_on(async {
-            let api_client = FastTranscriptionApi::new(
-                subscription_key,
-                region,
-                WstdHttpClient::new_with_timeout(Duration::from_secs(60), Duration::from_secs(600)),
-            );
+            let api_client = Self::create_or_get_client()?;
 
             let mut successes: Vec<WitTranscriptionResult> = Vec::new();
             let mut failures: Vec<WitFailedTranscription> = Vec::new();
@@ -292,4 +296,4 @@ impl From<TranscriptionResponse> for WitTranscriptionResult {
     }
 }
 
-golem_stt::export_stt!(Component with_types_in golem_stt);
+golem_stt::export_stt!(SttComponent with_types_in golem_stt);

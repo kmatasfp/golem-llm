@@ -81,33 +81,32 @@ pub fn get_supported_languages() -> &'static [Language] {
     &WHISPER_SUPPORTED_LANGUAGES
 }
 
-#[allow(non_camel_case_types)]
 #[allow(unused)]
 #[derive(Debug, Clone)]
 pub enum AudioFormat {
-    wav,
-    mp3,
-    mp4,
-    mpeg,
-    mpga,
-    m4a,
-    flac,
-    ogg,
-    webm,
+    Wav,
+    Mp3,
+    Mp4,
+    Mpeg,
+    Mpga,
+    M4a,
+    Flac,
+    Ogg,
+    Webm,
 }
 
 impl core::fmt::Display for AudioFormat {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let string_representation = match self {
-            AudioFormat::wav => "wav",
-            AudioFormat::mp3 => "mp3",
-            AudioFormat::mp4 => "mp4",
-            AudioFormat::mpeg => "mpeg",
-            AudioFormat::mpga => "mpga",
-            AudioFormat::m4a => "m4a",
-            AudioFormat::flac => "flac",
-            AudioFormat::ogg => "ogg",
-            AudioFormat::webm => "webm",
+            AudioFormat::Wav => "wav",
+            AudioFormat::Mp3 => "mp3",
+            AudioFormat::Mp4 => "mp4",
+            AudioFormat::Mpeg => "mpeg",
+            AudioFormat::Mpga => "mpga",
+            AudioFormat::M4a => "m4a",
+            AudioFormat::Flac => "flac",
+            AudioFormat::Ogg => "ogg",
+            AudioFormat::Webm => "webm",
         };
         write!(fmt, "{string_representation}")
     }
@@ -340,15 +339,15 @@ pub struct ErrorBody {
 
 fn get_mime_type(format: &AudioFormat) -> String {
     match format {
-        AudioFormat::wav => "audio/wav".to_string(),
-        AudioFormat::mp3 => "audio/mp3".to_string(),
-        AudioFormat::flac => "audio/flac".to_string(),
-        AudioFormat::ogg => "audio/ogg".to_string(),
-        AudioFormat::mp4 => "video/mp4".to_string(),
-        AudioFormat::mpeg => "audio/mpeg".to_string(),
-        AudioFormat::mpga => "audio/mpeg".to_string(),
-        AudioFormat::m4a => "audio/mp4".to_string(),
-        AudioFormat::webm => "video/webm".to_string(),
+        AudioFormat::Wav => "audio/wav".to_string(),
+        AudioFormat::Mp3 => "audio/mp3".to_string(),
+        AudioFormat::Flac => "audio/flac".to_string(),
+        AudioFormat::Ogg => "audio/ogg".to_string(),
+        AudioFormat::Mp4 => "video/mp4".to_string(),
+        AudioFormat::Mpeg => "audio/mpeg".to_string(),
+        AudioFormat::Mpga => "audio/mpeg".to_string(),
+        AudioFormat::M4a => "audio/mp4".to_string(),
+        AudioFormat::Webm => "video/webm".to_string(),
     }
 }
 
@@ -470,7 +469,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.into(),
             audio_config: AudioConfig {
-                format: AudioFormat::mp3,
+                format: AudioFormat::Mp3,
             },
             transcription_config: None,
         };
@@ -539,7 +538,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.clone().into(),
             audio_config: AudioConfig {
-                format: AudioFormat::mp3,
+                format: AudioFormat::Mp3,
             },
             transcription_config: Some(TranscriptionConfig {
                 language: Some(language.clone()),
@@ -684,7 +683,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.into(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
             },
             transcription_config: Some(TranscriptionConfig {
                 language: Some("en".to_string()),
@@ -753,7 +752,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.into(),
             audio_config: AudioConfig {
-                format: AudioFormat::mp3,
+                format: AudioFormat::Mp3,
             },
             transcription_config: None,
         };
@@ -803,7 +802,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.into(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
             },
             transcription_config: None,
         };
@@ -852,7 +851,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.into(),
             audio_config: AudioConfig {
-                format: AudioFormat::flac,
+                format: AudioFormat::Flac,
             },
             transcription_config: None,
         };
@@ -901,7 +900,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.into(),
             audio_config: AudioConfig {
-                format: AudioFormat::ogg,
+                format: AudioFormat::Ogg,
             },
             transcription_config: None,
         };
@@ -950,7 +949,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.into(),
             audio_config: AudioConfig {
-                format: AudioFormat::mp3,
+                format: AudioFormat::Mp3,
             },
             transcription_config: None,
         };
@@ -999,7 +998,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.into(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
             },
             transcription_config: None,
         };
@@ -1048,7 +1047,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.into(),
             audio_config: AudioConfig {
-                format: AudioFormat::mp3,
+                format: AudioFormat::Mp3,
             },
             transcription_config: None,
         };
@@ -1097,7 +1096,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: audio_bytes.into(),
             audio_config: AudioConfig {
-                format: AudioFormat::flac,
+                format: AudioFormat::Flac,
             },
             transcription_config: None,
         };

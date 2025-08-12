@@ -2,7 +2,7 @@ use golem_stt::golem::stt::languages::{
     Guest as WitLanguageGuest, LanguageInfo as WitLanguageInfo,
 };
 
-use golem_stt::error::Error;
+use golem_stt::error::Error as SttError;
 
 use golem_stt::golem::stt::transcription::{
     FailedTranscription as WitFailedTranscription, Guest as TranscriptionGuest,
@@ -17,6 +17,8 @@ use golem_stt::golem::stt::types::{
     TranscriptionResult as WitTranscriptionResult, TranscriptionSegment as WitTranscriptionSegment,
     WordSegment as WitWordSegment,
 };
+use golem_stt::http::WstdHttpClient;
+use golem_stt::runtime::WasiAyncRuntime;
 use golem_stt::transcription::SttProviderClient;
 use golem_stt::LOGGING_STATE;
 use log::trace;
@@ -27,14 +29,53 @@ use transcription::request::{
 
 use futures_concurrency::future::Join;
 use itertools::Itertools;
+use once_cell::sync::OnceCell;
 use wstd::runtime::block_on;
+
+use crate::transcription::{S3Client, TranscribeClient};
 
 mod transcription;
 
-#[allow(unused)]
-struct Component;
+static API_CLIENT: OnceCell<
+    TranscribeApi<S3Client<WstdHttpClient>, TranscribeClient<WstdHttpClient, WasiAyncRuntime>>,
+> = OnceCell::new();
 
-impl WitLanguageGuest for Component {
+#[allow(unused)]
+struct SttComponent;
+
+impl SttComponent {
+    fn create_or_get_client() -> Result<
+        &'static TranscribeApi<
+            S3Client<WstdHttpClient>,
+            TranscribeClient<WstdHttpClient, WasiAyncRuntime>,
+        >,
+        SttError,
+    > {
+        API_CLIENT.get_or_try_init(|| {
+            let region = std::env::var("AWS_REGION").map_err(|err| {
+                SttError::EnvVariablesNotSet(format!("Failed to load AWS_REGION: {}", err))
+            })?;
+
+            let access_key = std::env::var("AWS_ACCESS_KEY").map_err(|err| {
+                SttError::EnvVariablesNotSet(format!("Failed to load AWS_ACCESS_KEY: {}", err))
+            })?;
+
+            let secret_key = std::env::var("AWS_SECRET_KEY").map_err(|err| {
+                SttError::EnvVariablesNotSet(format!("Failed to load AWS_SECRET_KEY: {}", err))
+            })?;
+
+            let bucket_name = std::env::var("AWS_BUCKET_NAME").map_err(|err| {
+                SttError::EnvVariablesNotSet(format!("Failed to load AWS_BUCKET_NAME: {}", err))
+            })?;
+
+            let api_client = TranscribeApi::live(bucket_name, access_key, secret_key, region);
+
+            Ok(api_client)
+        })
+    }
+}
+
+impl WitLanguageGuest for SttComponent {
     fn list_languages() -> Result<Vec<WitLanguageInfo>, WitSttError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
@@ -50,28 +91,12 @@ impl WitLanguageGuest for Component {
     }
 }
 
-impl TranscriptionGuest for Component {
+impl TranscriptionGuest for SttComponent {
     fn transcribe(req: WitTranscriptionRequest) -> Result<WitTranscriptionResult, WitSttError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
-        let region = std::env::var("AWS_REGION").map_err(|err| {
-            Error::EnvVariablesNotSet(format!("Failed to load AWS_REGION: {}", err))
-        })?;
-
-        let access_key = std::env::var("AWS_ACCESS_KEY").map_err(|err| {
-            Error::EnvVariablesNotSet(format!("Failed to load AWS_ACCESS_KEY: {}", err))
-        })?;
-
-        let secret_key = std::env::var("AWS_SECRET_KEY").map_err(|err| {
-            Error::EnvVariablesNotSet(format!("Failed to load AWS_SECRET_KEY: {}", err))
-        })?;
-
-        let bucket_name = std::env::var("AWS_BUCKET_NAME").map_err(|err| {
-            Error::EnvVariablesNotSet(format!("Failed to load AWS_BUCKET_NAME: {}", err))
-        })?;
-
         block_on(async {
-            let api_client = TranscribeApi::live(bucket_name, access_key, secret_key, region);
+            let api_client = Self::create_or_get_client()?;
 
             let api_response = api_client.transcribe_audio(req.try_into()?).await?;
 
@@ -84,24 +109,8 @@ impl TranscriptionGuest for Component {
     ) -> Result<WitMultiTranscriptionResult, WitSttError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
-        let region = std::env::var("AWS_REGION").map_err(|err| {
-            Error::EnvVariablesNotSet(format!("Failed to load AWS_REGION: {}", err))
-        })?;
-
-        let access_key = std::env::var("AWS_ACCESS_KEY").map_err(|err| {
-            Error::EnvVariablesNotSet(format!("Failed to load AWS_ACCESS_KEY: {}", err))
-        })?;
-
-        let secret_key = std::env::var("AWS_SECRET_KEY").map_err(|err| {
-            Error::EnvVariablesNotSet(format!("Failed to load AWS_SECRET_KEY: {}", err))
-        })?;
-
-        let bucket_name = std::env::var("AWS_BUCKET_NAME").map_err(|err| {
-            Error::EnvVariablesNotSet(format!("Failed to load AWS_BUCKET_NAME: {}", err))
-        })?;
-
         block_on(async {
-            let api_client = TranscribeApi::live(bucket_name, access_key, secret_key, region);
+            let api_client = Self::create_or_get_client()?;
 
             let mut successes: Vec<WitTranscriptionResult> = Vec::new();
             let mut failures: Vec<WitFailedTranscription> = Vec::new();
@@ -380,4 +389,4 @@ impl From<TranscriptionResponse> for WitTranscriptionResult {
     }
 }
 
-golem_stt::export_stt!(Component with_types_in golem_stt);
+golem_stt::export_stt!(SttComponent with_types_in golem_stt);
