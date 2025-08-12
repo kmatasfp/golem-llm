@@ -416,13 +416,13 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextService for SpeechToTextClien
                 features.profanity_filter = Some(true);
             }
 
-            // Check if multi-channel mode is enabled and model is not latest_short
+            // Check if multi-channel mode is enabled and model is not `short`
             if audio_config.channels.as_ref().is_some_and(|c| *c > 1)
                 && config.enable_multi_channel
                 && !config
                     .model
                     .as_ref()
-                    .is_some_and(|m| m.eq_ignore_ascii_case("latest_short"))
+                    .is_some_and(|m| m.eq_ignore_ascii_case("short"))
             {
                 features.multi_channel_mode = Some("SEPARATE_RECOGNITION_PER_CHANNEL".to_string());
             }

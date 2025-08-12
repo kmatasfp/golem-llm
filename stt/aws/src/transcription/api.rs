@@ -241,7 +241,7 @@ impl<S3: S3Service, TC: TranscribeService> TranscribeApi<S3, TC> {
 
         trace!("waiting for {} to complete", request_id.to_string());
         let completed_transcription_job = if res.transcription_job.transcription_job_status
-            == "IN_PROGRESS"
+            != "COMPLETED"
         {
             self.transcribe_client
                 .wait_for_transcription_job_completion(&request_id, Duration::from_secs(3600 * 6))

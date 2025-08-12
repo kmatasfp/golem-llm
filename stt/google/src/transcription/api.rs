@@ -1,12 +1,152 @@
 use std::time::Duration;
 
-use golem_stt::{error::Error as SttError, transcription::SttProviderClient};
+use golem_stt::{error::Error as SttError, languages::Language, transcription::SttProviderClient};
 
 use super::{
     gcp_cloud_storage::CloudStorageService,
     gcp_speech_to_text::{BatchRecognizeOperationResponse, SpeechToTextService},
     request::TranscriptionRequest,
 };
+
+// https://cloud.google.com/speech-to-text/v2/docs/speech-to-text-supported-languages
+// different models support different languages so here is a common set of languages Google Speech to Text supports accross regions
+const GOOGLE_SPEECH_SUPPORTED_LANGUAGES: [Language; 117] = [
+    Language::new("af-ZA", "Afrikaans (South Africa)", "Afrikaans"),
+    Language::new("am-ET", "Amharic (Ethiopia)", "አማርኛ"),
+    Language::new("ar-EG", "Arabic (Egypt)", "العربية"),
+    Language::new("as-IN", "Assamese (India)", "অসমীয়া"),
+    Language::new("ast-ES", "Asturian (Spain)", "asturianu"),
+    Language::new("az-AZ", "Azerbaijani (Azerbaijan)", "azərbaycan dili"),
+    Language::new("be-BY", "Belarusian (Belarus)", "беларуская"),
+    Language::new("bg-BG", "Bulgarian (Bulgaria)", "български"),
+    Language::new("bn-BD", "Bengali (Bangladesh)", "বাংলা"),
+    Language::new("bn-IN", "Bengali (India)", "বাংলা"),
+    Language::new("bs-BA", "Bosnian (Bosnia and Herzegovina)", "bosanski"),
+    Language::new("ca-ES", "Catalan (Spain)", "català"),
+    Language::new("ceb-PH", "Cebuano (Philippines)", "Cebuano"),
+    Language::new("ckb-IQ", "Central Kurdish (Iraq)", "کوردیی ناوەندی"),
+    Language::new("cmn-Hans-CN", "Chinese (Simplified, China)", "中文（简体）"),
+    Language::new(
+        "cmn-Hant-TW",
+        "Chinese, Mandarin (Traditional, Taiwan)",
+        "中文（繁體）",
+    ),
+    Language::new("cs-CZ", "Czech (Czech Republic)", "čeština"),
+    Language::new("cy-GB", "Welsh (United Kingdom)", "Cymraeg"),
+    Language::new("da-DK", "Danish (Denmark)", "dansk"),
+    Language::new("de-DE", "German (Germany)", "Deutsch"),
+    Language::new("el-GR", "Greek (Greece)", "ελληνικά"),
+    Language::new("en-AU", "English (Australia)", "English"),
+    Language::new("en-GB", "English (United Kingdom)", "English"),
+    Language::new("en-IN", "English (India)", "English"),
+    Language::new("en-US", "English (United States)", "English"),
+    Language::new("es-419", "Spanish (Latin American)", "español"),
+    Language::new("es-ES", "Spanish (Spain)", "español"),
+    Language::new("es-US", "Spanish (United States)", "español"),
+    Language::new("et-EE", "Estonian (Estonia)", "eesti"),
+    Language::new("eu-ES", "Basque (Spain)", "euskera"),
+    Language::new("fa-IR", "Persian (Iran)", "فارسی"),
+    Language::new("ff-SN", "Fulah (Senegal)", "Fulfulde"),
+    Language::new("fi-FI", "Finnish (Finland)", "suomi"),
+    Language::new("fil-PH", "Filipino (Philippines)", "Filipino"),
+    Language::new("fr-CA", "French (Canada)", "français"),
+    Language::new("fr-FR", "French (France)", "français"),
+    Language::new("ga-IE", "Irish (Ireland)", "Gaeilge"),
+    Language::new("gl-ES", "Galician (Spain)", "galego"),
+    Language::new("gu-IN", "Gujarati (India)", "ગુજરાતી"),
+    Language::new("ha-NG", "Hausa (Nigeria)", "Hausa"),
+    Language::new("hi-IN", "Hindi (India)", "हिन्दी"),
+    Language::new("hr-HR", "Croatian (Croatia)", "hrvatski"),
+    Language::new("hu-HU", "Hungarian (Hungary)", "magyar"),
+    Language::new("hy-AM", "Armenian (Armenia)", "հայերեն"),
+    Language::new("id-ID", "Indonesian (Indonesia)", "Bahasa Indonesia"),
+    Language::new("ig-NG", "Igbo (Nigeria)", "Igbo"),
+    Language::new("is-IS", "Icelandic (Iceland)", "íslenska"),
+    Language::new("it-IT", "Italian (Italy)", "italiano"),
+    Language::new("iw-IL", "Hebrew (Israel)", "עברית"),
+    Language::new("ja-JP", "Japanese (Japan)", "日本語"),
+    Language::new("jv-ID", "Javanese (Indonesia)", "basa Jawa"),
+    Language::new("ka-GE", "Georgian (Georgia)", "ქართული"),
+    Language::new("kam-KE", "Kamba (Kenya)", "Kikamba"),
+    Language::new("kea-CV", "Kabuverdianu (Cape Verde)", "Kabuverdianu"),
+    Language::new("kk-KZ", "Kazakh (Kazakhstan)", "қазақ тілі"),
+    Language::new("km-KH", "Khmer (Cambodia)", "ខ្មែរ"),
+    Language::new("kn-IN", "Kannada (India)", "ಕನ್ನಡ"),
+    Language::new("ko-KR", "Korean (South Korea)", "한국어"),
+    Language::new("ky-KG", "Kyrgyz (Cyrillic)", "кыргызча"),
+    Language::new("lb-LU", "Luxembourgish (Luxembourg)", "Lëtzebuergesch"),
+    Language::new("lg-UG", "Ganda (Uganda)", "Luganda"),
+    Language::new("ln-CD", "Lingala (Congo-Kinshasa)", "Lingála"),
+    Language::new("lo-LA", "Lao (Laos)", "ລາວ"),
+    Language::new("lt-LT", "Lithuanian (Lithuania)", "lietuvių"),
+    Language::new("luo-KE", "Luo (Kenya)", "Luo"),
+    Language::new("lv-LV", "Latvian (Latvia)", "latviešu"),
+    Language::new("mi-NZ", "Maori (New Zealand)", "te reo Māori"),
+    Language::new("mk-MK", "Macedonian (North Macedonia)", "македонски"),
+    Language::new("ml-IN", "Malayalam (India)", "മലയാളം"),
+    Language::new("mn-MN", "Mongolian (Mongolia)", "монгол"),
+    Language::new("mr-IN", "Marathi (India)", "मराठी"),
+    Language::new("ms-MY", "Malay (Malaysia)", "Bahasa Melayu"),
+    Language::new("mt-MT", "Maltese (Malta)", "Malti"),
+    Language::new("my-MM", "Burmese (Myanmar)", "ဗမာ"),
+    Language::new("ne-NP", "Nepali (Nepal)", "नेपाली"),
+    Language::new("nl-NL", "Dutch (Netherlands)", "Nederlands"),
+    Language::new("no-NO", "Norwegian Bokmål (Norway)", "norsk"),
+    Language::new("nso-ZA", "Sepedi (South Africa)", "Sesotho sa Leboa"),
+    Language::new("ny-MW", "Nyanja (Malawi)", "Chinyanja"),
+    Language::new("oc-FR", "Occitan (France)", "occitan"),
+    Language::new("om-ET", "Oromo (Ethiopia)", "Afaan Oromoo"),
+    Language::new("or-IN", "Oriya (India)", "ଓଡ଼ିଆ"),
+    Language::new("pa-Guru-IN", "Punjabi (Gurmukhi India)", "ਪੰਜਾਬੀ"),
+    Language::new("pl-PL", "Polish (Poland)", "polski"),
+    Language::new("ps-AF", "Pashto", "پښتو"),
+    Language::new("pt-BR", "Portuguese (Brazil)", "português"),
+    Language::new("pt-PT", "Portuguese (Portugal)", "português"),
+    Language::new("ro-RO", "Romanian (Romania)", "română"),
+    Language::new("ru-RU", "Russian (Russia)", "русский"),
+    Language::new("rup-BG", "Aromanian (Bulgaria)", "armãneashti"),
+    Language::new("sd-IN", "Sindhi (India)", "سنڌي"),
+    Language::new("si-LK", "Sinhala (Sri Lanka)", "සිංහල"),
+    Language::new("sk-SK", "Slovak (Slovakia)", "slovenčina"),
+    Language::new("sl-SI", "Slovenian (Slovenia)", "slovenščina"),
+    Language::new("sn-ZW", "Shona (Zimbabwe)", "chiShona"),
+    Language::new("so-SO", "Somali", "Soomaali"),
+    Language::new("sq-AL", "Albanian (Albania)", "shqip"),
+    Language::new("sr-RS", "Serbian (Serbia)", "српски"),
+    Language::new("su-ID", "Sundanese (Indonesia)", "basa Sunda"),
+    Language::new("sv-SE", "Swedish (Sweden)", "svenska"),
+    Language::new("sw", "Swahili", "Kiswahili"),
+    Language::new("sw-KE", "Swahili (Kenya)", "Kiswahili"),
+    Language::new("ta-IN", "Tamil (India)", "தமிழ்"),
+    Language::new("te-IN", "Telugu (India)", "తెలుగు"),
+    Language::new("tg-TJ", "Tajik (Tajikistan)", "тоҷикӣ"),
+    Language::new("th-TH", "Thai (Thailand)", "ไทย"),
+    Language::new("tr-TR", "Turkish (Turkey)", "Türkçe"),
+    Language::new("uk-UA", "Ukrainian (Ukraine)", "українська"),
+    Language::new("umb-AO", "Umbundu (Angola)", "Umbundu"),
+    Language::new("ur-PK", "Urdu (Pakistan)", "اردو"),
+    Language::new("uz-UZ", "Uzbek (Uzbekistan)", "o'zbekcha"),
+    Language::new("vi-VN", "Vietnamese (Vietnam)", "Tiếng Việt"),
+    Language::new("wo-SN", "Wolof (Senegal)", "Wolof"),
+    Language::new("xh-ZA", "Xhosa (South Africa)", "isiXhosa"),
+    Language::new("yo-NG", "Yoruba (Nigeria)", "Yorùbá"),
+    Language::new(
+        "yue-Hant-HK",
+        "Chinese, Cantonese (Traditional Hong Kong)",
+        "廣東話",
+    ),
+    Language::new("zu-ZA", "Zulu (South Africa)", "isiZulu"),
+];
+
+pub fn is_supported_language(language_code: &str) -> bool {
+    GOOGLE_SPEECH_SUPPORTED_LANGUAGES
+        .iter()
+        .any(|lang| lang.code == language_code)
+}
+
+pub fn get_supported_languages() -> &'static [Language] {
+    &GOOGLE_SPEECH_SUPPORTED_LANGUAGES
+}
 
 pub struct SpeechToTextApi<GC: CloudStorageService, ST: SpeechToTextService> {
     bucket_name: String,
@@ -82,7 +222,7 @@ impl<GC: CloudStorageService, ST: SpeechToTextService>
 
         let audio_size = request.audio.len();
         let extension = determine_audio_extension(&request.audio_config.format);
-        let object_name = format!("{}.audio{}", request_id.clone(), extension);
+        let object_name = format!("{}/audio{}", request_id.clone(), extension);
 
         self.upload_audio_to_gcs(&request_id, &object_name, request.audio)
             .await?;
