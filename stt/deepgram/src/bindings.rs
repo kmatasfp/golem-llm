@@ -51,7 +51,7 @@ request\x1b\0\"\x04\0\x0atranscribe\x01#\x01p\x1b\x01j\x01!\x01\x05\x01@\x01\x08
 requests$\0%\x04\0\x0ftranscribe-many\x01&\x04\0\x1dgolem:stt/transcription@1.0.\
 0\x05\x06\x04\0$golem:stt-deepgram/stt-library@1.0.0\x04\0\x0b\x11\x01\0\x0bstt-\
 library\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\x0dwit-component\x070.22\
-0.1\x10wit-bindgen-rust\x060.36.0";
+0.0\x10wit-bindgen-rust\x060.36.0";
 #[inline(never)]
 #[doc(hidden)]
 pub fn __link_custom_section_describing_imports() {

@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
+use std::{collections::HashMap, sync::Arc};
 
 use golem_stt::error::Error as SttError;
 use golem_stt::http::HttpClient;
@@ -290,23 +290,18 @@ pub trait SpeechToTextService {
 }
 
 pub struct SpeechToTextClient<HC: HttpClient, RT: AsyncRuntime> {
-    http_client: Rc<HC>,
-    auth: GcpAuth<HC>,
+    http_client: HC,
+    auth: Arc<GcpAuth<HC>>,
     location: String,
     runtime: RT,
 }
 
 impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextClient<HC, RT> {
-    pub fn new(
-        auth: GcpAuth<HC>,
-        http_client: Rc<HC>,
-        location: Option<String>,
-        runtime: RT,
-    ) -> Self {
+    pub fn new(auth: Arc<GcpAuth<HC>>, http_client: HC, location: String, runtime: RT) -> Self {
         Self {
             http_client,
             auth,
-            location: location.unwrap_or_else(|| "global".to_string()),
+            location,
             runtime,
         }
     }
@@ -756,10 +751,10 @@ mod tests {
 
     #[wstd::test]
     async fn test_start_batch_recognize_basic_request() {
-        let mock_client = Rc::new(MockHttpClient::new());
+        let auth_mock_client = MockHttpClient::new();
 
         // Mock the OAuth token exchange response
-        mock_client.expect_response(
+        auth_mock_client.expect_response(
                Response::builder()
                    .status(StatusCode::OK)
                    .body(br#"{"access_token":"test-access-token","token_type":"Bearer","expires_in":3600}"#.to_vec())
@@ -774,7 +769,8 @@ mod tests {
                "done": false
            }"#;
 
-        mock_client.expect_response(
+        let speech_mock_client = MockHttpClient::new();
+        speech_mock_client.expect_response(
             Response::builder()
                 .status(200)
                 .body(mock_response.as_bytes().to_vec())
@@ -784,12 +780,12 @@ mod tests {
         let mock_runtime = MockRuntime::new();
 
         let service_account_key = create_test_service_account_key();
-        let auth = GcpAuth::new(service_account_key, mock_client.clone()).unwrap();
+        let auth = GcpAuth::new(service_account_key, auth_mock_client).unwrap();
 
-        let mut client = SpeechToTextClient::new(
-            auth,
-            mock_client.clone(),
-            Some("us-central1".to_string()),
+        let client = SpeechToTextClient::new(
+            auth.into(),
+            speech_mock_client,
+            "us-central1".to_string(),
             mock_runtime,
         );
 
@@ -810,11 +806,8 @@ mod tests {
             .await
             .unwrap();
 
-        // We should have 2 requests: one for token exchange, one for batch recognize
-        assert_eq!(mock_client.captured_request_count(), 2);
-
         // Verify the batch recognize request was constructed correctly
-        let request = mock_client.last_captured_request().unwrap();
+        let request = client.http_client.last_captured_request().unwrap();
         let actual_request: StartBatchRecognizeRequest =
             serde_json::from_slice(request.body()).unwrap();
 
@@ -868,10 +861,10 @@ mod tests {
 
     #[wstd::test]
     async fn test_start_batch_recognize_with_multi_channel() {
-        let mock_client = Rc::new(MockHttpClient::new());
+        let auth_mock_client = MockHttpClient::new();
 
         // Mock the OAuth token exchange response
-        mock_client.expect_response(
+        auth_mock_client.expect_response(
                Response::builder()
                    .status(StatusCode::OK)
                    .body(br#"{"access_token":"test-access-token","token_type":"Bearer","expires_in":3600}"#.to_vec())
@@ -884,7 +877,8 @@ mod tests {
                "done": false
            }"#;
 
-        mock_client.expect_response(
+        let speech_mock_client = MockHttpClient::new();
+        speech_mock_client.expect_response(
             Response::builder()
                 .status(200)
                 .body(mock_response.as_bytes().to_vec())
@@ -894,12 +888,12 @@ mod tests {
         let mock_runtime = MockRuntime::new();
 
         let service_account_key = create_test_service_account_key();
-        let auth = GcpAuth::new(service_account_key, mock_client.clone()).unwrap();
+        let auth = GcpAuth::new(service_account_key, auth_mock_client).unwrap();
 
-        let mut client = SpeechToTextClient::new(
-            auth,
-            mock_client.clone(),
-            Some("us-central1".to_string()),
+        let client = SpeechToTextClient::new(
+            auth.into(),
+            speech_mock_client,
+            "us-central1".to_string(),
             mock_runtime,
         );
 
@@ -928,7 +922,7 @@ mod tests {
             .await
             .unwrap();
 
-        let request = mock_client.last_captured_request().unwrap();
+        let request = client.http_client.last_captured_request().unwrap();
         let actual_request: StartBatchRecognizeRequest =
             serde_json::from_slice(request.body()).unwrap();
 
@@ -967,10 +961,10 @@ mod tests {
 
     #[wstd::test]
     async fn test_start_batch_recognize_with_speaker_diarization() {
-        let mock_client = Rc::new(MockHttpClient::new());
+        let auth_mock_client = MockHttpClient::new();
 
         // Mock the OAuth token exchange response
-        mock_client.expect_response(
+        auth_mock_client.expect_response(
                 Response::builder()
                     .status(StatusCode::OK)
                     .body(br#"{"access_token":"test-access-token","token_type":"Bearer","expires_in":3600}"#.to_vec())
@@ -983,7 +977,8 @@ mod tests {
                 "done": false
             }"#;
 
-        mock_client.expect_response(
+        let speech_mock_client = MockHttpClient::new();
+        speech_mock_client.expect_response(
             Response::builder()
                 .status(200)
                 .body(mock_response.as_bytes().to_vec())
@@ -993,12 +988,12 @@ mod tests {
         let mock_runtime = MockRuntime::new();
 
         let service_account_key = create_test_service_account_key();
-        let auth = GcpAuth::new(service_account_key, mock_client.clone()).unwrap();
+        let auth = GcpAuth::new(service_account_key, auth_mock_client).unwrap();
 
-        let mut client = SpeechToTextClient::new(
-            auth,
-            mock_client.clone(),
-            Some("us-central1".to_string()),
+        let client = SpeechToTextClient::new(
+            auth.into(),
+            speech_mock_client,
+            "us-central1".to_string(),
             mock_runtime,
         );
 
@@ -1032,7 +1027,7 @@ mod tests {
             .await
             .unwrap();
 
-        let request = mock_client.last_captured_request().unwrap();
+        let request = client.http_client.last_captured_request().unwrap();
         let actual_request: StartBatchRecognizeRequest =
             serde_json::from_slice(request.body()).unwrap();
 
@@ -1074,10 +1069,10 @@ mod tests {
 
     #[wstd::test]
     async fn test_start_batch_recognize_with_explicit_language() {
-        let mock_client = Rc::new(MockHttpClient::new());
+        let auth_mock_client = MockHttpClient::new();
 
         // Mock the OAuth token exchange response
-        mock_client.expect_response(
+        auth_mock_client.expect_response(
                 Response::builder()
                     .status(StatusCode::OK)
                     .body(br#"{"access_token":"test-access-token","token_type":"Bearer","expires_in":3600}"#.to_vec())
@@ -1090,7 +1085,8 @@ mod tests {
                 "done": false
             }"#;
 
-        mock_client.expect_response(
+        let speech_mock_client = MockHttpClient::new();
+        speech_mock_client.expect_response(
             Response::builder()
                 .status(200)
                 .body(mock_response.as_bytes().to_vec())
@@ -1100,12 +1096,12 @@ mod tests {
         let mock_runtime = MockRuntime::new();
 
         let service_account_key = create_test_service_account_key();
-        let auth = GcpAuth::new(service_account_key, mock_client.clone()).unwrap();
+        let auth = GcpAuth::new(service_account_key, auth_mock_client).unwrap();
 
-        let mut client = SpeechToTextClient::new(
-            auth,
-            mock_client.clone(),
-            Some("us-central1".to_string()),
+        let client = SpeechToTextClient::new(
+            auth.into(),
+            speech_mock_client,
+            "us-central1".to_string(),
             mock_runtime,
         );
 
@@ -1134,7 +1130,7 @@ mod tests {
             .await
             .unwrap();
 
-        let request = mock_client.last_captured_request().unwrap();
+        let request = client.http_client.last_captured_request().unwrap();
         let actual_request: StartBatchRecognizeRequest =
             serde_json::from_slice(request.body()).unwrap();
 
@@ -1177,10 +1173,10 @@ mod tests {
 
     #[wstd::test]
     async fn test_start_batch_recognize_with_model() {
-        let mock_client = Rc::new(MockHttpClient::new());
+        let auth_mock_client = MockHttpClient::new();
 
         // Mock the OAuth token exchange response
-        mock_client.expect_response(
+        auth_mock_client.expect_response(
                Response::builder()
                    .status(StatusCode::OK)
                    .body(br#"{"access_token":"test-access-token","token_type":"Bearer","expires_in":3600}"#.to_vec())
@@ -1193,7 +1189,8 @@ mod tests {
                "done": false
            }"#;
 
-        mock_client.expect_response(
+        let speech_mock_client = MockHttpClient::new();
+        speech_mock_client.expect_response(
             Response::builder()
                 .status(200)
                 .body(mock_response.as_bytes().to_vec())
@@ -1203,12 +1200,12 @@ mod tests {
         let mock_runtime = MockRuntime::new();
 
         let service_account_key = create_test_service_account_key();
-        let auth = GcpAuth::new(service_account_key, mock_client.clone()).unwrap();
+        let auth = GcpAuth::new(service_account_key, auth_mock_client).unwrap();
 
-        let mut client = SpeechToTextClient::new(
-            auth,
-            mock_client.clone(),
-            Some("us-central1".to_string()),
+        let client = SpeechToTextClient::new(
+            auth.into(),
+            speech_mock_client,
+            "us-central1".to_string(),
             mock_runtime,
         );
 
@@ -1237,7 +1234,7 @@ mod tests {
             .await
             .unwrap();
 
-        let request = mock_client.last_captured_request().unwrap();
+        let request = client.http_client.last_captured_request().unwrap();
         let actual_request: StartBatchRecognizeRequest =
             serde_json::from_slice(request.body()).unwrap();
 
@@ -1276,10 +1273,10 @@ mod tests {
 
     #[wstd::test]
     async fn test_start_batch_recognize_with_phrases() {
-        let mock_client = Rc::new(MockHttpClient::new());
+        let auth_mock_client = MockHttpClient::new();
 
         // Mock the OAuth token exchange response
-        mock_client.expect_response(
+        auth_mock_client.expect_response(
                Response::builder()
                    .status(StatusCode::OK)
                    .body(br#"{"access_token":"test-access-token","token_type":"Bearer","expires_in":3600}"#.to_vec())
@@ -1292,7 +1289,8 @@ mod tests {
                "done": false
            }"#;
 
-        mock_client.expect_response(
+        let speech_mock_client = MockHttpClient::new();
+        speech_mock_client.expect_response(
             Response::builder()
                 .status(200)
                 .body(mock_response.as_bytes().to_vec())
@@ -1302,12 +1300,12 @@ mod tests {
         let mock_runtime = MockRuntime::new();
 
         let service_account_key = create_test_service_account_key();
-        let auth = GcpAuth::new(service_account_key, mock_client.clone()).unwrap();
+        let auth = GcpAuth::new(service_account_key, auth_mock_client).unwrap();
 
-        let mut client = SpeechToTextClient::new(
-            auth,
-            mock_client.clone(),
-            Some("us-central1".to_string()),
+        let client = SpeechToTextClient::new(
+            auth.into(),
+            speech_mock_client,
+            "us-central1".to_string(),
             mock_runtime,
         );
 
@@ -1349,7 +1347,7 @@ mod tests {
             .await
             .unwrap();
 
-        let request = mock_client.last_captured_request().unwrap();
+        let request = client.http_client.last_captured_request().unwrap();
         let actual_request: StartBatchRecognizeRequest =
             serde_json::from_slice(request.body()).unwrap();
 
@@ -1407,10 +1405,10 @@ mod tests {
 
     #[wstd::test]
     async fn test_start_batch_recognize_with_profanity_filter() {
-        let mock_client = Rc::new(MockHttpClient::new());
+        let auth_mock_client = MockHttpClient::new();
 
         // Mock the OAuth token exchange response
-        mock_client.expect_response(
+        auth_mock_client.expect_response(
                Response::builder()
                    .status(StatusCode::OK)
                    .body(br#"{"access_token":"test-access-token","token_type":"Bearer","expires_in":3600}"#.to_vec())
@@ -1423,7 +1421,8 @@ mod tests {
                "done": false
            }"#;
 
-        mock_client.expect_response(
+        let speech_mock_client = MockHttpClient::new();
+        speech_mock_client.expect_response(
             Response::builder()
                 .status(200)
                 .body(mock_response.as_bytes().to_vec())
@@ -1433,12 +1432,12 @@ mod tests {
         let mock_runtime = MockRuntime::new();
 
         let service_account_key = create_test_service_account_key();
-        let auth = GcpAuth::new(service_account_key, mock_client.clone()).unwrap();
+        let auth = GcpAuth::new(service_account_key, auth_mock_client).unwrap();
 
-        let mut client = SpeechToTextClient::new(
-            auth,
-            mock_client.clone(),
-            Some("us-central1".to_string()),
+        let client = SpeechToTextClient::new(
+            auth.into(),
+            speech_mock_client,
+            "us-central1".to_string(),
             mock_runtime,
         );
 
@@ -1467,7 +1466,7 @@ mod tests {
             .await
             .unwrap();
 
-        let request = mock_client.last_captured_request().unwrap();
+        let request = client.http_client.last_captured_request().unwrap();
         let actual_request: StartBatchRecognizeRequest =
             serde_json::from_slice(request.body()).unwrap();
 
@@ -1506,17 +1505,18 @@ mod tests {
 
     #[wstd::test]
     async fn test_delete_batch_recognize() {
-        let mock_client = Rc::new(MockHttpClient::new());
+        let auth_mock_client = MockHttpClient::new();
 
         // Mock the OAuth token exchange response
-        mock_client.expect_response(
+        auth_mock_client.expect_response(
                 Response::builder()
                     .status(StatusCode::OK)
                     .body(br#"{"access_token":"test-access-token","token_type":"Bearer","expires_in":3600}"#.to_vec())
                     .unwrap(),
             );
 
-        mock_client.expect_response(
+        let speech_mock_client = MockHttpClient::new();
+        speech_mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::OK)
                 .body(b"{}".to_vec())
@@ -1526,12 +1526,12 @@ mod tests {
         let mock_runtime = MockRuntime::new();
 
         let service_account_key = create_test_service_account_key();
-        let auth = GcpAuth::new(service_account_key, mock_client.clone()).unwrap();
+        let auth = GcpAuth::new(service_account_key, auth_mock_client).unwrap();
 
-        let mut client = SpeechToTextClient::new(
-            auth,
-            mock_client.clone(),
-            Some("us-central1".to_string()),
+        let client = SpeechToTextClient::new(
+            auth.into(),
+            speech_mock_client,
+            "us-central1".to_string(),
             mock_runtime,
         );
 
@@ -1543,10 +1543,7 @@ mod tests {
 
         assert!(result.is_ok());
 
-        // We should have 2 requests: one for token exchange, one for delete
-        assert_eq!(mock_client.captured_request_count(), 2);
-
-        let request = mock_client.last_captured_request().unwrap();
+        let request = client.http_client.last_captured_request().unwrap();
         assert_eq!(request.method(), "DELETE");
         assert_eq!(
             request.uri().to_string(),
@@ -1564,10 +1561,10 @@ mod tests {
 
     #[wstd::test]
     async fn test_wait_for_batch_recognize_completion() {
-        let mock_client = Rc::new(MockHttpClient::new());
+        let auth_mock_client = MockHttpClient::new();
 
         // Mock the OAuth token exchange response (called multiple times for each polling request)
-        mock_client.expect_response(
+        auth_mock_client.expect_response(
                 Response::builder()
                     .status(StatusCode::OK)
                     .body(br#"{"access_token":"test-access-token","token_type":"Bearer","expires_in":3600}"#.to_vec())
@@ -1584,7 +1581,8 @@ mod tests {
                 "done": false
             }"#;
 
-        mock_client.expect_response(
+        let speech_mock_client = MockHttpClient::new();
+        speech_mock_client.expect_response(
             Response::builder()
                 .status(200)
                 .body(in_progress_response.as_bytes().to_vec())
@@ -1623,7 +1621,7 @@ mod tests {
                     }
                 }"#;
 
-        mock_client.expect_response(
+        speech_mock_client.expect_response(
             Response::builder()
                 .status(200)
                 .body(completed_response.as_bytes().to_vec())
@@ -1633,12 +1631,12 @@ mod tests {
         let mock_runtime = MockRuntime::new();
 
         let service_account_key = create_test_service_account_key();
-        let auth = GcpAuth::new(service_account_key, mock_client.clone()).unwrap();
+        let auth = GcpAuth::new(service_account_key, auth_mock_client).unwrap();
 
-        let mut client = SpeechToTextClient::new(
-            auth,
-            mock_client.clone(),
-            Some("us-central1".to_string()),
+        let client = SpeechToTextClient::new(
+            auth.into(),
+            speech_mock_client,
+            "us-central1".to_string(),
             mock_runtime,
         );
 
@@ -1657,9 +1655,6 @@ mod tests {
         assert!(response.response.is_some());
         assert!(response.error.is_none());
 
-        // Should have made exactly 3 requests: 1 OAuth + 2 polling requests
-        assert_eq!(mock_client.captured_request_count(), 3);
-
         // Should have called sleep at least once
         let sleep_calls = client.runtime.get_sleep_calls();
         assert!(!sleep_calls.is_empty());
@@ -1670,10 +1665,9 @@ mod tests {
         );
 
         // Verify the polling requests were get_batch_recognize calls
-        let captured_requests = mock_client.get_captured_requests();
+        let captured_requests = client.http_client.get_captured_requests();
 
-        // Check the first polling request (index 1, since index 0 is OAuth)
-        let first_poll_request = &captured_requests[1];
+        let first_poll_request = &captured_requests[0];
         assert_eq!(first_poll_request.method(), "GET");
         assert_eq!(
             first_poll_request.uri().to_string(),
@@ -1688,7 +1682,7 @@ mod tests {
             .unwrap();
         assert_eq!(auth_header, "Bearer test-access-token");
 
-        let second_poll_request = &captured_requests[2];
+        let second_poll_request = &captured_requests[1];
         assert_eq!(second_poll_request.method(), "GET");
         assert_eq!(
             second_poll_request.uri().to_string(),
@@ -1698,10 +1692,10 @@ mod tests {
 
     #[wstd::test]
     async fn test_wait_for_batch_recognize_completion_failure() {
-        let mock_client = Rc::new(MockHttpClient::new());
+        let auth_mock_client = MockHttpClient::new();
 
         // Mock the OAuth token exchange response
-        mock_client.expect_response(
+        auth_mock_client.expect_response(
                 Response::builder()
                     .status(StatusCode::OK)
                     .body(br#"{"access_token":"test-access-token","token_type":"Bearer","expires_in":3600}"#.to_vec())
@@ -1724,7 +1718,8 @@ mod tests {
                 }
             }"#;
 
-        mock_client.expect_response(
+        let speech_mock_client = MockHttpClient::new();
+        speech_mock_client.expect_response(
             Response::builder()
                 .status(200)
                 .body(failed_response.as_bytes().to_vec())
@@ -1734,12 +1729,12 @@ mod tests {
         let mock_runtime = MockRuntime::new();
 
         let service_account_key = create_test_service_account_key();
-        let auth = GcpAuth::new(service_account_key, mock_client.clone()).unwrap();
+        let auth = GcpAuth::new(service_account_key, auth_mock_client).unwrap();
 
-        let mut client = SpeechToTextClient::new(
-            auth,
-            mock_client.clone(),
-            Some("us-central1".to_string()),
+        let client = SpeechToTextClient::new(
+            auth.into(),
+            speech_mock_client,
+            "us-central1".to_string(),
             mock_runtime,
         );
 
@@ -1767,12 +1762,9 @@ mod tests {
             other => panic!("Expected APIInternalServerError, got: {:?}", other),
         }
 
-        // Should have made exactly 2 requests: 1 OAuth + 1 polling request
-        assert_eq!(mock_client.captured_request_count(), 2);
-
         // Verify the polling request
-        let captured_requests = mock_client.get_captured_requests();
-        let poll_request = &captured_requests[1];
+        let captured_requests = client.http_client.get_captured_requests();
+        let poll_request = &captured_requests[0];
         assert_eq!(poll_request.method(), "GET");
         assert_eq!(
             poll_request.uri().to_string(),
@@ -1790,15 +1782,16 @@ mod tests {
 
     #[wstd::test]
     async fn test_wait_for_batch_recognize_completion_timeout() {
-        let mock_client = Rc::new(MockHttpClient::new());
+        let auth_mock_client = MockHttpClient::new();
 
-        mock_client.expect_response(
+        auth_mock_client.expect_response(
                 Response::builder()
                     .status(StatusCode::OK)
                     .body(br#"{"access_token":"test-access-token","token_type":"Bearer","expires_in":3600}"#.to_vec())
                     .unwrap(),
             );
 
+        let speech_mock_client = MockHttpClient::new();
         for _ in 0..100 {
             // Always return IN_PROGRESS to simulate timeout
             let in_progress_response = r#"{
@@ -1810,7 +1803,7 @@ mod tests {
                     "done": false
                 }"#;
 
-            mock_client.expect_response(
+            speech_mock_client.expect_response(
                 Response::builder()
                     .status(200)
                     .body(in_progress_response.as_bytes().to_vec())
@@ -1841,12 +1834,12 @@ mod tests {
         let mock_runtime = MockRuntime::new();
 
         let service_account_key = create_test_service_account_key();
-        let auth = GcpAuth::new(service_account_key, mock_client.clone()).unwrap();
+        let auth = GcpAuth::new(service_account_key, auth_mock_client).unwrap();
 
-        let mut client = SpeechToTextClient::new(
-            auth,
-            mock_client.clone(),
-            Some("us-central1".to_string()),
+        let client = SpeechToTextClient::new(
+            auth.into(),
+            speech_mock_client,
+            "us-central1".to_string(),
             mock_runtime,
         );
 

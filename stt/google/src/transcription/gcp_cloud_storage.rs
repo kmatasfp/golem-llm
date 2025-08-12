@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use golem_stt::{error::Error as SttError, http::HttpClient};
 use http::{Request, StatusCode};
@@ -24,13 +24,13 @@ pub trait CloudStorageService {
 }
 
 pub struct CloudStorageClient<HC: HttpClient> {
-    http_client: Rc<HC>,
-    auth: GcpAuth<HC>,
+    http_client: HC,
+    auth: Arc<GcpAuth<HC>>,
 }
 
 impl<HC: HttpClient> CloudStorageClient<HC> {
-    pub fn new(auth: GcpAuth<HC>, http_client: Rc<HC>) -> Result<Self, SttError> {
-        Ok(Self { http_client, auth })
+    pub fn new(auth: Arc<GcpAuth<HC>>, http_client: HC) -> Self {
+        Self { http_client, auth }
     }
 
     pub fn project_id(&self) -> &str {
@@ -306,10 +306,10 @@ mod tests {
 
     #[wstd::test]
     async fn test_cloud_storage_put_object_request() {
-        let mock_client = Rc::new(MockHttpClient::new());
+        let auth_mock_client = MockHttpClient::new();
 
         // Mock the OAuth token exchange response
-        mock_client.expect_response(
+        auth_mock_client.expect_response(
                 Response::builder()
                     .status(StatusCode::OK)
                     .body(br#"{"access_token":"test-access-token","token_type":"Bearer","expires_in":3600}"#.to_vec())
@@ -317,7 +317,8 @@ mod tests {
             );
 
         // Mock the actual Cloud Storage upload response
-        mock_client.expect_response(
+        let storage_mock_client = MockHttpClient::new();
+        storage_mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::OK)
                 .body(vec![])
@@ -326,9 +327,9 @@ mod tests {
 
         let service_account_key = create_test_service_account_key();
 
-        let auth = GcpAuth::new(service_account_key, mock_client.clone()).unwrap();
+        let auth = GcpAuth::new(service_account_key, auth_mock_client).unwrap();
 
-        let mut cloud_storage_client = CloudStorageClient::new(auth, mock_client.clone()).unwrap();
+        let cloud_storage_client = CloudStorageClient::new(auth.into(), storage_mock_client);
 
         let bucket = "test-bucket";
         let object_name = "test-object.txt";
@@ -377,18 +378,19 @@ mod tests {
 
     #[wstd::test]
     async fn test_cloud_storage_delete_object_request() {
-        let mock_client = Rc::new(MockHttpClient::new());
+        let auth_mock_client = MockHttpClient::new();
 
         // Mock the OAuth token exchange response
-        mock_client.expect_response(
+        auth_mock_client.expect_response(
                 Response::builder()
                     .status(StatusCode::OK)
                     .body(br#"{"access_token":"test-access-token","token_type":"Bearer","expires_in":3600}"#.to_vec())
                     .unwrap(),
             );
 
+        let storage_mock_client = MockHttpClient::new();
         // Mock the actual Cloud Storage delete response
-        mock_client.expect_response(
+        storage_mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::NO_CONTENT)
                 .body(vec![])
@@ -397,9 +399,9 @@ mod tests {
 
         let service_account_key = create_test_service_account_key();
 
-        let auth = GcpAuth::new(service_account_key, mock_client.clone()).unwrap();
+        let auth = GcpAuth::new(service_account_key, auth_mock_client).unwrap();
 
-        let mut cloud_storage_client = CloudStorageClient::new(auth, mock_client.clone()).unwrap();
+        let cloud_storage_client = CloudStorageClient::new(auth.into(), storage_mock_client);
 
         let bucket = "test-bucket";
         let object_name = "test-object.txt";

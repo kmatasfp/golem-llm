@@ -83,7 +83,7 @@ struct TokenResponse {
 
 #[derive(Clone)]
 pub struct GcpAuth<HC: HttpClient> {
-    http_client: Rc<HC>,
+    http_client: HC,
     project_id: String,
     client_email: String,
     private_key: RsaPrivateKey,
@@ -98,13 +98,13 @@ struct TokenData {
 
 // based on https://developers.google.com/identity/protocols/oauth2/service-account#httprest
 impl<HC: HttpClient> GcpAuth<HC> {
-    pub fn new(serivce_account_key: ServiceAccountKey, http_client: Rc<HC>) -> Result<Self, Error> {
-        let private_key = Self::parse_private_key(&serivce_account_key.private_key)?;
+    pub fn new(service_account_key: ServiceAccountKey, http_client: HC) -> Result<Self, Error> {
+        let private_key = Self::parse_private_key(&service_account_key.private_key)?;
 
         Ok(Self {
             http_client,
-            project_id: serivce_account_key.project_id,
-            client_email: serivce_account_key.client_email,
+            project_id: service_account_key.project_id,
+            client_email: service_account_key.client_email,
             private_key,
             token_data: Arc::new(Mutex::new(TokenData {
                 access_token: None,
@@ -319,7 +319,7 @@ mod tests {
             private_key.to_string(),
         );
 
-        let mut auth = GcpAuth::new(service_account_key, Rc::new(mock_client)).unwrap();
+        let auth = GcpAuth::new(service_account_key, mock_client).unwrap();
 
         let _result = auth.get_access_token().await;
 

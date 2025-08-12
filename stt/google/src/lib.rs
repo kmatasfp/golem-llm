@@ -1,3 +1,8 @@
+use once_cell::sync::OnceCell;
+
+use golem_stt::error::Error as SttError;
+use golem_stt::http::WstdHttpClient;
+use golem_stt::runtime::WasiAyncRuntime;
 use golem_stt::transcription::SttProviderClient;
 use golem_stt::LOGGING_STATE;
 
@@ -29,10 +34,79 @@ use futures_concurrency::future::Join;
 use itertools::Itertools;
 use wstd::runtime::block_on;
 
+use crate::transcription::{CloudStorageClient, ServiceAccountKey, SpeechToTextClient};
+
 mod transcription;
+
+static API_CLIENT: OnceCell<
+    SpeechToTextApi<
+        CloudStorageClient<WstdHttpClient>,
+        SpeechToTextClient<WstdHttpClient, WasiAyncRuntime>,
+    >,
+> = OnceCell::new();
 
 #[allow(unused)]
 struct Component;
+
+impl Component {
+    fn create_or_get_client() -> Result<
+        &'static SpeechToTextApi<
+            CloudStorageClient<WstdHttpClient>,
+            SpeechToTextClient<WstdHttpClient, WasiAyncRuntime>,
+        >,
+        SttError,
+    > {
+        API_CLIENT.get_or_try_init(|| {
+            let location = std::env::var("GOOGLE_LOCATION").map_err(|err| {
+                SttError::EnvVariablesNotSet(format!("Failed to load GOOGLE_LOCATION: {}", err))
+            })?;
+
+            let bucket_name = std::env::var("GOOGLE_BUCKET_NAME").map_err(|err| {
+                SttError::EnvVariablesNotSet(format!("Failed to load GOOGLE_BUCKET_NAME: {}", err))
+            })?;
+
+            let service_acc_key = if let Ok(creds_json_file) =
+                std::env::var("GOOGLE_APPLICATION_CREDENTIALS")
+            {
+                let bytes = read_file_to_bytes(&creds_json_file).map_err(|err| {
+                    SttError::AuthError(format!("Failed to read Google credentials file: {}", err))
+                })?;
+                let service_acc_key: ServiceAccountKey =
+                    serde_json::from_slice(&bytes).map_err(|err| {
+                        SttError::AuthError(format!("Failed to parse Google credentials: {}", err))
+                    })?;
+                service_acc_key
+            } else {
+                let project_id = std::env::var("GOOGLE_PROJECT_ID").map_err(|err| {
+                    SttError::EnvVariablesNotSet(format!(
+                        "Failed to load GOOGLE_PROJECT_ID: {}",
+                        err
+                    ))
+                })?;
+
+                let client_email = std::env::var("GOOGLE_CLIENT_EMAIL").map_err(|err| {
+                    SttError::EnvVariablesNotSet(format!(
+                        "Failed to load GOOGLE_CLIENT_EMAIL: {}",
+                        err
+                    ))
+                })?;
+
+                let private_key = std::env::var("GOOGLE_PRIVATE_KEY").map_err(|err| {
+                    SttError::EnvVariablesNotSet(format!(
+                        "Failed to load GOOGLE_PRIVATE_KEY: {}",
+                        err
+                    ))
+                })?;
+
+                ServiceAccountKey::new(project_id, client_email, private_key)
+            };
+
+            let api_client = SpeechToTextApi::live(bucket_name, service_acc_key, location)?;
+
+            Ok(api_client)
+        })
+    }
+}
 
 impl WitLanguageGuest for Component {
     fn list_languages() -> Result<Vec<WitLanguageInfo>, WitSttError> {
@@ -55,7 +129,7 @@ impl TranscriptionGuest for Component {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
         block_on(async {
-            let api_client = SpeechToTextApi::live();
+            let api_client = Self::create_or_get_client()?;
 
             let api_response = api_client.transcribe_audio(req.try_into()?).await?;
 
@@ -69,7 +143,7 @@ impl TranscriptionGuest for Component {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
         block_on(async {
-            let api_client = SpeechToTextApi::live();
+            let api_client = Self::create_or_get_client()?;
 
             let mut successes: Vec<WitTranscriptionResult> = Vec::new();
             let mut failures: Vec<WitFailedTranscription> = Vec::new();
@@ -145,6 +219,20 @@ impl TranscriptionGuest for Component {
             })
         })
     }
+}
+
+fn read_file_to_bytes(path: &str) -> std::io::Result<Vec<u8>> {
+    use std::fs;
+    use std::io::Read;
+
+    let mut file = fs::File::open(path)?;
+    let metadata = file.metadata()?;
+    let file_size = metadata.len() as usize;
+
+    let mut buffer = Vec::with_capacity(file_size);
+    file.read_to_end(&mut buffer)?;
+
+    Ok(buffer)
 }
 
 impl TryFrom<WitAudioFormat> for AudioFormat {
