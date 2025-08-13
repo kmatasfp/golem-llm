@@ -1547,7 +1547,7 @@ mod tests {
         assert_eq!(request.method(), "DELETE");
         assert_eq!(
             request.uri().to_string(),
-            format!("https://speech.googleapis.com/v2/{}", operation_name)
+            format!("https://speech.googleapis.com/v2/{operation_name}")
         );
 
         let auth_header = request
@@ -1671,7 +1671,7 @@ mod tests {
         assert_eq!(first_poll_request.method(), "GET");
         assert_eq!(
             first_poll_request.uri().to_string(),
-            format!("https://speech.googleapis.com/v2/{}", operation_name)
+            format!("https://speech.googleapis.com/v2/{operation_name}")
         );
 
         let auth_header = first_poll_request
@@ -1686,7 +1686,7 @@ mod tests {
         assert_eq!(second_poll_request.method(), "GET");
         assert_eq!(
             second_poll_request.uri().to_string(),
-            format!("https://speech.googleapis.com/v2/{}", operation_name)
+            format!("https://speech.googleapis.com/v2/{operation_name}")
         );
     }
 
@@ -1759,7 +1759,7 @@ mod tests {
                 assert!(provider_error.contains("Operation failed"));
                 assert!(provider_error.contains("Audio file format is not supported"));
             }
-            other => panic!("Expected APIInternalServerError, got: {:?}", other),
+            other => panic!("Expected APIInternalServerError, got: {other:?}"),
         }
 
         // Verify the polling request
@@ -1768,7 +1768,7 @@ mod tests {
         assert_eq!(poll_request.method(), "GET");
         assert_eq!(
             poll_request.uri().to_string(),
-            format!("https://speech.googleapis.com/v2/{}", operation_name)
+            format!("https://speech.googleapis.com/v2/{operation_name}")
         );
 
         let auth_header = poll_request

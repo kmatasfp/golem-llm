@@ -691,17 +691,13 @@ mod tests {
             let result = validate_request_id(id);
             assert!(
                 result.is_err(),
-                "Expected '{}' to be invalid, but validation passed",
-                id
+                "Expected '{id}' to be invalid, but validation passed",
             );
 
             let error_msg = result.unwrap_err();
             assert!(
                 error_msg.contains(expected_error_substring),
-                "Expected error for '{}' to contain '{}', but got: '{}'",
-                id,
-                expected_error_substring,
-                error_msg
+                "Expected error for '{id}' to contain '{expected_error_substring}', but got: '{error_msg}'",
             );
         }
     }

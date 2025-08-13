@@ -557,18 +557,14 @@ mod tests {
             let result = validate_request_id(invalid_id);
             assert!(
                 result.is_err(),
-                "Expected '{}' to be invalid, but validation passed",
-                invalid_id
+                "Expected '{invalid_id}' to be invalid, but validation passed",
             );
 
             // Your implementation returns String error, not SttError
             if let Err(error_msg) = result {
                 assert!(
                     error_msg.contains(expected_error_part),
-                    "For input '{}', expected error containing '{}', but got: '{}'",
-                    invalid_id,
-                    expected_error_part,
-                    error_msg
+                    "For input '{invalid_id}', expected error containing '{expected_error_part}', but got: '{error_msg}'"
                 );
             }
         }
@@ -924,8 +920,8 @@ mod tests {
 
         // Generate the GCS URI that matches what the actual implementation creates
         let extension = determine_audio_extension(audio_format);
-        let object_name = format!("{}/audio{}", request_id, extension);
-        let gcs_uri = format!("gs://{}/{}", bucket_name, object_name);
+        let object_name = format!("{request_id}/audio{extension}");
+        let gcs_uri = format!("gs://{bucket_name}/{object_name}");
 
         let file_result = BatchRecognizeFileResult {
             error: None,

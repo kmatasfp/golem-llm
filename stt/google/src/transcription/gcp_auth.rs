@@ -361,7 +361,7 @@ mod tests {
         let public_key = RsaPublicKey::from(&auth.private_key);
         let padding = Pkcs1v15Sign::new::<Sha256>();
 
-        let to_be_signed = format!("{}.{}", header_b64, claim_b64);
+        let to_be_signed = format!("{header_b64}.{claim_b64}");
 
         let signature_bytes = general_purpose::URL_SAFE_NO_PAD
             .decode(signature_b64)

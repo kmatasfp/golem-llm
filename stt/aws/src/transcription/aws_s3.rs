@@ -267,7 +267,7 @@ mod tests {
 
         assert_eq!(request.method(), "PUT");
 
-        let expected_uri = format!("https://{}.s3.amazonaws.com/{}", bucket, object_name);
+        let expected_uri = format!("https://{bucket}.s3.amazonaws.com/{object_name}");
         assert_eq!(request.uri().to_string(), expected_uri);
 
         assert_eq!(request.body(), &content);
@@ -324,7 +324,7 @@ mod tests {
 
         assert_eq!(request.method(), "DELETE");
 
-        let expected_uri = format!("https://{}.s3.amazonaws.com/{}", bucket, object_name);
+        let expected_uri = format!("https://{bucket}.s3.amazonaws.com/{object_name}");
         assert_eq!(request.uri().to_string(), expected_uri);
 
         let expected_body: Vec<u8> = vec![];

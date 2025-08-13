@@ -1046,7 +1046,7 @@ mod tests {
         assert_eq!(request.method(), "POST");
         assert_eq!(
             request.uri().to_string(),
-            format!("https://transcribe.{}.amazonaws.com/", region)
+            format!("https://transcribe.{region}.amazonaws.com/")
         );
         assert_eq!(
             request.headers().get("content-type").unwrap(),
@@ -1122,7 +1122,7 @@ mod tests {
         assert_eq!(request.method(), "POST");
         assert_eq!(
             request.uri().to_string(),
-            format!("https://transcribe.{}.amazonaws.com/", region)
+            format!("https://transcribe.{region}.amazonaws.com/")
         );
         assert_eq!(
             request.headers().get("content-type").unwrap(),
@@ -1795,7 +1795,7 @@ mod tests {
         assert_eq!(request.method(), "POST");
         assert_eq!(
             request.uri().to_string(),
-            format!("https://transcribe.{}.amazonaws.com/", region)
+            format!("https://transcribe.{region}.amazonaws.com/")
         );
         assert_eq!(
             request.headers().get("content-type").unwrap(),
