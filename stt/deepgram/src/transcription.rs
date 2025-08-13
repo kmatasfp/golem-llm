@@ -8,8 +8,6 @@ use url::Url;
 
 use golem_stt::error::Error;
 
-const BASE_URL: &str = "https://api.deepgram.com/v1/listen";
-
 const DEEPGRAM_SUPPORTED_LANGUAGES: [Language; 56] = [
     Language::new("multi", "Multilingual", "Multi"),
     Language::new("bg", "Bulgarian", "български"),
@@ -160,14 +158,16 @@ impl std::fmt::Debug for TranscriptionRequest {
 ///
 /// https://developers.deepgram.com/reference/speech-to-text-api/listen
 pub struct PreRecordedAudioApi<HC: HttpClient> {
+    endpoint: String,
     deepgram_api_token: String,
     http_client: HC,
 }
 
 #[allow(unused)]
 impl<HC: HttpClient> PreRecordedAudioApi<HC> {
-    pub fn new(deepgram_api_key: String, http_client: HC) -> Self {
+    pub fn new(deepgram_api_key: String, endpoint: String, http_client: HC) -> Self {
         Self {
+            endpoint,
             deepgram_api_token: format!("Token {deepgram_api_key}"),
             http_client,
         }
@@ -253,7 +253,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
             }
         }
 
-        let mut url = Url::parse(BASE_URL).map_err(|e| {
+        let mut url = Url::parse(&self.endpoint).map_err(|e| {
             Error::Http(
                 request_id.clone(),
                 golem_stt::http::Error::Generic(format!("Failed to parse uri: {e}")),
@@ -420,6 +420,8 @@ mod tests {
 
     const TEST_API_KEY: &str = "test-deepgram-api-key";
 
+    const TEST_ENDPOINT: &str = "https://example.com/v1/listen";
+
     struct MockHttpClient {
         pub responses: RefCell<VecDeque<Result<Response<Vec<u8>>, golem_stt::http::Error>>>,
         pub captured_requests: RefCell<Vec<Request<Vec<u8>>>>,
@@ -554,7 +556,11 @@ mod tests {
 
         mock_client.expect_response(create_mock_success_response());
 
-        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(
+            TEST_API_KEY.to_string(),
+            TEST_ENDPOINT.to_string(),
+            mock_client,
+        );
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
@@ -583,7 +589,11 @@ mod tests {
 
         mock_client.expect_response(create_mock_success_response());
 
-        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(
+            TEST_API_KEY.to_string(),
+            TEST_ENDPOINT.to_string(),
+            mock_client,
+        );
 
         let audio_data = b"fake audio data".to_vec();
         let request = TranscriptionRequest {
@@ -610,7 +620,7 @@ mod tests {
         assert!(captured_request
             .uri()
             .to_string()
-            .starts_with("https://api.deepgram.com/v1/listen"));
+            .starts_with(&api.endpoint));
 
         let body_bytes = captured_request.body().to_vec();
 
@@ -623,7 +633,11 @@ mod tests {
 
         mock_client.expect_response(create_mock_success_response());
 
-        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(
+            TEST_API_KEY.to_string(),
+            TEST_ENDPOINT.to_string(),
+            mock_client,
+        );
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
@@ -671,7 +685,11 @@ mod tests {
 
         mock_client.expect_response(create_mock_success_response());
 
-        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(
+            TEST_API_KEY.to_string(),
+            TEST_ENDPOINT.to_string(),
+            mock_client,
+        );
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
@@ -719,7 +737,11 @@ mod tests {
 
         mock_client.expect_response(create_mock_success_response());
 
-        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(
+            TEST_API_KEY.to_string(),
+            TEST_ENDPOINT.to_string(),
+            mock_client,
+        );
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
@@ -779,7 +801,11 @@ mod tests {
 
         mock_client.expect_response(create_mock_success_response());
 
-        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(
+            TEST_API_KEY.to_string(),
+            TEST_ENDPOINT.to_string(),
+            mock_client,
+        );
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
@@ -885,7 +911,11 @@ mod tests {
                 .unwrap(),
         );
 
-        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(
+            TEST_API_KEY.to_string(),
+            TEST_ENDPOINT.to_string(),
+            mock_client,
+        );
 
         let audio_data = b"fake audio data".to_vec();
         let request = TranscriptionRequest {
@@ -1058,7 +1088,11 @@ mod tests {
                 .unwrap(),
         );
 
-        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(
+            TEST_API_KEY.to_string(),
+            TEST_ENDPOINT.to_string(),
+            mock_client,
+        );
 
         let audio_data = b"fake audio data".to_vec();
         let request = TranscriptionRequest {
@@ -1170,7 +1204,11 @@ mod tests {
                 .unwrap(),
         );
 
-        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(
+            TEST_API_KEY.to_string(),
+            TEST_ENDPOINT.to_string(),
+            mock_client,
+        );
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
@@ -1214,7 +1252,11 @@ mod tests {
                 .unwrap(),
         );
 
-        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(
+            TEST_API_KEY.to_string(),
+            TEST_ENDPOINT.to_string(),
+            mock_client,
+        );
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
@@ -1257,7 +1299,11 @@ mod tests {
                 .unwrap(),
         );
 
-        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(
+            TEST_API_KEY.to_string(),
+            TEST_ENDPOINT.to_string(),
+            mock_client,
+        );
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
@@ -1301,7 +1347,11 @@ mod tests {
                 .unwrap(),
         );
 
-        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(
+            TEST_API_KEY.to_string(),
+            TEST_ENDPOINT.to_string(),
+            mock_client,
+        );
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
@@ -1340,7 +1390,11 @@ mod tests {
                 .unwrap(),
         );
 
-        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(
+            TEST_API_KEY.to_string(),
+            TEST_ENDPOINT.to_string(),
+            mock_client,
+        );
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
@@ -1379,7 +1433,11 @@ mod tests {
                 .unwrap(),
         );
 
-        let api = PreRecordedAudioApi::new(TEST_API_KEY.to_string(), mock_client);
+        let api = PreRecordedAudioApi::new(
+            TEST_API_KEY.to_string(),
+            TEST_ENDPOINT.to_string(),
+            mock_client,
+        );
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),

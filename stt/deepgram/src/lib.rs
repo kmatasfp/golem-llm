@@ -47,8 +47,13 @@ impl SttComponent {
                 SttError::EnvVariablesNotSet(format!("Failed to load DEEPGRAM_API_TOKEN: {err}"))
             })?;
 
+            let endpoint = std::env::var("DEEPGRAM_ENDPOINT")
+                .ok()
+                .unwrap_or_else(|| "https://api.deepgram.com/v1/listen".to_string());
+
             let api_client = PreRecordedAudioApi::new(
                 api_key,
+                endpoint,
                 WstdHttpClient::new_with_timeout(Duration::from_secs(60), Duration::from_secs(600)),
             );
 
