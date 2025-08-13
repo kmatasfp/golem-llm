@@ -58,43 +58,38 @@ impl SttComponent {
     > {
         API_CLIENT.get_or_try_init(|| {
             let location = std::env::var("GOOGLE_LOCATION").map_err(|err| {
-                SttError::EnvVariablesNotSet(format!("Failed to load GOOGLE_LOCATION: {}", err))
+                SttError::EnvVariablesNotSet(format!("Failed to load GOOGLE_LOCATION: {err}"))
             })?;
 
             let bucket_name = std::env::var("GOOGLE_BUCKET_NAME").map_err(|err| {
-                SttError::EnvVariablesNotSet(format!("Failed to load GOOGLE_BUCKET_NAME: {}", err))
+                SttError::EnvVariablesNotSet(format!("Failed to load GOOGLE_BUCKET_NAME: {err}"))
             })?;
 
             let service_acc_key = if let Ok(creds_json_file) =
                 std::env::var("GOOGLE_APPLICATION_CREDENTIALS")
             {
                 let bytes = read_file_to_bytes(&creds_json_file).map_err(|err| {
-                    SttError::AuthError(format!("Failed to read Google credentials file: {}", err))
+                    SttError::AuthError(format!("Failed to read Google credentials file: {err}"))
                 })?;
                 let service_acc_key: ServiceAccountKey =
                     serde_json::from_slice(&bytes).map_err(|err| {
-                        SttError::AuthError(format!("Failed to parse Google credentials: {}", err))
+                        SttError::AuthError(format!("Failed to parse Google credentials: {err}"))
                     })?;
                 service_acc_key
             } else {
                 let project_id = std::env::var("GOOGLE_PROJECT_ID").map_err(|err| {
-                    SttError::EnvVariablesNotSet(format!(
-                        "Failed to load GOOGLE_PROJECT_ID: {}",
-                        err
-                    ))
+                    SttError::EnvVariablesNotSet(format!("Failed to load GOOGLE_PROJECT_ID: {err}"))
                 })?;
 
                 let client_email = std::env::var("GOOGLE_CLIENT_EMAIL").map_err(|err| {
                     SttError::EnvVariablesNotSet(format!(
-                        "Failed to load GOOGLE_CLIENT_EMAIL: {}",
-                        err
+                        "Failed to load GOOGLE_CLIENT_EMAIL: {err}"
                     ))
                 })?;
 
                 let private_key = std::env::var("GOOGLE_PRIVATE_KEY").map_err(|err| {
                     SttError::EnvVariablesNotSet(format!(
-                        "Failed to load GOOGLE_PRIVATE_KEY: {}",
-                        err
+                        "Failed to load GOOGLE_PRIVATE_KEY: {err}"
                     ))
                 })?;
 
@@ -197,13 +192,13 @@ impl TranscriptionGuest for SttComponent {
                             match resp.try_into() {
                                 Ok(transcription) => successes.push(transcription),
                                 Err(error) => {
-                                    trace!("transcription request parsing failed, error {}", error);
+                                    trace!("transcription request parsing failed, error {error}");
                                     failures.push(WitFailedTranscription { request_id, error })
                                 }
                             }
                         }
                         Err(err) => {
-                            trace!("transcription request failed, error {}", err);
+                            trace!("transcription request failed, error {err}");
                             failures.push(WitFailedTranscription {
                                 request_id: err.request_id().to_string(),
                                 error: WitSttError::from(err),
@@ -277,15 +272,11 @@ impl TryFrom<WitTranscribeOptions> for TranscriptionConfig {
             })
             .unwrap_or_default();
 
-        let diarization_config = if let Some(dc) = options.diarization {
-            Some(DiarizationConfig {
-                enabled: dc.enabled,
-                min_speaker_count: dc.min_speaker_count.map(|count| count as i32).or(Some(1)), // set default value to 1
-                max_speaker_count: dc.max_speaker_count.map(|count| count as i32),
-            })
-        } else {
-            None
-        };
+        let diarization_config = options.diarization.map(|dc| DiarizationConfig {
+            enabled: dc.enabled,
+            min_speaker_count: dc.min_speaker_count.map(|count| count as i32).or(Some(1)), // set default value to 1
+            max_speaker_count: dc.max_speaker_count.map(|count| count as i32),
+        });
 
         let enable_multi_channel = options.enable_multi_channel.unwrap_or(false);
         let enable_profanity_filter = options.profanity_filter.unwrap_or(false);
@@ -339,8 +330,7 @@ impl TryFrom<TranscriptionResponse> for WitTranscriptionResult {
                 .parse::<f32>()
                 .map_err(|_| {
                     WitSttError::InternalError(format!(
-                        "Failed to parse duration: {}",
-                        duration_str
+                        "Failed to parse duration for {duration_str}",
                     ))
                 })
         }
@@ -354,7 +344,7 @@ impl TryFrom<TranscriptionResponse> for WitTranscriptionResult {
                 gcp_results
                     .iter()
                     .filter_map(|result| result.result_end_offset.as_ref())
-                    .last()
+                    .next_back()
                     .map(|offset| parse_google_duration(offset))
                     .transpose()?
                     .unwrap_or(0.0)
@@ -363,7 +353,7 @@ impl TryFrom<TranscriptionResponse> for WitTranscriptionResult {
             gcp_results
                 .iter()
                 .filter_map(|result| result.result_end_offset.as_ref())
-                .last()
+                .next_back()
                 .map(|offset| parse_google_duration(offset))
                 .transpose()?
                 .unwrap_or(0.0)
@@ -464,3 +454,5 @@ impl TryFrom<TranscriptionResponse> for WitTranscriptionResult {
         })
     }
 }
+
+golem_stt::export_stt!(SttComponent with_types_in golem_stt);

@@ -587,7 +587,7 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextService for SpeechToTextClien
         request_id: &str,
         operation_name: &str,
     ) -> Result<BatchRecognizeOperationResponse, SttError> {
-        let uri = format!("{}/{}", BASE_URL, operation_name);
+        let uri = format!("{BASE_URL}/{operation_name}");
 
         self.make_authenticated_request(&uri, request_id, Method::GET, None)
             .await

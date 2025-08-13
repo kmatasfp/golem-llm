@@ -22,7 +22,7 @@ impl
         location: String,
     ) -> Result<Self, SttError> {
         let gcp_auth = GcpAuth::new(service_acc_key, WstdHttpClient::default()).map_err(|err| {
-            SttError::AuthError(format!("failed to create GcpAuth client, {}", err))
+            SttError::AuthError(format!("failed to create GcpAuth client, {err}"))
         })?;
 
         let gcp_auth_arc = Arc::new(gcp_auth);

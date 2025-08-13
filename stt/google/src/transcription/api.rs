@@ -633,6 +633,7 @@ mod tests {
         pub captured_delete_operations: RefCell<Vec<GcsDeleteOperation>>,
     }
 
+    #[allow(unused)]
     impl MockCloudStorageService {
         pub fn new() -> Self {
             Self {
@@ -730,6 +731,7 @@ mod tests {
         pub captured_wait_for_completion: RefCell<Vec<WaitForCompletionOperation>>,
     }
 
+    #[allow(unused)]
     impl MockSpeechToTextService {
         pub fn new() -> Self {
             Self {
