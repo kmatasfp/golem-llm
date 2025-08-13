@@ -276,7 +276,7 @@ mod tests {
             self.responses.borrow_mut().push_back(Ok(response));
         }
 
-        pub fn last_captured_request(&self) -> Option<Ref<Request<Vec<u8>>>> {
+        pub fn last_captured_request(&self) -> Option<Ref<'_, Request<Vec<u8>>>> {
             let borrow = self.captured_requests.borrow();
             if borrow.is_empty() {
                 None

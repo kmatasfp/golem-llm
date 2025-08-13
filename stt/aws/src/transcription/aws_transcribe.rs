@@ -924,7 +924,7 @@ mod tests {
             self.responses.borrow_mut().push_back(Ok(response));
         }
 
-        pub fn get_captured_requests(&self) -> Ref<Vec<Request<Vec<u8>>>> {
+        pub fn get_captured_requests(&self) -> Ref<'_, Vec<Request<Vec<u8>>>> {
             self.captured_requests.borrow()
         }
 
@@ -936,7 +936,7 @@ mod tests {
             self.captured_requests.borrow().len()
         }
 
-        pub fn last_captured_request(&self) -> Option<Ref<Request<Vec<u8>>>> {
+        pub fn last_captured_request(&self) -> Option<Ref<'_, Request<Vec<u8>>>> {
             let borrow = self.captured_requests.borrow();
             if borrow.is_empty() {
                 None
@@ -1879,7 +1879,7 @@ mod tests {
             mock_runtime,
         );
 
-        let _result = transcribe_client
+        transcribe_client
             .wait_for_vocabulary_ready("test-vocab", Duration::from_secs(300))
             .await
             .unwrap();

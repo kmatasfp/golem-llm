@@ -236,7 +236,7 @@ mod tests {
             self.responses.borrow_mut().push_back(Ok(response));
         }
 
-        pub fn get_captured_requests(&self) -> Ref<Vec<Request<Vec<u8>>>> {
+        pub fn get_captured_requests(&self) -> Ref<'_, Vec<Request<Vec<u8>>>> {
             self.captured_requests.borrow()
         }
 
@@ -248,7 +248,7 @@ mod tests {
             self.captured_requests.borrow().len()
         }
 
-        pub fn last_captured_request(&self) -> Option<Ref<Request<Vec<u8>>>> {
+        pub fn last_captured_request(&self) -> Option<Ref<'_, Request<Vec<u8>>>> {
             let borrow = self.captured_requests.borrow();
             if borrow.is_empty() {
                 None
@@ -319,7 +319,7 @@ mod tests {
         let object_name = "test-object.txt";
         let content = b"Hello, World!".to_vec();
 
-        let _result = cloud_storage_client
+        cloud_storage_client
             .put_object("some-request-id", bucket, object_name, content.clone())
             .await
             .unwrap();
@@ -387,7 +387,7 @@ mod tests {
         let bucket = "test-bucket";
         let object_name = "test-object.txt";
 
-        let _result = cloud_storage_client
+        cloud_storage_client
             .delete_object("some-request-id", bucket, object_name)
             .await
             .unwrap();

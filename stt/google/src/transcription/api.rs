@@ -654,11 +654,11 @@ mod tests {
                 .push_back(response);
         }
 
-        pub fn get_captured_put_operations(&self) -> Ref<Vec<GcsPutOperation>> {
+        pub fn get_captured_put_operations(&self) -> Ref<'_, Vec<GcsPutOperation>> {
             self.captured_put_operations.borrow()
         }
 
-        pub fn get_captured_delete_operations(&self) -> Ref<Vec<GcsDeleteOperation>> {
+        pub fn get_captured_delete_operations(&self) -> Ref<'_, Vec<GcsDeleteOperation>> {
             self.captured_delete_operations.borrow()
         }
 
@@ -766,15 +766,17 @@ mod tests {
                 .push_back(response);
         }
 
-        pub fn get_captured_recognize(&self) -> Ref<Vec<RecognizeOperation>> {
+        pub fn get_captured_recognize(&self) -> Ref<'_, Vec<RecognizeOperation>> {
             self.captured_recognize.borrow()
         }
 
-        pub fn get_captured_start_batch_recognize(&self) -> Ref<Vec<StartBatchRecognizeOperation>> {
+        pub fn get_captured_start_batch_recognize(
+            &self,
+        ) -> Ref<'_, Vec<StartBatchRecognizeOperation>> {
             self.captured_start_batch_recognize.borrow()
         }
 
-        pub fn get_captured_wait_for_completion(&self) -> Ref<Vec<WaitForCompletionOperation>> {
+        pub fn get_captured_wait_for_completion(&self) -> Ref<'_, Vec<WaitForCompletionOperation>> {
             self.captured_wait_for_completion.borrow()
         }
 

@@ -374,7 +374,7 @@ mod tests {
             .into();
 
         let mut hasher = Sha256::new();
-        hasher.update(&request.body());
+        hasher.update(request.body());
         let hashed_content = hex::encode(hasher.finalize());
 
         request.headers_mut().append(
@@ -515,7 +515,7 @@ mod tests {
             .method(Method::GET)
             .uri("s3://examplebucket.s3.amazonaws.com/foo/bar/test@file.txt")
             .header("Range", "bytes=0-9")
-            .body(vec![].into())
+            .body(vec![])
             .unwrap();
 
         let request_for_aws_sdk = request.clone();
@@ -572,7 +572,7 @@ mod tests {
             .uri("s3://examplebucket.s3.amazonaws.com/test$file.text")
             .header("Date", "Fri, 24 May 2013 00:00:00 GMT")
             .header("x-amz-storage-class", "REDUCED_REDUNDANCY")
-            .body(b"Welcome to Amazon S3.".to_vec().into())
+            .body(b"Welcome to Amazon S3.".to_vec())
             .unwrap();
 
         let request_for_aws_sdk = request.clone();
@@ -627,7 +627,7 @@ mod tests {
         let request = Request::builder()
             .method(Method::GET)
             .uri("s3://examplebucket.s3.amazonaws.com/?max-keys=2&prefix=J")
-            .body(vec![].into())
+            .body(vec![])
             .unwrap();
 
         let request_for_aws_sdk = request.clone();

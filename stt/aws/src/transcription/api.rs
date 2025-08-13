@@ -771,11 +771,11 @@ mod tests {
                 .push_back(response);
         }
 
-        pub fn get_captured_put_operations(&self) -> Ref<Vec<S3PutOperation>> {
+        pub fn get_captured_put_operations(&self) -> Ref<'_, Vec<S3PutOperation>> {
             self.captured_put_operations.borrow()
         }
 
-        pub fn get_captured_delete_operations(&self) -> Ref<Vec<S3DeleteOperation>> {
+        pub fn get_captured_delete_operations(&self) -> Ref<'_, Vec<S3DeleteOperation>> {
             self.captured_delete_operations.borrow()
         }
 
@@ -924,15 +924,19 @@ mod tests {
                 .push_back(response);
         }
 
-        pub fn get_captured_create_vocabulary(&self) -> Ref<Vec<CreateVocabularyOperation>> {
+        pub fn get_captured_create_vocabulary(&self) -> Ref<'_, Vec<CreateVocabularyOperation>> {
             self.captured_create_vocabulary.borrow()
         }
 
-        pub fn get_captured_start_transcription(&self) -> Ref<Vec<StartTranscriptionOperation>> {
+        pub fn get_captured_start_transcription(
+            &self,
+        ) -> Ref<'_, Vec<StartTranscriptionOperation>> {
             self.captured_start_transcription.borrow()
         }
 
-        pub fn get_captured_download_transcript(&self) -> Ref<Vec<DownloadTranscriptOperation>> {
+        pub fn get_captured_download_transcript(
+            &self,
+        ) -> Ref<'_, Vec<DownloadTranscriptOperation>> {
             self.captured_download_transcript.borrow()
         }
 
