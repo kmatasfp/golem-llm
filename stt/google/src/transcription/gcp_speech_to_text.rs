@@ -1,4 +1,3 @@
-use std::rc::Rc;
 use std::time::Duration;
 use std::{collections::HashMap, sync::Arc};
 
@@ -282,6 +281,7 @@ pub trait SpeechToTextService {
         max_wait_time: Duration,
     ) -> Result<BatchRecognizeOperationResponse, SttError>;
 
+    #[allow(unused)]
     async fn delete_batch_recognize(
         &self,
         request_id: &str,
@@ -421,12 +421,12 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextClient<HC, RT> {
             .auth
             .get_access_token()
             .await
-            .map_err(|e| SttError::AuthError(format!("Failed to get access token: {:?}", e)))?;
+            .map_err(|e| SttError::AuthError(format!("Failed to get access token: {e:?}")))?;
 
         let mut request_builder = Request::builder()
             .method(method)
             .uri(uri)
-            .header("Authorization", format!("Bearer {}", access_token));
+            .header("Authorization", format!("Bearer {access_token}"));
 
         if body.is_some() {
             request_builder = request_builder.header(CONTENT_TYPE, "application/json");
@@ -436,7 +436,7 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextClient<HC, RT> {
             .body(body.unwrap_or_default())
             .map_err(|e| (request_id.to_string(), golem_stt::http::Error::HttpError(e)))?;
 
-        trace!("Sending request to GCP Speech-to-Text API: {}", uri);
+        trace!("Sending request to GCP Speech-to-Text API: {uri}");
 
         let response = self
             .http_client
@@ -448,10 +448,9 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextClient<HC, RT> {
             let json_response: T = serde_json::from_slice(response.body()).map_err(|e| {
                 (
                     request_id.to_string(),
-                    golem_stt::http::Error::Generic(format!(
-                        "Failed to deserialize response: {}",
-                        e
-                    )),
+                    golem_stt::http::Error::Generic(
+                        format!("Failed to deserialize response: {e}",),
+                    ),
                 )
             })?;
 
@@ -524,12 +523,12 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextService for SpeechToTextClien
             uri: None,
         };
 
-        let uri = format!("{}/{}:recognize", BASE_URL, recognizer_path);
+        let uri = format!("{BASE_URL}/{recognizer_path}:recognize");
 
         let body = serde_json::to_vec(&request_body).map_err(|e| {
             (
                 request_id.to_string(),
-                golem_stt::http::Error::Generic(format!("Failed to serialize request: {}", e)),
+                golem_stt::http::Error::Generic(format!("Failed to serialize request: {e}")),
             )
         })?;
 
@@ -570,16 +569,16 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextService for SpeechToTextClien
             processing_strategy: None, // Use default processing, which is as soon as possible
         };
 
-        let uri = format!("{}/{}:batchRecognize", BASE_URL, recognizer_path);
+        let uri = format!("{BASE_URL}/{recognizer_path}:batchRecognize");
 
         let body = serde_json::to_vec(&request_body).map_err(|e| {
             (
                 request_id.to_string(),
-                golem_stt::http::Error::Generic(format!("Failed to serialize request: {}", e)),
+                golem_stt::http::Error::Generic(format!("Failed to serialize request: {e}")),
             )
         })?;
 
-        self.make_authenticated_request(&uri, &request_id, Method::POST, Some(body))
+        self.make_authenticated_request(&uri, request_id, Method::POST, Some(body))
             .await
     }
 
@@ -590,7 +589,7 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextService for SpeechToTextClien
     ) -> Result<BatchRecognizeOperationResponse, SttError> {
         let uri = format!("{}/{}", BASE_URL, operation_name);
 
-        self.make_authenticated_request(&uri, &request_id, Method::GET, None)
+        self.make_authenticated_request(&uri, request_id, Method::GET, None)
             .await
     }
 
@@ -633,7 +632,7 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextService for SpeechToTextClien
         request_id: &str,
         operation_name: &str,
     ) -> Result<(), SttError> {
-        let uri = format!("{}/{}", BASE_URL, operation_name);
+        let uri = format!("{BASE_URL}/{operation_name}");
 
         let _: serde_json::Value = self
             .make_authenticated_request(&uri, request_id, Method::DELETE, None)
@@ -663,6 +662,7 @@ mod tests {
         pub captured_requests: RefCell<Vec<Request<Vec<u8>>>>,
     }
 
+    #[allow(unused)]
     impl MockHttpClient {
         pub fn new() -> Self {
             Self {

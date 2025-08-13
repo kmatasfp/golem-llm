@@ -32,7 +32,7 @@ impl LoggingState {
                 &std::env::var("STT_PROVIDER_LOG_LEVEL").unwrap_or_default(),
             )
             .unwrap_or(log::LevelFilter::Trace);
-            eprintln!("Setting log level to {:?}", max_level);
+            eprintln!("Setting log level to {max_level}");
             log::set_max_level(max_level);
             self.logging_initialized = true;
         }

@@ -53,19 +53,19 @@ impl SttComponent {
     > {
         API_CLIENT.get_or_try_init(|| {
             let region = std::env::var("AWS_REGION").map_err(|err| {
-                SttError::EnvVariablesNotSet(format!("Failed to load AWS_REGION: {}", err))
+                SttError::EnvVariablesNotSet(format!("Failed to load AWS_REGION: {err}"))
             })?;
 
             let access_key = std::env::var("AWS_ACCESS_KEY").map_err(|err| {
-                SttError::EnvVariablesNotSet(format!("Failed to load AWS_ACCESS_KEY: {}", err))
+                SttError::EnvVariablesNotSet(format!("Failed to load AWS_ACCESS_KEY: {err}"))
             })?;
 
             let secret_key = std::env::var("AWS_SECRET_KEY").map_err(|err| {
-                SttError::EnvVariablesNotSet(format!("Failed to load AWS_SECRET_KEY: {}", err))
+                SttError::EnvVariablesNotSet(format!("Failed to load AWS_SECRET_KEY: {err}"))
             })?;
 
             let bucket_name = std::env::var("AWS_BUCKET_NAME").map_err(|err| {
-                SttError::EnvVariablesNotSet(format!("Failed to load AWS_BUCKET_NAME: {}", err))
+                SttError::EnvVariablesNotSet(format!("Failed to load AWS_BUCKET_NAME: {err}"))
             })?;
 
             let api_client = TranscribeApi::live(bucket_name, access_key, secret_key, region);
@@ -136,7 +136,7 @@ impl TranscriptionGuest for SttComponent {
             //     match res {
             //         Ok(resp) => successes.push(resp.into()),
             //         Err(err) => {
-            //             trace!("transcription request failed, error {}", err);
+            //             trace!("transcription request failed, error {err}");
             //             failures.push(WitFailedTranscription {
             //                 request_id: err.request_id().to_string(),
             //                 error: WitSttError::from(err),
@@ -161,7 +161,7 @@ impl TranscriptionGuest for SttComponent {
                     match res {
                         Ok(resp) => successes.push(resp.into()),
                         Err(err) => {
-                            trace!("transcription request failed, error {}", err);
+                            trace!("transcription request failed, error {err}");
                             failures.push(WitFailedTranscription {
                                 request_id: err.request_id().to_string(),
                                 error: WitSttError::from(err),
@@ -216,14 +216,10 @@ impl TryFrom<WitTranscribeOptions> for TranscriptionConfig {
             })
             .unwrap_or_default();
 
-        let diarization_config = if let Some(dc) = options.diarization {
-            Some(DiarizationConfig {
-                enabled: dc.enabled,
-                max_speakers: dc.max_speaker_count.unwrap_or(30) as u8,
-            })
-        } else {
-            None
-        };
+        let diarization_config = options.diarization.map(|dc| DiarizationConfig {
+            enabled: dc.enabled,
+            max_speakers: dc.max_speaker_count.unwrap_or(30) as u8,
+        });
 
         let enable_multi_channel = options.enable_multi_channel.unwrap_or(false);
 
@@ -326,7 +322,7 @@ impl From<TranscriptionResponse> for WitTranscriptionResult {
                                 aws_results
                                     .items
                                     .iter()
-                                    .find(|item| item.id.map_or(false, |id| id == *item_id))
+                                    .find(|item| item.id == Some(*item_id))
                             })
                             .filter(|item| item.item_type == "pronunciation") // Only pronunciation items, not punctuation
                             .filter_map(|item| {

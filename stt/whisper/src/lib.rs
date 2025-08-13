@@ -40,7 +40,7 @@ impl SttComponent {
     fn create_or_get_client() -> Result<&'static TranscriptionsApi<WstdHttpClient>, SttError> {
         API_CLIENT.get_or_try_init(|| {
             let api_key = std::env::var("OPENAI_API_KEY").map_err(|err| {
-                SttError::EnvVariablesNotSet(format!("Failed to load OPENAI_API_KEY: {}", err))
+                SttError::EnvVariablesNotSet(format!("Failed to load OPENAI_API_KEY: {err}"))
             })?;
 
             let api_client = TranscriptionsApi::new(

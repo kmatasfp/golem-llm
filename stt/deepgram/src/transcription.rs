@@ -168,7 +168,7 @@ pub struct PreRecordedAudioApi<HC: HttpClient> {
 impl<HC: HttpClient> PreRecordedAudioApi<HC> {
     pub fn new(deepgram_api_key: String, http_client: HC) -> Self {
         Self {
-            deepgram_api_token: format!("Token {}", deepgram_api_key),
+            deepgram_api_token: format!("Token {deepgram_api_key}"),
             http_client,
         }
     }
@@ -203,7 +203,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
                 && request
                     .transcription_config
                     .as_ref()
-                    .map_or(false, |t| t.enable_multi_channel)
+                    .is_some_and(|t| t.enable_multi_channel)
             {
                 query_params.push(("multichannel", "true".to_string()));
             }
@@ -241,7 +241,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
                 transcription_config.keywords.iter().for_each(|keyword| {
                     let encoded = keyword.value.replace(" ", "+");
                     if let Some(boost) = keyword.boost {
-                        query_params.push(("keyword", format!("{}:{}", encoded, boost)));
+                        query_params.push(("keyword", format!("{encoded}:{boost}")));
                     } else {
                         query_params.push(("keyword", encoded));
                     }
@@ -256,7 +256,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
         let mut url = Url::parse(BASE_URL).map_err(|e| {
             Error::Http(
                 request_id.clone(),
-                golem_stt::http::Error::Generic(format!("Failed to parse uri: {}", e)),
+                golem_stt::http::Error::Generic(format!("Failed to parse uri: {e}")),
             )
         })?;
 
@@ -284,8 +284,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
                     Error::Http(
                         request_id.clone(),
                         golem_stt::http::Error::Generic(format!(
-                            "Failed to deserialize response: {}",
-                            e
+                            "Failed to deserialize response: {e}"
                         )),
                     )
                 })?;
@@ -301,8 +300,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
                 Error::Http(
                     request_id.clone(),
                     golem_stt::http::Error::Generic(format!(
-                        "Failed to parse response as UTF-8: {}",
-                        e
+                        "Failed to parse response as UTF-8: {e}",
                     )),
                 )
             })?;

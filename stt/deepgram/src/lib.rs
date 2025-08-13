@@ -44,7 +44,7 @@ impl SttComponent {
     fn create_or_get_client() -> Result<&'static PreRecordedAudioApi<WstdHttpClient>, SttError> {
         API_CLIENT.get_or_try_init(|| {
             let api_key = std::env::var("DEEPGRAM_API_TOKEN").map_err(|err| {
-                SttError::EnvVariablesNotSet(format!("Failed to load DEEPGRAM_API_TOKEN: {}", err))
+                SttError::EnvVariablesNotSet(format!("Failed to load DEEPGRAM_API_TOKEN: {err}"))
             })?;
 
             let api_client = PreRecordedAudioApi::new(

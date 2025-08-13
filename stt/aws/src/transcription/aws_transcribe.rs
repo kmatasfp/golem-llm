@@ -462,7 +462,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeClient<HC, RT>
         let json_body = serde_json::to_string(request_body).map_err(|e| {
             (
                 request_id.clone(),
-                golem_stt::http::Error::Generic(format!("Failed to serialize request: {}", e)),
+                golem_stt::http::Error::Generic(format!("Failed to serialize request: {e}")),
             )
         })?;
 
@@ -480,11 +480,11 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeClient<HC, RT>
             .map_err(|err| {
                 (
                     request_id.clone(),
-                    golem_stt::http::Error::Generic(format!("Failed to sign request: {}", err)),
+                    golem_stt::http::Error::Generic(format!("Failed to sign request: {err}")),
                 )
             })?;
 
-        trace!("Sending request to AWS Transcribe API: {}", uri);
+        trace!("Sending request to AWS Transcribe API: {uri}");
 
         let response = self
             .http_client
@@ -496,10 +496,9 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeClient<HC, RT>
             let transcribe_response: T = serde_json::from_slice(response.body()).map_err(|e| {
                 (
                     request_id.clone(),
-                    golem_stt::http::Error::Generic(format!(
-                        "Failed to deserialize response: {}",
-                        e
-                    )),
+                    golem_stt::http::Error::Generic(
+                        format!("Failed to deserialize response: {e}",),
+                    ),
                 )
             })?;
 
@@ -514,23 +513,18 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeClient<HC, RT>
                 StatusCode::BAD_REQUEST => Err(golem_stt::error::Error::APIBadRequest {
                     request_id,
                     provider_error: format!(
-                        "Transcribe {} bad request: {}",
-                        operation_name, error_body
+                        "Transcribe {operation_name} bad request: {error_body}"
                     ),
                 }),
                 StatusCode::FORBIDDEN => Err(golem_stt::error::Error::APIForbidden {
                     request_id,
-                    provider_error: format!(
-                        "Transcribe {} forbidden: {}",
-                        operation_name, error_body
-                    ),
+                    provider_error: format!("Transcribe {operation_name} forbidden: {error_body}"),
                 }),
                 StatusCode::INTERNAL_SERVER_ERROR => {
                     Err(golem_stt::error::Error::APIInternalServerError {
                         request_id,
                         provider_error: format!(
-                            "Transcribe {} server error: {}",
-                            operation_name, error_body
+                            "Transcribe {operation_name} server error: {error_body}",
                         ),
                     })
                 }
@@ -538,16 +532,14 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeClient<HC, RT>
                     Err(golem_stt::error::Error::APIInternalServerError {
                         request_id,
                         provider_error: format!(
-                            "Transcribe {} service unavailable: {}",
-                            operation_name, error_body
+                            "Transcribe {operation_name} service unavailable: {error_body}",
                         ),
                     })
                 }
                 _ => Err(golem_stt::error::Error::APIUnknown {
                     request_id,
                     provider_error: format!(
-                        "Transcribe {} unknown error ({}): {}",
-                        operation_name, status, error_body
+                        "Transcribe {operation_name} unknown error ({status}): {error_body}"
                     ),
                 }),
             }
@@ -634,7 +626,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
                 other => {
                     return Err(golem_stt::error::Error::APIBadRequest {
                         request_id: vocabulary_name.to_string(),
-                        provider_error: format!("Unexpected vocabulary state: {}", other),
+                        provider_error: format!("Unexpected vocabulary state: {other}"),
                     });
                 }
             }
@@ -709,7 +701,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
 
                 if let Some(vocab_name) = vocabulary_name {
                     settings
-                        .get_or_insert_with(|| Settings::default())
+                        .get_or_insert_with(Settings::default)
                         .vocabulary_name = Some(vocab_name.to_string());
                 }
             } else {
@@ -718,13 +710,13 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
 
             if audio_config.channels.is_some_and(|c| c == 2) && config.enable_multi_channel {
                 settings
-                    .get_or_insert_with(|| Settings::default())
+                    .get_or_insert_with(Settings::default)
                     .channel_identification = Some(true);
             }
 
             if let Some(diarization) = &config.diarization {
                 if diarization.enabled {
-                    let settings_ref = settings.get_or_insert_with(|| Settings::default());
+                    let settings_ref = settings.get_or_insert_with(Settings::default);
                     settings_ref.show_speaker_labels = Some(true);
                     settings_ref.max_speaker_labels = Some(diarization.max_speakers as i32);
                 }
@@ -803,11 +795,11 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
 
             match res.transcription_job.transcription_job_status.as_str() {
                 "COMPLETED" => {
-                    trace!("transcription job {} completed", transcription_job_name);
+                    trace!("transcription job {transcription_job_name} completed");
                     return Ok(res);
                 }
                 "FAILED" => {
-                    trace!("tracription job {} failed", transcription_job_name);
+                    trace!("tracription job {transcription_job_name} failed");
                     return Err(golem_stt::error::Error::APIBadRequest {
                         request_id: transcription_job_name.to_string(),
                         provider_error: format!(
@@ -820,15 +812,12 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
                     });
                 }
                 "IN_PROGRESS" | "QUEUED" => {
-                    trace!(
-                        "transcription job {} waiting for completion",
-                        transcription_job_name
-                    );
+                    trace!("transcription job {transcription_job_name} waiting for completion");
                 }
                 other => {
                     return Err(golem_stt::error::Error::APIBadRequest {
                         request_id: transcription_job_name.to_string(),
-                        provider_error: format!("Unexpected transcription job status: {}", other),
+                        provider_error: format!("Unexpected transcription job status: {other}"),
                     });
                 }
             }
@@ -864,8 +853,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
                     golem_stt::error::Error::Http(
                         transcription_job_name.to_string(),
                         golem_stt::http::Error::Generic(format!(
-                            "Failed to deserialize response: {}",
-                            e
+                            "Failed to deserialize response: {e}",
                         )),
                     )
                 })?;
@@ -882,23 +870,23 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
             match status {
                 StatusCode::BAD_REQUEST => Err(golem_stt::error::Error::APIBadRequest {
                     request_id,
-                    provider_error: format!("Transcript download bad request: {}", error_body),
+                    provider_error: format!("Transcript download bad request: {error_body}"),
                 }),
                 StatusCode::FORBIDDEN => Err(golem_stt::error::Error::APIForbidden {
                     request_id,
-                    provider_error: format!("Transcript download forbidden (expired URL or insufficient permissions): {}", error_body),
+                    provider_error: format!("Transcript download forbidden (expired URL or insufficient permissions): {error_body}"),
                 }),
                 StatusCode::NOT_FOUND => Err(golem_stt::error::Error::APINotFound {
                     request_id,
-                    provider_error: format!("Transcript file not found: {}", error_body),
+                    provider_error: format!("Transcript file not found: {error_body}"),
                 }),
                 s if s.is_server_error() => Err(golem_stt::error::Error::APIInternalServerError {
                     request_id,
-                    provider_error: format!("Transcript download server error ({}): {}", status, error_body),
+                    provider_error: format!("Transcript download server error ({status}): {error_body}"),
                 }),
                 _ => Err(golem_stt::error::Error::APIUnknown {
                     request_id,
-                    provider_error: format!("Transcript download unknown error ({}): {}", status, error_body),
+                    provider_error: format!("Transcript download unknown error ({status}): {error_body}"),
                 }),
             }
         }

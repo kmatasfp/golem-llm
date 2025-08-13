@@ -214,7 +214,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
             serde_json::to_string(&definition).map_err(|e| {
                 SttError::Http(
                     request_id.clone(),
-                    HttpError::Generic(format!("Failed to serialize definition: {}", e)),
+                    HttpError::Generic(format!("Failed to serialize definition: {e}")),
                 )
             })?
         } else {
@@ -246,7 +246,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
                 .map_err(|e| {
                 SttError::Http(
                     request_id.clone(),
-                    HttpError::Generic(format!("Failed to parse response: {}", e)),
+                    HttpError::Generic(format!("Failed to parse response: {e}")),
                 )
             })?;
 
@@ -261,8 +261,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
                 SttError::Http(
                     request_id.clone(),
                     golem_stt::http::Error::Generic(format!(
-                        "Failed to parse response as UTF-8: {}",
-                        e
+                        "Failed to parse response as UTF-8: {e}"
                     )),
                 )
             })?;
@@ -408,6 +407,7 @@ mod tests {
         pub captured_requests: RefCell<Vec<Request<Vec<u8>>>>,
     }
 
+    #[allow(unused)]
     impl MockHttpClient {
         pub fn new() -> Self {
             Self {

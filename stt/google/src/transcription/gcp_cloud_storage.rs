@@ -32,10 +32,6 @@ impl<HC: HttpClient> CloudStorageClient<HC> {
     pub fn new(auth: Arc<GcpAuth<HC>>, http_client: HC) -> Self {
         Self { http_client, auth }
     }
-
-    pub fn project_id(&self) -> &str {
-        self.auth.project_id()
-    }
 }
 
 impl<HC: HttpClient> CloudStorageService for CloudStorageClient<HC> {
@@ -49,7 +45,7 @@ impl<HC: HttpClient> CloudStorageService for CloudStorageClient<HC> {
         let access_token = self.auth.get_access_token().await.map_err(|e| {
             SttError::Http(
                 request_id.to_string(),
-                golem_stt::http::Error::Generic(format!("Failed to get access token: {}", e)),
+                golem_stt::http::Error::Generic(format!("Failed to get access token: {e}")),
             )
         })?;
 
@@ -66,7 +62,7 @@ impl<HC: HttpClient> CloudStorageService for CloudStorageClient<HC> {
             .uri(&uri)
             .header("Content-Type", "application/octet-stream")
             .header("Content-Length", &content_length)
-            .header("Authorization", format!("Bearer {}", access_token))
+            .header("Authorization", format!("Bearer {access_token}"))
             .body(content)
             .map_err(|e| {
                 SttError::Http(request_id.to_string(), golem_stt::http::Error::HttpError(e))
@@ -90,42 +86,36 @@ impl<HC: HttpClient> CloudStorageService for CloudStorageClient<HC> {
             match status {
                 StatusCode::BAD_REQUEST => Err(SttError::APIBadRequest {
                     request_id,
-                    provider_error: format!("Cloud Storage upload bad request: {}", error_body),
+                    provider_error: format!("Cloud Storage upload bad request: {error_body}"),
                 }),
                 StatusCode::UNAUTHORIZED => Err(SttError::APIForbidden {
                     request_id,
-                    provider_error: format!("Cloud Storage upload forbidden error: {}", error_body),
+                    provider_error: format!("Cloud Storage upload forbidden error: {error_body}"),
                 }),
                 StatusCode::FORBIDDEN => Err(SttError::APIUnauthorized {
                     request_id,
                     provider_error: format!(
-                        "Cloud Storage upload unauthorized error: {}",
-                        error_body
+                        "Cloud Storage upload unauthorized error: {error_body}",
                     ),
                 }),
                 StatusCode::NOT_FOUND => Err(SttError::APIConflict {
                     request_id,
-                    provider_error: format!("Cloud Storage upload conflict error: {}", error_body),
+                    provider_error: format!("Cloud Storage upload conflict error: {error_body}"),
                 }),
                 StatusCode::TOO_MANY_REQUESTS => Err(SttError::APIRateLimit {
                     request_id,
-                    provider_error: format!(
-                        "Cloud Storage upload rate limit error: {}",
-                        error_body
-                    ),
+                    provider_error: format!("Cloud Storage upload rate limit error: {error_body}",),
                 }),
                 s if s.is_server_error() => Err(SttError::APIInternalServerError {
                     request_id,
                     provider_error: format!(
-                        "Cloud Storage upload server error ({}): {}",
-                        status, error_body
+                        "Cloud Storage upload server error ({status}): {error_body}",
                     ),
                 }),
                 _ => Err(SttError::APIUnknown {
                     request_id,
                     provider_error: format!(
-                        "Cloud Storage upload unexpected error ({}): {}",
-                        status, error_body
+                        "Cloud Storage upload unexpected error ({status}): {error_body}",
                     ),
                 }),
             }
@@ -141,7 +131,7 @@ impl<HC: HttpClient> CloudStorageService for CloudStorageClient<HC> {
         let access_token = self.auth.get_access_token().await.map_err(|e| {
             SttError::Http(
                 request_id.to_string(),
-                golem_stt::http::Error::Generic(format!("Failed to get access token: {}", e)),
+                golem_stt::http::Error::Generic(format!("Failed to get access token: {e}")),
             )
         })?;
 
@@ -153,7 +143,7 @@ impl<HC: HttpClient> CloudStorageService for CloudStorageClient<HC> {
 
         let request = Request::builder()
             .method("DELETE")
-            .header("Authorization", format!("Bearer {}", access_token))
+            .header("Authorization", format!("Bearer {access_token}"))
             .uri(&uri)
             .body(vec![])
             .map_err(|e| {
@@ -178,42 +168,36 @@ impl<HC: HttpClient> CloudStorageService for CloudStorageClient<HC> {
             match status {
                 StatusCode::BAD_REQUEST => Err(SttError::APIBadRequest {
                     request_id,
-                    provider_error: format!("Cloud Storage delete bad request: {}", error_body),
+                    provider_error: format!("Cloud Storage delete bad request: {error_body}"),
                 }),
                 StatusCode::FORBIDDEN => Err(SttError::APIForbidden {
                     request_id,
-                    provider_error: format!("Cloud Storage delete forbidden error: {}", error_body),
+                    provider_error: format!("Cloud Storage delete forbidden error: {error_body}"),
                 }),
                 StatusCode::UNAUTHORIZED => Err(SttError::APIUnauthorized {
                     request_id,
                     provider_error: format!(
-                        "Cloud Storage delete unauthorized error: {}",
-                        error_body
+                        "Cloud Storage delete unauthorized error: {error_body}"
                     ),
                 }),
                 StatusCode::CONFLICT => Err(SttError::APIConflict {
                     request_id,
-                    provider_error: format!("Cloud Storage delete conflict error: {}", error_body),
+                    provider_error: format!("Cloud Storage delete conflict error: {error_body}"),
                 }),
                 StatusCode::TOO_MANY_REQUESTS => Err(SttError::APIRateLimit {
                     request_id,
-                    provider_error: format!(
-                        "Cloud Storage delete rate limit error: {}",
-                        error_body
-                    ),
+                    provider_error: format!("Cloud Storage delete rate limit error: {error_body}",),
                 }),
                 s if s.is_server_error() => Err(SttError::APIInternalServerError {
                     request_id,
                     provider_error: format!(
-                        "Cloud Storage delete server error ({}): {}",
-                        status, error_body
+                        "Cloud Storage delete server error ({status}): {error_body}",
                     ),
                 }),
                 _ => Err(SttError::APIUnknown {
                     request_id,
                     provider_error: format!(
-                        "Cloud Storage delete unexpected error ({}): {}",
-                        status, error_body
+                        "Cloud Storage delete unexpected error ({status}): {error_body}",
                     ),
                 }),
             }

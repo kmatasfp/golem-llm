@@ -138,7 +138,7 @@ impl AwsSignatureV4 {
                     {
                         host.to_string()
                     } else {
-                        format!("{}:{}", host, port)
+                        format!("{host}:{port}")
                     }
                 } else {
                     host.to_string()
@@ -165,8 +165,7 @@ impl AwsSignatureV4 {
             self.access_key, date_stamp, self.region, self.service
         );
         let authorization = format!(
-            "AWS4-HMAC-SHA256 Credential={}, SignedHeaders={}, Signature={}",
-            credential, signed_headers, signature
+            "AWS4-HMAC-SHA256 Credential={credential}, SignedHeaders={signed_headers}, Signature={signature}"
         );
 
         parts
@@ -251,7 +250,7 @@ impl AwsSignatureV4 {
                 if value.is_empty() {
                     key
                 } else {
-                    format!("{}={}", key, value)
+                    format!("{key}={value}")
                 }
             })
             .collect::<Vec<_>>()
@@ -273,7 +272,7 @@ impl AwsSignatureV4 {
         sorted_headers.sort_by(|a, b| a.0.cmp(&b.0));
 
         for (name, value) in sorted_headers {
-            canonical_headers.push_str(&format!("{}:{}\n", name, value));
+            canonical_headers.push_str(&format!("{name}:{value}\n"));
         }
 
         canonical_headers
@@ -302,10 +301,8 @@ impl AwsSignatureV4 {
 
         let hashed_canonical_request = self.hash_payload(canonical_request.as_bytes());
 
-        let string_to_sign = format!(
-            "{}\n{}\n{}\n{}",
-            algorithm, amz_date, credential_scope, hashed_canonical_request
-        );
+        let string_to_sign =
+            format!("{algorithm}\n{amz_date}\n{credential_scope}\n{hashed_canonical_request}");
 
         string_to_sign
     }

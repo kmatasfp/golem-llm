@@ -153,7 +153,7 @@ pub struct TranscriptionsApi<HC: HttpClient> {
 impl<HC: HttpClient> TranscriptionsApi<HC> {
     pub fn new(openai_api_key: String, http_client: HC) -> Self {
         Self {
-            openai_api_token: format!("Bearer {}", openai_api_key),
+            openai_api_token: format!("Bearer {openai_api_key}"),
             http_client,
         }
     }
@@ -216,8 +216,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
                     Error::Http(
                         request_id.clone(),
                         golem_stt::http::Error::Generic(format!(
-                            "Failed to deserialize response: {}",
-                            e
+                            "Failed to deserialize response: {e}"
                         )),
                     )
                 })?;
@@ -232,8 +231,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
                 Error::Http(
                     request_id.clone(),
                     golem_stt::http::Error::Generic(format!(
-                        "Failed to parse response as UTF-8: {}",
-                        e
+                        "Failed to parse response as UTF-8: {e}"
                     )),
                 )
             })?;

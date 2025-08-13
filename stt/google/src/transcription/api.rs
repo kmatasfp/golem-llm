@@ -223,7 +223,7 @@ impl<GC: CloudStorageService, ST: SpeechToTextService> SpeechToTextApi<GC, ST> {
         let completed_operation = self
             .speech_to_text_service
             .wait_for_batch_recognize_completion(
-                &operation_response.name.split('/').last().unwrap_or(""),
+                operation_response.name.split('/').next_back().unwrap_or(""),
                 operation_name,
                 max_wait_time,
             )
@@ -245,7 +245,7 @@ impl<GC: CloudStorageService, ST: SpeechToTextService>
 
         validate_request_id(&request_id).map_err(|validation_error| SttError::APIBadRequest {
             request_id: request_id.clone(),
-            provider_error: format!("Invalid request ID: {}", validation_error),
+            provider_error: format!("Invalid request ID: {validation_error}"),
         })?;
 
         let audio_size = request.audio.len();
@@ -290,9 +290,7 @@ impl<GC: CloudStorageService, ST: SpeechToTextService>
             if let Err(cleanup_error) = cleanup_result {
                 // Log cleanup error but don't fail the operation
                 log::warn!(
-                    "Failed to cleanup audio file for request {}: {:?}",
-                    request_id,
-                    cleanup_error
+                    "Failed to cleanup audio file for request {request_id}: {cleanup_error:?}",
                 );
             }
 
@@ -314,8 +312,7 @@ impl<GC: CloudStorageService, ST: SpeechToTextService>
                     .ok_or_else(|| golem_stt::error::Error::APIUnknown {
                         request_id: request_id.to_string(),
                         provider_error: format!(
-                        "Transcription completed but no transcript found for expected file path {}",
-                        gcs_uri
+                        "Transcription completed but no transcript found for expected file path {gcs_uri}",
                     ),
                     })?;
 

@@ -165,7 +165,7 @@ impl<S3: S3Service, TC: TranscribeService> TranscribeApi<S3, TC> {
         audio_bytes: Vec<u8>,
     ) -> Result<(), Error> {
         self.s3_client
-            .put_object(&request_id, &self.bucket_name, object_key, audio_bytes)
+            .put_object(request_id, &self.bucket_name, object_key, audio_bytes)
             .await?;
 
         Ok(())
@@ -199,7 +199,7 @@ impl<S3: S3Service, TC: TranscribeService> TranscribeApi<S3, TC> {
 
         if res.vocabulary_state == "PENDING" {
             self.transcribe_client
-                .wait_for_vocabulary_ready(&request_id, Duration::from_secs(300))
+                .wait_for_vocabulary_ready(request_id, Duration::from_secs(300))
                 .await?;
         }
 
@@ -218,7 +218,7 @@ impl<S3: S3Service, TC: TranscribeService> TranscribeApi<S3, TC> {
         let res = self
             .transcribe_client
             .start_transcription_job(
-                &request_id,
+                request_id,
                 &format!("s3://{}/{object_key}", &bucket),
                 audio_config,
                 transcription_config,
@@ -227,7 +227,7 @@ impl<S3: S3Service, TC: TranscribeService> TranscribeApi<S3, TC> {
             .await?;
 
         if res.transcription_job.transcription_job_status == "FAILED" {
-            log::error!("transcription job {} failed", request_id);
+            log::error!("transcription job {request_id} failed");
             return Err(Error::APIBadRequest {
                 request_id: request_id.to_string(),
                 provider_error: format!(
@@ -239,12 +239,12 @@ impl<S3: S3Service, TC: TranscribeService> TranscribeApi<S3, TC> {
             });
         }
 
-        trace!("waiting for {} to complete", request_id.to_string());
+        trace!("waiting for {request_id} to complete");
         let completed_transcription_job = if res.transcription_job.transcription_job_status
             != "COMPLETED"
         {
             self.transcribe_client
-                .wait_for_transcription_job_completion(&request_id, Duration::from_secs(3600 * 6))
+                .wait_for_transcription_job_completion(request_id, Duration::from_secs(3600 * 6))
                 .await?
                 .transcription_job
         } else {
@@ -259,15 +259,12 @@ impl<S3: S3Service, TC: TranscribeService> TranscribeApi<S3, TC> {
         request_id: &str,
         completed_transcription_job: &TranscriptionJob,
     ) -> Result<TranscribeOutput, Error> {
-        trace!(
-            "retrieveing transcription job {} result",
-            request_id.to_string()
-        );
+        trace!("retrieveing transcription job {request_id} result",);
         if let Some(ref transcript) = completed_transcription_job.transcript {
             if let Some(ref transcript_uri) = transcript.transcript_file_uri {
                 let transcribe_output = self
                     .transcribe_client
-                    .download_transcript_json(request_id.as_ref(), &transcript_uri)
+                    .download_transcript_json(request_id.as_ref(), transcript_uri)
                     .await?;
 
                 Ok(transcribe_output)
@@ -317,7 +314,7 @@ impl<S3: S3Service, TC: TranscribeService>
 
         validate_request_id(&request_id).map_err(|validation_error| Error::APIBadRequest {
             request_id: request_id.to_string(),
-            provider_error: format!("Invalid request ID: {}", validation_error),
+            provider_error: format!("Invalid request ID: {validation_error}"),
         })?;
 
         let maybe_existing_job = self
@@ -351,7 +348,7 @@ impl<S3: S3Service, TC: TranscribeService>
                     match self.transcribe_client.delete_vocabulary(&request_id).await {
                         Ok(_) => (),
                         Err(e) => {
-                            log::warn!("Failed to delete vocabulary: {}", e);
+                            log::warn!("Failed to delete vocabulary: {e}");
                         }
                     }
 
@@ -362,7 +359,7 @@ impl<S3: S3Service, TC: TranscribeService>
                     {
                         Ok(_) => (),
                         Err(e) => {
-                            log::warn!("Failed to delete object: {}", e);
+                            log::warn!("Failed to delete object: {e}");
                         }
                     }
 
@@ -412,7 +409,7 @@ impl<S3: S3Service, TC: TranscribeService>
                                 {
                                     Ok(_) => (),
                                     Err(e) => {
-                                        log::error!("Failed to delete object: {}", e);
+                                        log::error!("Failed to delete object: {e}");
                                     }
                                 }
                                 return Err(err);
@@ -439,7 +436,7 @@ impl<S3: S3Service, TC: TranscribeService>
                     match self.transcribe_client.delete_vocabulary(&request_id).await {
                         Ok(_) => (),
                         Err(e) => {
-                            log::error!("Failed to delete vocabulary: {}", e);
+                            log::error!("Failed to delete vocabulary: {e}");
                         }
                     }
                 }
@@ -451,7 +448,7 @@ impl<S3: S3Service, TC: TranscribeService>
                 {
                     Ok(_) => (),
                     Err(e) => {
-                        log::error!("Failed to delete object: {}", e);
+                        log::error!("Failed to delete object: {e}");
                     }
                 }
 

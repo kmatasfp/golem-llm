@@ -1,3 +1,4 @@
+#[allow(unused)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum AudioFormat {
     LinearPcm,

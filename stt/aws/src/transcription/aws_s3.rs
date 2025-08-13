@@ -45,7 +45,7 @@ impl<HC: HttpClient> S3Service for S3Client<HC> {
         content: Vec<u8>,
     ) -> Result<(), golem_stt::error::Error> {
         let timestamp = Utc::now();
-        let uri = format!("https://{}.s3.amazonaws.com/{}", bucket, object_name);
+        let uri = format!("https://{bucket}.s3.amazonaws.com/{object_name}");
 
         let content_length = content.len().to_string();
 
@@ -65,7 +65,7 @@ impl<HC: HttpClient> S3Service for S3Client<HC> {
             .map_err(|err| {
                 (
                     request_id.to_string(),
-                    golem_stt::http::Error::Generic(format!("Failed to sign request: {}", err)),
+                    golem_stt::http::Error::Generic(format!("Failed to sign request: {err}")),
                 )
             })?;
 
@@ -87,20 +87,16 @@ impl<HC: HttpClient> S3Service for S3Client<HC> {
             match status {
                 StatusCode::BAD_REQUEST => Err(golem_stt::error::Error::APIBadRequest {
                     request_id,
-                    provider_error: format!("S3 PutObject bad request: {}", error_body),
+                    provider_error: format!("S3 PutObject bad request: {error_body}",),
                 }),
                 s if s.is_server_error() => Err(golem_stt::error::Error::APIInternalServerError {
                     request_id,
-                    provider_error: format!(
-                        "S3 PutObject server error ({}): {}",
-                        status, error_body
-                    ),
+                    provider_error: format!("S3 PutObject server error ({status}): {error_body}"),
                 }),
                 _ => Err(golem_stt::error::Error::APIUnknown {
                     request_id,
                     provider_error: format!(
-                        "S3 PutObject unexpected error ({}): {}",
-                        status, error_body
+                        "S3 PutObject unexpected error ({status}): {error_body}",
                     ),
                 }),
             }
@@ -114,7 +110,7 @@ impl<HC: HttpClient> S3Service for S3Client<HC> {
         object_name: &str,
     ) -> Result<(), golem_stt::error::Error> {
         let timestamp = Utc::now();
-        let uri = format!("https://{}.s3.amazonaws.com/{}", bucket, object_name);
+        let uri = format!("https://{bucket}.s3.amazonaws.com/{object_name}");
 
         let request = Request::builder()
             .method("DELETE")
@@ -128,7 +124,7 @@ impl<HC: HttpClient> S3Service for S3Client<HC> {
             .map_err(|err| {
                 (
                     request_id.to_string(),
-                    golem_stt::http::Error::Generic(format!("Failed to sign request: {}", err)),
+                    golem_stt::http::Error::Generic(format!("Failed to sign request: {err}")),
                 )
             })?;
 
@@ -150,20 +146,18 @@ impl<HC: HttpClient> S3Service for S3Client<HC> {
             match status {
                 StatusCode::BAD_REQUEST => Err(golem_stt::error::Error::APIBadRequest {
                     request_id,
-                    provider_error: format!("S3 DeleteObject bad request: {}", error_body),
+                    provider_error: format!("S3 DeleteObject bad request: {error_body}"),
                 }),
                 s if s.is_server_error() => Err(golem_stt::error::Error::APIInternalServerError {
                     request_id,
                     provider_error: format!(
-                        "S3 DeleteObject server error ({}): {}",
-                        status, error_body
+                        "S3 DeleteObject server error ({status}): {error_body}"
                     ),
                 }),
                 _ => Err(golem_stt::error::Error::APIUnknown {
                     request_id,
                     provider_error: format!(
-                        "S3 DeleteObject unexpected error ({}): {}",
-                        status, error_body
+                        "S3 DeleteObject unexpected error ({status}): {error_body}"
                     ),
                 }),
             }

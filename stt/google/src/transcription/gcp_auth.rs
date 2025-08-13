@@ -1,5 +1,4 @@
 use async_lock::Mutex;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use base64::{engine::general_purpose, Engine as _};
@@ -11,6 +10,7 @@ use rsa::{pkcs8::DecodePrivateKey, RsaPrivateKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+#[allow(unused)]
 #[derive(Debug, Deserialize, Clone)]
 pub struct ServiceAccountKey {
     #[serde(rename = "type")]
@@ -43,10 +43,14 @@ impl ServiceAccountKey {
     }
 }
 
+#[allow(unused)]
 #[derive(Debug)]
 pub enum Error {
+    #[allow(clippy::enum_variant_names)]
     JsonError(serde_json::Error),
+    #[allow(clippy::enum_variant_names)]
     CryptoError(String),
+    #[allow(clippy::enum_variant_names)]
     HttpError(String),
     TokenExchange(String),
 }
@@ -74,6 +78,7 @@ struct JwtClaim {
     iat: i64,
 }
 
+#[allow(unused)]
 #[derive(Debug, Deserialize)]
 struct TokenResponse {
     access_token: String,
@@ -119,7 +124,7 @@ impl<HC: HttpClient> GcpAuth<HC> {
 
     fn parse_private_key(pem_key: &str) -> Result<RsaPrivateKey, Error> {
         RsaPrivateKey::from_pkcs8_pem(pem_key)
-            .map_err(|e| Error::CryptoError(format!("Failed to parse private key: {}", e)))
+            .map_err(|e| Error::CryptoError(format!("Failed to parse private key: {e}")))
     }
 
     pub async fn get_access_token(&self) -> Result<String, Error> {
@@ -181,13 +186,13 @@ impl<HC: HttpClient> GcpAuth<HC> {
         let header_b64 = general_purpose::URL_SAFE_NO_PAD.encode(header_json.as_bytes());
         let claim_b64 = general_purpose::URL_SAFE_NO_PAD.encode(claim_json.as_bytes());
 
-        let to_be_signed = format!("{}.{}", header_b64, claim_b64);
+        let to_be_signed = format!("{header_b64}.{claim_b64}");
 
         // Sign with RSASSA-PKCS1-v1_5 (JWT RS256 standard)
         let signature = self.calculate_signature(to_be_signed.as_bytes())?;
         let signature_b64 = general_purpose::URL_SAFE_NO_PAD.encode(&signature);
 
-        Ok(format!("{}.{}", to_be_signed, signature_b64))
+        Ok(format!("{to_be_signed}.{signature_b64}"))
     }
 
     fn calculate_signature(&self, data: &[u8]) -> Result<Vec<u8>, Error> {
@@ -201,7 +206,7 @@ impl<HC: HttpClient> GcpAuth<HC> {
         let signature = self
             .private_key
             .sign_with_rng(&mut rng, padding, &hash)
-            .map_err(|e| Error::CryptoError(format!("Failed to sign data: {}", e)))?;
+            .map_err(|e| Error::CryptoError(format!("Failed to sign data: {e}")))?;
 
         Ok(signature)
     }
@@ -218,13 +223,13 @@ impl<HC: HttpClient> GcpAuth<HC> {
             .header("Content-Type", "application/x-www-form-urlencoded")
             .header("Content-Length", form_data.len().to_string())
             .body(form_data.into_bytes())
-            .map_err(|e| Error::HttpError(format!("Failed to build token request: {}", e)))?;
+            .map_err(|e| Error::HttpError(format!("Failed to build token request: {e}")))?;
 
         let response = self
             .http_client
             .execute(request)
             .await
-            .map_err(|e| Error::HttpError(format!("Token request failed: {:?}", e)))?;
+            .map_err(|e| Error::HttpError(format!("Token request failed: {e:?}")))?;
 
         if !response.status().is_success() {
             let error_body = String::from_utf8_lossy(response.body());
@@ -236,7 +241,7 @@ impl<HC: HttpClient> GcpAuth<HC> {
         }
 
         let token_response: TokenResponse =
-            serde_json::from_slice(response.body()).map_err(|e| Error::JsonError(e))?;
+            serde_json::from_slice(response.body()).map_err(Error::JsonError)?;
 
         Ok(token_response.access_token)
     }

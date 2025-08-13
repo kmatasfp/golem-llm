@@ -144,3 +144,9 @@ impl MultipartBuilder {
         (content_type, final_buffer)
     }
 }
+
+impl Default for MultipartBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}

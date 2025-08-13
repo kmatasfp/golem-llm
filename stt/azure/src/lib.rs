@@ -40,13 +40,12 @@ impl SttComponent {
     fn create_or_get_client() -> Result<&'static FastTranscriptionApi<WstdHttpClient>, SttError> {
         API_CLIENT.get_or_try_init(|| {
             let region = std::env::var("AZURE_REGION").map_err(|err| {
-                SttError::EnvVariablesNotSet(format!("Failed to load AZURE_REGION: {}", err))
+                SttError::EnvVariablesNotSet(format!("Failed to load AZURE_REGION: {err}"))
             })?;
 
             let subscription_key = std::env::var("AZURE_SUBSCRIPTION_KEY").map_err(|err| {
                 SttError::EnvVariablesNotSet(format!(
-                    "Failed to load AZURE_SUBSCRIPTION_KEY: {}",
-                    err
+                    "Failed to load AZURE_SUBSCRIPTION_KEY: {err}",
                 ))
             })?;
 
@@ -172,14 +171,10 @@ impl TryFrom<WitTranscribeOptions> for TranscriptionConfig {
             }
         }
 
-        let diarization_config = if let Some(dc) = options.diarization {
-            Some(DiarizationConfig {
-                enabled: dc.enabled,
-                max_speakers: dc.max_speaker_count.unwrap_or(2) as u8,
-            })
-        } else {
-            None
-        };
+        let diarization_config = options.diarization.map(|dc| DiarizationConfig {
+            enabled: dc.enabled,
+            max_speakers: dc.max_speaker_count.unwrap_or(2) as u8,
+        });
 
         let profanity_filter_mode = if options.profanity_filter.unwrap_or(false) {
             Some(ProfanityFilterMode::Masked)
