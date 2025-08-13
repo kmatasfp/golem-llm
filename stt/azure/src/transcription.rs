@@ -205,7 +205,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
                 },
                 diarization: config.diarization.as_ref().map(|d| AzureDiarizationConfig {
                     enabled: d.enabled,
-                    max_speakers: d.max_speakers as u32,
+                    max_speakers: d.max_speakers,
                 }),
                 channels,
                 profanity_filter_mode: config.profanity_filter_mode.map(|pfm| pfm.to_string()),
@@ -369,7 +369,7 @@ struct AzureTranscriptionDefinition {
 #[serde(rename_all = "camelCase")]
 struct AzureDiarizationConfig {
     pub enabled: bool,
-    pub max_speakers: u32,
+    pub max_speakers: u8,
 }
 
 fn get_mime_type(format: &AudioFormat) -> String {

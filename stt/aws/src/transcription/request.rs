@@ -23,6 +23,7 @@ impl core::fmt::Display for AudioFormat {
 #[derive(Debug, Clone)]
 pub struct AudioConfig {
     pub format: AudioFormat,
+    pub sample_rate_hertz: Option<u32>,
     pub channels: Option<u8>,
 }
 

@@ -1113,6 +1113,7 @@ mod tests {
             audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                sample_rate_hertz: None,
                 channels: Some(1),
             },
             transcription_config: None,
@@ -1137,6 +1138,7 @@ mod tests {
             audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                sample_rate_hertz: None,
                 channels: Some(1),
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1168,6 +1170,7 @@ mod tests {
             audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                sample_rate_hertz: None,
                 channels: Some(1),
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1242,6 +1245,7 @@ mod tests {
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                sample_rate_hertz: None,
                 channels: Some(1),
             },
             transcription_config: None,
@@ -1318,6 +1322,7 @@ mod tests {
             audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::mp3,
+                sample_rate_hertz: None,
                 channels: Some(1),
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1394,6 +1399,7 @@ mod tests {
             audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::flac,
+                sample_rate_hertz: None,
                 channels: Some(2),
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1482,6 +1488,7 @@ mod tests {
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::ogg,
+                sample_rate_hertz: None,
                 channels: Some(1),
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1568,6 +1575,7 @@ mod tests {
             audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                sample_rate_hertz: None,
                 channels: Some(1),
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1610,6 +1618,7 @@ mod tests {
             audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                sample_rate_hertz: None,
                 channels: Some(1),
             },
             transcription_config: None,
@@ -1644,6 +1653,7 @@ mod tests {
             audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                sample_rate_hertz: None,
                 channels: Some(1),
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1698,6 +1708,7 @@ mod tests {
             audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                sample_rate_hertz: None,
                 channels: Some(1),
             },
             transcription_config: None,
@@ -1756,6 +1767,7 @@ mod tests {
             audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
                 format: AudioFormat::wav,
+                sample_rate_hertz: None,
                 channels: Some(1),
             },
             transcription_config: None,

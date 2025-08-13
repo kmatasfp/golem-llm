@@ -52,8 +52,8 @@ pub struct TranscriptionConfig {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DiarizationConfig {
     pub enabled: bool,
-    pub min_speaker_count: Option<i32>,
-    pub max_speaker_count: Option<i32>,
+    pub min_speaker_count: Option<u32>,
+    pub max_speaker_count: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

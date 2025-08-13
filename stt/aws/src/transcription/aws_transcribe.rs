@@ -92,7 +92,7 @@ pub struct StartTranscriptionJobRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub media_sample_rate_hertz: Option<i32>,
+    pub media_sample_rate_hertz: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_settings: Option<ModelSettings>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -174,7 +174,7 @@ pub struct Settings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_alternatives: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_speaker_labels: Option<i32>,
+    pub max_speaker_labels: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub show_alternatives: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -676,7 +676,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
             language_code: None,
             language_id_settings: None,
             language_options: None,
-            media_sample_rate_hertz: None,
+            media_sample_rate_hertz: audio_config.sample_rate_hertz,
             model_settings: None,
             output_bucket_name: None,
             output_encryption_kms_key_id: None,
@@ -718,7 +718,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
                 if diarization.enabled {
                     let settings_ref = settings.get_or_insert_with(Settings::default);
                     settings_ref.show_speaker_labels = Some(true);
-                    settings_ref.max_speaker_labels = Some(diarization.max_speakers as i32);
+                    settings_ref.max_speaker_labels = Some(diarization.max_speakers);
                 }
             }
         } else {
@@ -1190,6 +1190,7 @@ mod tests {
         // Test basic audio config with no transcription config (should use identify_language)
         let audio_config = AudioConfig {
             format: AudioFormat::wav,
+            sample_rate_hertz: Some(16000),
             channels: Some(1),
         };
 
@@ -1226,7 +1227,7 @@ mod tests {
                 redacted_media_file_uri: None,
             },
             media_format: Some("wav".to_string()),
-            media_sample_rate_hertz: None,
+            media_sample_rate_hertz: Some(16000),
             model_settings: None, // Should be None when using identify_language
             output_bucket_name: None,
             output_encryption_kms_key_id: None,
@@ -1278,6 +1279,7 @@ mod tests {
 
         let audio_config = AudioConfig {
             format: AudioFormat::mp3,
+            sample_rate_hertz: Some(48000),
             channels: Some(1),
         };
 
@@ -1321,7 +1323,7 @@ mod tests {
                 redacted_media_file_uri: None,
             },
             media_format: Some("mp3".to_string()),
-            media_sample_rate_hertz: None,
+            media_sample_rate_hertz: Some(48000),
             model_settings: None, // No model specified
             output_bucket_name: None,
             output_encryption_kms_key_id: None,
@@ -1373,6 +1375,7 @@ mod tests {
 
         let audio_config = AudioConfig {
             format: AudioFormat::flac,
+            sample_rate_hertz: None,
             channels: Some(1),
         };
 
@@ -1479,6 +1482,7 @@ mod tests {
 
         let audio_config = AudioConfig {
             format: AudioFormat::ogg,
+            sample_rate_hertz: None,
             channels: Some(1), // Single channel
         };
 
@@ -1586,6 +1590,7 @@ mod tests {
 
         let audio_config = AudioConfig {
             format: AudioFormat::wav,
+            sample_rate_hertz: None,
             channels: Some(2), // Multi-channel audio
         };
 
@@ -1696,6 +1701,7 @@ mod tests {
 
         let audio_config = AudioConfig {
             format: AudioFormat::mp3,
+            sample_rate_hertz: None,
             channels: Some(1),
         };
 

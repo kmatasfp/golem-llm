@@ -274,8 +274,8 @@ impl TryFrom<WitTranscribeOptions> for TranscriptionConfig {
 
         let diarization_config = options.diarization.map(|dc| DiarizationConfig {
             enabled: dc.enabled,
-            min_speaker_count: dc.min_speaker_count.map(|count| count as i32).or(Some(1)), // set default value to 1
-            max_speaker_count: dc.max_speaker_count.map(|count| count as i32),
+            min_speaker_count: dc.min_speaker_count.or(Some(1)), // set default value to 1
+            max_speaker_count: dc.max_speaker_count,
         });
 
         let enable_multi_channel = options.enable_multi_channel.unwrap_or(false);

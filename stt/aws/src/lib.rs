@@ -251,6 +251,7 @@ impl TryFrom<WitTranscriptionRequest> for TranscriptionRequest {
             audio,
             audio_config: AudioConfig {
                 format: request.config.format.try_into()?,
+                sample_rate_hertz: request.config.sample_rate,
                 channels: request.config.channels,
             },
             transcription_config,
