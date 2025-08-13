@@ -184,10 +184,10 @@ impl TryFrom<WitAudioFormat> for AudioFormat {
 
     fn try_from(wit_format: WitAudioFormat) -> Result<Self, Self::Error> {
         match wit_format {
-            WitAudioFormat::Wav => Ok(AudioFormat::wav),
-            WitAudioFormat::Mp3 => Ok(AudioFormat::mp3),
-            WitAudioFormat::Flac => Ok(AudioFormat::flac),
-            WitAudioFormat::Ogg => Ok(AudioFormat::ogg),
+            WitAudioFormat::Wav => Ok(AudioFormat::Wav),
+            WitAudioFormat::Mp3 => Ok(AudioFormat::Mp3),
+            WitAudioFormat::Flac => Ok(AudioFormat::Flac),
+            WitAudioFormat::Ogg => Ok(AudioFormat::Ogg),
             format => Err(WitSttError::UnsupportedFormat(format!(
                 "{format:?}is not supported"
             ))),

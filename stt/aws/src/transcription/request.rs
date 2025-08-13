@@ -1,20 +1,19 @@
-#[allow(non_camel_case_types)]
 #[allow(unused)]
 #[derive(Debug, Clone)]
 pub enum AudioFormat {
-    wav,
-    mp3,
-    flac,
-    ogg,
+    Wav,
+    Mp3,
+    Flac,
+    Ogg,
 }
 
 impl core::fmt::Display for AudioFormat {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let string_representation = match self {
-            AudioFormat::wav => "wav",
-            AudioFormat::mp3 => "mp3",
-            AudioFormat::flac => "flac",
-            AudioFormat::ogg => "ogg",
+            AudioFormat::Wav => "wav",
+            AudioFormat::Mp3 => "mp3",
+            AudioFormat::Flac => "flac",
+            AudioFormat::Ogg => "ogg",
         };
         write!(fmt, "{string_representation}")
     }

@@ -1112,7 +1112,7 @@ mod tests {
             request_id: "invalid request id".to_string(), // spaces are invalid
             audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: Some(1),
             },
             transcription_config: None,
@@ -1136,7 +1136,7 @@ mod tests {
             request_id: "test-123".to_string(),
             audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: Some(1),
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1167,7 +1167,7 @@ mod tests {
             request_id: "test-123".to_string(),
             audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: Some(1),
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1241,7 +1241,7 @@ mod tests {
             request_id: "test-123".to_string(),
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: Some(1),
             },
             transcription_config: None,
@@ -1317,7 +1317,7 @@ mod tests {
             request_id: "test-123".to_string(),
             audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::mp3,
+                format: AudioFormat::Mp3,
                 channels: Some(1),
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1393,7 +1393,7 @@ mod tests {
             request_id: "test-123".to_string(),
             audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::flac,
+                format: AudioFormat::Flac,
                 channels: Some(2),
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1481,7 +1481,7 @@ mod tests {
             request_id: "test-123".to_string(),
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::ogg,
+                format: AudioFormat::Ogg,
                 channels: Some(1),
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1567,7 +1567,7 @@ mod tests {
             request_id: "test-123".to_string(),
             audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: Some(1),
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1609,7 +1609,7 @@ mod tests {
             request_id: "test-123".to_string(),
             audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: Some(1),
             },
             transcription_config: None,
@@ -1643,7 +1643,7 @@ mod tests {
             request_id: "test-123".to_string(),
             audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: Some(1),
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1697,7 +1697,7 @@ mod tests {
             request_id: "test-123".to_string(),
             audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: Some(1),
             },
             transcription_config: None,
@@ -1755,7 +1755,7 @@ mod tests {
             request_id: "test-123".to_string(),
             audio: b"test audio".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: Some(1),
             },
             transcription_config: None,

@@ -47,33 +47,30 @@ pub fn get_supported_languages() -> &'static [Language] {
     &AZURE_SUPPORTED_LANGUAGES
 }
 
-#[allow(non_camel_case_types)]
 #[allow(unused)]
 #[derive(Debug, Clone)]
 pub enum AudioFormat {
-    wav,
-    mp3,
-    flac,
-    ogg,
-    opus,
-    wma,
-    aac,
-    webm,
-    speex,
+    Wav,
+    Mp3,
+    Flac,
+    Ogg,
+    Wma,
+    Aac,
+    Webm,
+    Speex,
 }
 
 impl std::fmt::Display for AudioFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AudioFormat::wav => write!(f, "wav"),
-            AudioFormat::mp3 => write!(f, "mp3"),
-            AudioFormat::flac => write!(f, "flac"),
-            AudioFormat::ogg => write!(f, "ogg"),
-            AudioFormat::opus => write!(f, "opus"),
-            AudioFormat::wma => write!(f, "wma"),
-            AudioFormat::aac => write!(f, "aac"),
-            AudioFormat::webm => write!(f, "webm"),
-            AudioFormat::speex => write!(f, "speex"),
+            AudioFormat::Wav => write!(f, "wav"),
+            AudioFormat::Mp3 => write!(f, "mp3"),
+            AudioFormat::Flac => write!(f, "flac"),
+            AudioFormat::Ogg => write!(f, "ogg"),
+            AudioFormat::Wma => write!(f, "wma"),
+            AudioFormat::Aac => write!(f, "aac"),
+            AudioFormat::Webm => write!(f, "webm"),
+            AudioFormat::Speex => write!(f, "speex"),
         }
     }
 }
@@ -374,15 +371,14 @@ struct AzureDiarizationConfig {
 
 fn get_mime_type(format: &AudioFormat) -> String {
     match format {
-        AudioFormat::wav => "audio/wav".to_string(),
-        AudioFormat::mp3 => "audio/mpeg".to_string(),
-        AudioFormat::flac => "audio/flac".to_string(),
-        AudioFormat::ogg => "audio/ogg".to_string(),
-        AudioFormat::opus => "audio/opus".to_string(),
-        AudioFormat::wma => "audio/x-ms-wma".to_string(),
-        AudioFormat::aac => "audio/aac".to_string(),
-        AudioFormat::webm => "audio/webm".to_string(),
-        AudioFormat::speex => "audio/speex".to_string(),
+        AudioFormat::Wav => "audio/wav".to_string(),
+        AudioFormat::Mp3 => "audio/mpeg".to_string(),
+        AudioFormat::Flac => "audio/flac".to_string(),
+        AudioFormat::Ogg => "audio/ogg".to_string(),
+        AudioFormat::Wma => "audio/x-ms-wma".to_string(),
+        AudioFormat::Aac => "audio/aac".to_string(),
+        AudioFormat::Webm => "audio/webm".to_string(),
+        AudioFormat::Speex => "audio/speex".to_string(),
     }
 }
 
@@ -501,7 +497,7 @@ mod tests {
             request_id: "test-id".to_string(),
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: Some(1),
             },
             transcription_config: Some(TranscriptionConfig {
@@ -572,7 +568,7 @@ mod tests {
             request_id: "test-id".to_string(),
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: None,
             },
             transcription_config: Some(TranscriptionConfig {
@@ -723,7 +719,7 @@ mod tests {
             request_id: "test-id".to_string(),
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: Some(2),
             },
             transcription_config: Some(TranscriptionConfig {
@@ -822,7 +818,7 @@ mod tests {
             request_id: "test-id".to_string(),
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: None,
             },
             transcription_config: Some(TranscriptionConfig {
@@ -922,7 +918,7 @@ mod tests {
             request_id: "test-id".to_string(),
             audio: audio_bytes.clone(),
             audio_config: AudioConfig {
-                format: AudioFormat::flac,
+                format: AudioFormat::Flac,
                 channels: None,
             },
             transcription_config: None,
@@ -1219,7 +1215,7 @@ mod tests {
             request_id: "test-id".to_string(),
             audio: audio_bytes.clone(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: None,
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1383,7 +1379,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: None,
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1438,7 +1434,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: None,
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1493,7 +1489,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: None,
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1548,7 +1544,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: None,
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1603,7 +1599,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: None,
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1658,7 +1654,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: None,
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1713,7 +1709,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: None,
             },
             transcription_config: Some(TranscriptionConfig {
@@ -1759,7 +1755,7 @@ mod tests {
             request_id: "some-transcription-id".to_string(),
             audio: b"test audio data".to_vec(),
             audio_config: AudioConfig {
-                format: AudioFormat::wav,
+                format: AudioFormat::Wav,
                 channels: None,
             },
             transcription_config: Some(TranscriptionConfig {

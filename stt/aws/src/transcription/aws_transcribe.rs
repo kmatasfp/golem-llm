@@ -1189,7 +1189,7 @@ mod tests {
 
         // Test basic audio config with no transcription config (should use identify_language)
         let audio_config = AudioConfig {
-            format: AudioFormat::wav,
+            format: AudioFormat::Wav,
             channels: Some(1),
         };
 
@@ -1277,7 +1277,7 @@ mod tests {
         );
 
         let audio_config = AudioConfig {
-            format: AudioFormat::mp3,
+            format: AudioFormat::Mp3,
             channels: Some(1),
         };
 
@@ -1372,7 +1372,7 @@ mod tests {
         );
 
         let audio_config = AudioConfig {
-            format: AudioFormat::flac,
+            format: AudioFormat::Flac,
             channels: Some(1),
         };
 
@@ -1478,7 +1478,7 @@ mod tests {
         );
 
         let audio_config = AudioConfig {
-            format: AudioFormat::ogg,
+            format: AudioFormat::Ogg,
             channels: Some(1), // Single channel
         };
 
@@ -1585,7 +1585,7 @@ mod tests {
         );
 
         let audio_config = AudioConfig {
-            format: AudioFormat::wav,
+            format: AudioFormat::Wav,
             channels: Some(2), // Multi-channel audio
         };
 
@@ -1695,7 +1695,7 @@ mod tests {
         );
 
         let audio_config = AudioConfig {
-            format: AudioFormat::mp3,
+            format: AudioFormat::Mp3,
             channels: Some(1),
         };
 
