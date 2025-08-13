@@ -465,7 +465,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: audio_bytes.into(),
+            audio: audio_bytes,
             audio_config: AudioConfig {
                 format: AudioFormat::Mp3,
             },
@@ -534,7 +534,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: audio_bytes.clone().into(),
+            audio: audio_bytes.clone(),
             audio_config: AudioConfig {
                 format: AudioFormat::Mp3,
             },
@@ -679,7 +679,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: audio_bytes.into(),
+            audio: audio_bytes,
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
             },
@@ -748,7 +748,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: audio_bytes.into(),
+            audio: audio_bytes,
             audio_config: AudioConfig {
                 format: AudioFormat::Mp3,
             },
@@ -798,7 +798,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: audio_bytes.into(),
+            audio: audio_bytes,
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
             },
@@ -847,7 +847,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: audio_bytes.into(),
+            audio: audio_bytes,
             audio_config: AudioConfig {
                 format: AudioFormat::Flac,
             },
@@ -896,7 +896,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: audio_bytes.into(),
+            audio: audio_bytes,
             audio_config: AudioConfig {
                 format: AudioFormat::Ogg,
             },
@@ -945,7 +945,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: audio_bytes.into(),
+            audio: audio_bytes,
             audio_config: AudioConfig {
                 format: AudioFormat::Mp3,
             },
@@ -994,7 +994,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: audio_bytes.into(),
+            audio: audio_bytes,
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
             },
@@ -1043,7 +1043,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: audio_bytes.into(),
+            audio: audio_bytes,
             audio_config: AudioConfig {
                 format: AudioFormat::Mp3,
             },
@@ -1092,7 +1092,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: audio_bytes.into(),
+            audio: audio_bytes,
             audio_config: AudioConfig {
                 format: AudioFormat::Flac,
             },
