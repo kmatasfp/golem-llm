@@ -135,8 +135,8 @@ struct ExplicitDecodingConfig {
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct SpeakerDiarizationConfig {
-    min_speaker_count: i32,
-    max_speaker_count: i32,
+    min_speaker_count: u32,
+    max_speaker_count: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
