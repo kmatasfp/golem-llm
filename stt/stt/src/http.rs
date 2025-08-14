@@ -1,8 +1,23 @@
+use std::time::Duration;
+
+use bytes::Bytes;
 use derive_more::From;
 use http::{Request, Response};
 use wstd::{
-    http::{body::BoundedBody, Client, IntoBody},
-    time::Duration,
+    http::{
+        body::BoundedBody,
+        error::WasiHttpErrorCode::{
+            ConnectionLimitReached, ConnectionReadTimeout, ConnectionRefused, ConnectionTerminated,
+            ConnectionTimeout, ConnectionWriteTimeout, TlsCertificateError,
+        },
+        Body, Client, IntoBody,
+    },
+    io::AsyncRead,
+};
+
+use crate::{
+    retry::{Retry, RetryConfig},
+    runtime::WasiAyncRuntime,
 };
 
 #[allow(unused)]
@@ -12,8 +27,6 @@ pub enum Error {
     HttpError(http::Error),
     #[from]
     WstdHttpError(wstd::http::Error),
-    #[from]
-    Io(std::io::Error),
     Generic(String),
 }
 
@@ -28,16 +41,26 @@ impl std::error::Error for Error {}
 #[allow(async_fn_in_trait)]
 pub trait HttpClient {
     async fn execute(&self, request: Request<Vec<u8>>) -> Result<Response<Vec<u8>>, Error>;
+    async fn execute_zero_copy(&self, request: Request<Bytes>) -> Result<Response<Vec<u8>>, Error> {
+        todo!()
+    }
 }
 
 pub struct WstdHttpClient {
     client: Client,
+    retry: Retry<WasiAyncRuntime>,
 }
 
 impl WstdHttpClient {
     pub fn new() -> Self {
+        let retry_config = RetryConfig::new()
+            .with_max_attempts(3)
+            .with_min_delay(Duration::from_millis(500))
+            .with_max_delay(Duration::from_secs(10));
+
         Self {
             client: Client::new(),
+            retry: Retry::new(retry_config, WasiAyncRuntime::new()),
         }
     }
 
@@ -46,7 +69,48 @@ impl WstdHttpClient {
         client.set_connect_timeout(connection_timeout);
         client.set_first_byte_timeout(first_byte_timeout);
 
-        Self { client }
+        let retry_config = RetryConfig::new()
+            .with_max_attempts(10)
+            .with_min_delay(Duration::from_millis(500))
+            .with_max_delay(Duration::from_secs(10));
+
+        Self {
+            client,
+            retry: Retry::new(retry_config, WasiAyncRuntime::new()),
+        }
+    }
+
+    fn should_retry_wstd_result(
+        result: &Result<wstd::http::Response<wstd::http::body::IncomingBody>, wstd::http::Error>,
+    ) -> bool {
+        match result {
+            Err(wstd_error) => Self::is_retryable_wstd_error(wstd_error),
+            Ok(response) => Self::is_retryable_status_code(response.status()),
+        }
+    }
+
+    fn is_retryable_wstd_error(error: &wstd::http::Error) -> bool {
+        use wstd::http::body::ErrorVariant;
+
+        matches!(
+            error.variant(),
+            ErrorVariant::WasiHttp(ConnectionLimitReached)
+                | ErrorVariant::WasiHttp(ConnectionReadTimeout)
+                | ErrorVariant::WasiHttp(ConnectionWriteTimeout)
+                | ErrorVariant::WasiHttp(ConnectionTimeout)
+                | ErrorVariant::WasiHttp(ConnectionTerminated)
+                | ErrorVariant::WasiHttp(ConnectionRefused)
+                | ErrorVariant::WasiHttp(TlsCertificateError)
+                | ErrorVariant::BodyIo(_)
+        )
+    }
+
+    fn is_retryable_status_code(status: http::StatusCode) -> bool {
+        match status.as_u16() {
+            429 => true,       // Too Many Requests
+            500..=599 => true, // Server errors
+            _ => false,
+        }
     }
 }
 
@@ -56,9 +120,9 @@ impl Default for WstdHttpClient {
     }
 }
 
-struct WasiRequest(wstd::http::Request<BoundedBody<Vec<u8>>>);
+struct WasiRequest<T: Body>(wstd::http::Request<T>);
 
-impl From<Request<Vec<u8>>> for WasiRequest {
+impl From<Request<Vec<u8>>> for WasiRequest<BoundedBody<Vec<u8>>> {
     fn from(request: Request<Vec<u8>>) -> Self {
         let (parts, body) = request.into_parts();
 
@@ -67,6 +131,60 @@ impl From<Request<Vec<u8>>> for WasiRequest {
             .method(parts.method)
             .version(parts.version)
             .body(body.into_body())
+            .expect("Known valid");
+
+        *req.headers_mut() = parts.headers;
+
+        WasiRequest(req)
+    }
+}
+
+#[derive(Debug)]
+struct BytesCursor {
+    cursor: wstd::io::Cursor<Bytes>,
+}
+
+impl BytesCursor {
+    fn new(bytes: Bytes) -> Self {
+        Self {
+            cursor: wstd::io::Cursor::new(bytes),
+        }
+    }
+}
+
+impl AsyncRead for BytesCursor {
+    async fn read(&mut self, buf: &mut [u8]) -> wstd::io::Result<usize> {
+        self.cursor.read(buf).await
+    }
+
+    async fn read_to_end(&mut self, buf: &mut Vec<u8>) -> wstd::io::Result<usize> {
+        self.cursor.read_to_end(buf).await
+    }
+}
+
+impl Body for BytesCursor {
+    fn len(&self) -> Option<usize> {
+        Some(self.cursor.get_ref().len())
+    }
+}
+
+impl Clone for BytesCursor {
+    fn clone(&self) -> Self {
+        Self::new(self.cursor.get_ref().clone())
+    }
+}
+
+impl From<Request<Bytes>> for WasiRequest<BytesCursor> {
+    fn from(request: Request<Bytes>) -> Self {
+        let (parts, body) = request.into_parts();
+
+        let cursor_body = BytesCursor::new(body);
+
+        let mut req = wstd::http::Request::builder()
+            .uri(parts.uri)
+            .method(parts.method)
+            .version(parts.version)
+            .body(cursor_body)
             .expect("Known valid");
 
         *req.headers_mut() = parts.headers;
@@ -90,6 +208,28 @@ impl HttpClient for WstdHttpClient {
 
         let mut response = Response::builder().status(status).body(body)?;
 
+        *response.headers_mut() = headers;
+
+        Ok(response)
+    }
+
+    async fn execute_zero_copy(&self, request: Request<Bytes>) -> Result<Response<Vec<u8>>, Error> {
+        let wasi_request = WasiRequest::from(request).0;
+
+        let wasi_response = self
+            .retry
+            .retry_when(Self::should_retry_wstd_result, || async {
+                self.client.send(wasi_request.clone()).await
+            })
+            .await?;
+
+        let mut wasi_response = wasi_response;
+
+        let status = wasi_response.status();
+        let headers = wasi_response.headers().clone();
+        let body = wasi_response.body_mut().bytes().await?;
+
+        let mut response = Response::builder().status(status).body(body)?;
         *response.headers_mut() = headers;
 
         Ok(response)

@@ -1,6 +1,7 @@
 pub mod error;
 pub mod http;
 pub mod languages;
+mod retry;
 pub mod runtime;
 pub mod transcription;
 

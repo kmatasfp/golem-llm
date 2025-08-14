@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use futures_concurrency::future::Join;
 use golem_stt::http::WstdHttpClient;
 use golem_stt::transcription::SttProviderClient;
@@ -27,7 +29,6 @@ use transcription::{
     TranscriptionsApi,
 };
 use wstd::runtime::block_on;
-use wstd::time::Duration;
 
 mod transcription;
 

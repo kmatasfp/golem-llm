@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use bytes::Bytes;
 use golem_stt::{http::HttpClient, languages::Language, transcription::SttProviderClient};
 use http::{header::CONTENT_TYPE, Method, Request, StatusCode};
 use log::trace;
@@ -264,17 +265,19 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
             url.query_pairs_mut().append_pair(key, &value);
         }
 
+        let audio_bytes = Bytes::from(request.audio);
+
         let req = Request::builder()
             .method(Method::POST)
             .uri(url.as_str())
             .header(CONTENT_TYPE, mime_type)
             .header("Authorization", &self.deepgram_api_token)
-            .body(request.audio)
+            .body(audio_bytes)
             .map_err(|e| Error::Http(request_id.clone(), golem_stt::http::Error::HttpError(e)))?;
 
         let response = self
             .http_client
-            .execute(req)
+            .execute_zero_copy(req)
             .await
             .map_err(|e| Error::Http(request_id.clone(), e))?;
 

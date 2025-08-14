@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use once_cell::sync::OnceCell;
 
 use golem_stt::error::Error as SttError;
@@ -31,7 +33,6 @@ use golem_stt::golem::stt::types::{
 use futures_concurrency::future::Join;
 use itertools::Itertools;
 use wstd::runtime::block_on;
-use wstd::time::Duration;
 
 mod transcription;
 

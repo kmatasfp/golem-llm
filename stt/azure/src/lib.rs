@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use futures_concurrency::future::Join;
 use golem_stt::transcription::SttProviderClient;
 use itertools::Itertools;
@@ -29,7 +31,6 @@ use transcription::{
     AudioConfig, AudioFormat, DiarizationConfig, FastTranscriptionApi, ProfanityFilterMode,
     TranscriptionConfig, TranscriptionRequest, TranscriptionResponse,
 };
-use wstd::time::Duration;
 
 static API_CLIENT: OnceCell<FastTranscriptionApi<WstdHttpClient>> = OnceCell::new();
 
