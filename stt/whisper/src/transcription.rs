@@ -182,7 +182,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
 
         form.add_field("model", "whisper-1");
         form.add_field("response_format", "verbose_json");
-        form.add_field("", "timestamp_granularities[]=word");
+        form.add_field("timestamp_granularities[]", "word");
 
         if let Some(transcription_config) = request.transcription_config {
             if let Some(language) = transcription_config.language {
@@ -195,6 +195,8 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
         }
 
         let (content_type, body) = form.finish();
+
+        trace!("sending multipart form: {}", String::from_utf8_lossy(&body));
 
         let req = Request::builder()
             .method(Method::POST)
@@ -212,6 +214,8 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
 
         // match what official OpenAI SDK does https://github.com/openai/openai-python/blob/0673da62f2f2476a3e5791122e75ec0cbfd03442/src/openai/_client.py#L343
         if response.status().is_success() {
+            trace!("response: {}", String::from_utf8_lossy(response.body()));
+
             let whisper_transcription: WhisperTranscription =
                 serde_json::from_slice(response.body()).map_err(|e| {
                     Error::Http(
