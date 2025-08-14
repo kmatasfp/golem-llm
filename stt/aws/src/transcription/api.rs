@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use bytes::Bytes;
 use golem_stt::{error::Error, languages::Language, transcription::SttProviderClient};
 
 use log::trace;
@@ -162,7 +163,7 @@ impl<S3: S3Service, TC: TranscribeService> TranscribeApi<S3, TC> {
         &self,
         request_id: &str,
         object_key: &str,
-        audio_bytes: Vec<u8>,
+        audio_bytes: Bytes,
     ) -> Result<(), Error> {
         self.s3_client
             .put_object(request_id, &self.bucket_name, object_key, audio_bytes)
@@ -788,7 +789,7 @@ mod tests {
             request_id: &str,
             bucket: &str,
             object_name: &str,
-            content: Vec<u8>,
+            content: Bytes,
         ) -> Result<(), Error> {
             self.captured_put_operations
                 .borrow_mut()
@@ -1111,7 +1112,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "invalid request id".to_string(), // spaces are invalid
-            audio: b"test audio".to_vec(),
+            audio: "test audio".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: Some(1),
@@ -1135,7 +1136,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: b"test audio".to_vec(),
+            audio: "test audio".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: Some(1),
@@ -1166,7 +1167,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: b"test audio".to_vec(),
+            audio: "test audio".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: Some(1),
@@ -1240,7 +1241,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: b"test audio data".to_vec(),
+            audio: "test audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: Some(1),
@@ -1316,7 +1317,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: b"test audio".to_vec(),
+            audio: "test audio".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Mp3,
                 channels: Some(1),
@@ -1392,7 +1393,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: b"test audio".to_vec(),
+            audio: "test audio".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Flac,
                 channels: Some(2),
@@ -1480,7 +1481,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: b"test audio data".to_vec(),
+            audio: "test audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Ogg,
                 channels: Some(1),
@@ -1566,7 +1567,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: b"test audio".to_vec(),
+            audio: "test audio".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: Some(1),
@@ -1608,7 +1609,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: b"test audio".to_vec(),
+            audio: "test audio".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: Some(1),
@@ -1642,7 +1643,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: b"test audio".to_vec(),
+            audio: "test audio".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: Some(1),
@@ -1696,7 +1697,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: b"test audio".to_vec(),
+            audio: "test audio".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: Some(1),
@@ -1754,7 +1755,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: b"test audio".to_vec(),
+            audio: "test audio".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: Some(1),

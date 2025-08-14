@@ -5,6 +5,7 @@ use std::io::Read;
 mod bindings;
 
 use crate::bindings::exports::test::stt_exports::test_stt_api::*;
+use crate::bindings::golem::stt::languages::list_languages;
 use crate::bindings::golem::stt::transcription::{
     transcribe, transcribe_many, TranscriptionRequest as WitTranscriptionRequest,
 };
@@ -74,12 +75,16 @@ impl Guest for Component {
                 let successes: Vec<_> = res.successes.iter().map(|tr| format!("{tr:?}")).collect();
                 let failures: Vec<_> = res.failures.iter().map(|tr| format!("{tr:?}")).collect();
 
-                Ok(format!(
-                    "successes = {:?}, failures {:?}",
-                    successes, failures
-                ))
+                Ok(format!("successes = {successes:?}, failures {failures:?}"))
             }
             Err(err) => Err(format!("multi transcription error: {err:?}")),
+        }
+    }
+
+    fn test_list_supported_languages() -> Result<String, String> {
+        match list_languages() {
+            Ok(languages) => Ok(format!("{languages:?}")),
+            Err(err) => Err(format!("error: {err:?}")),
         }
     }
 }

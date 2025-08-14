@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use bytes::Bytes;
 use golem_stt::{error::Error as SttError, languages::Language, transcription::SttProviderClient};
 
 use super::{
@@ -195,7 +196,7 @@ impl<GC: CloudStorageService, ST: SpeechToTextService> SpeechToTextApi<GC, ST> {
         &self,
         request_id: &str,
         object_name: &str,
-        audio_data: Vec<u8>,
+        audio_data: Bytes,
     ) -> Result<(), SttError> {
         self.cloud_storage_service
             .put_object(request_id, &self.bucket_name, object_name, audio_data)
@@ -670,7 +671,7 @@ mod tests {
             request_id: &str,
             bucket: &str,
             object_name: &str,
-            content: Vec<u8>,
+            content: Bytes,
         ) -> Result<(), SttError> {
             self.captured_put_operations
                 .borrow_mut()
@@ -966,7 +967,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "invalid request id".to_string(), // spaces are invalid
-            audio: b"test audio".to_vec(),
+            audio: "test audio".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 sample_rate_hertz: Some(16000),
@@ -1014,7 +1015,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-123".to_string(),
-            audio: b"test audio data".to_vec(),
+            audio: "test audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Mp3,
                 sample_rate_hertz: Some(16000),
@@ -1077,7 +1078,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-456".to_string(),
-            audio: b"test audio data".to_vec(),
+            audio: "test audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 sample_rate_hertz: Some(44100),
@@ -1115,7 +1116,7 @@ mod tests {
             .expect_recognize_response(Ok(expected_recognize_response.clone()));
 
         // Create a small audio file (< 10MB) with "short" model
-        let small_audio = vec![0u8; 1024]; // 1KB audio file
+        let small_audio = Bytes::from(vec![0u8; 1024]); // 1KB audio file
         let request = TranscriptionRequest {
             request_id: "sync-test".to_string(),
             audio: small_audio,
@@ -1211,7 +1212,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-789".to_string(),
-            audio: b"audio content".to_vec(),
+            audio: "audio content".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Flac,
                 sample_rate_hertz: None,
@@ -1275,7 +1276,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "cleanup-test".to_string(),
-            audio: b"test".to_vec(),
+            audio: "test audio".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Mp4,
                 sample_rate_hertz: Some(16000),
@@ -1311,7 +1312,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "upload-fail".to_string(),
-            audio: b"test".to_vec(),
+            audio: "test audio".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 sample_rate_hertz: Some(16000),
@@ -1348,7 +1349,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "batch-fail".to_string(),
-            audio: b"test".to_vec(),
+            audio: "test audio".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 sample_rate_hertz: Some(16000),
@@ -1403,7 +1404,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "timeout-test".to_string(),
-            audio: b"test".to_vec(),
+            audio: "test audio".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 sample_rate_hertz: Some(16000),

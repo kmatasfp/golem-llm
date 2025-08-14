@@ -13,7 +13,7 @@ pub trait CloudStorageService {
         request_id: &str,
         bucket: &str,
         object_name: &str,
-        content: Vec<u8>,
+        content: Bytes,
     ) -> Result<(), SttError>;
 
     async fn delete_object(
@@ -41,7 +41,7 @@ impl<HC: HttpClient> CloudStorageService for CloudStorageClient<HC> {
         request_id: &str,
         bucket: &str,
         object_name: &str,
-        content: Vec<u8>,
+        content: Bytes,
     ) -> Result<(), golem_stt::error::Error> {
         let access_token = self.auth.get_access_token().await.map_err(|e| {
             SttError::Http(
@@ -58,15 +58,13 @@ impl<HC: HttpClient> CloudStorageService for CloudStorageClient<HC> {
 
         let content_length = content.len().to_string();
 
-        let content_bytes = Bytes::from(content);
-
         let request = Request::builder()
             .method("POST")
             .uri(&uri)
             .header("Content-Type", "application/octet-stream")
             .header("Content-Length", &content_length)
             .header("Authorization", format!("Bearer {access_token}"))
-            .body(content_bytes)
+            .body(content)
             .map_err(|e| {
                 SttError::Http(request_id.to_string(), golem_stt::http::Error::HttpError(e))
             })?;
@@ -320,7 +318,7 @@ mod tests {
 
         let bucket = "test-bucket";
         let object_name = "test-object.txt";
-        let content = b"Hello, World!".to_vec();
+        let content = Bytes::from("Hello, World!");
 
         cloud_storage_client
             .put_object("some-request-id", bucket, object_name, content.clone())

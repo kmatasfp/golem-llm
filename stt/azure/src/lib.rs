@@ -1,6 +1,8 @@
 use std::time::Duration;
 
 use futures_concurrency::future::Join;
+use golem_stt::durability::{DurableStt, ExtendedGuest};
+use golem_stt::guest::{SttTranscriptionGuest, SttTranscriptionRequest};
 use golem_stt::transcription::SttProviderClient;
 use itertools::Itertools;
 use once_cell::sync::OnceCell;
@@ -21,9 +23,9 @@ use golem_stt::http::WstdHttpClient;
 use golem_stt::LOGGING_STATE;
 
 use golem_stt::golem::stt::transcription::{
-    FailedTranscription as WitFailedTranscription, Guest as TranscriptionGuest,
+    FailedTranscription as WitFailedTranscription,
     MultiTranscriptionResult as WitMultiTranscriptionResult,
-    TranscribeOptions as WitTranscribeOptions, TranscriptionRequest as WitTranscriptionRequest,
+    TranscribeOptions as WitTranscribeOptions,
 };
 
 use golem_stt::golem::stt::languages::{Guest as LanguageGuest, LanguageInfo};
@@ -77,8 +79,8 @@ impl LanguageGuest for SttComponent {
     }
 }
 
-impl TranscriptionGuest for SttComponent {
-    fn transcribe(req: WitTranscriptionRequest) -> Result<WitTranscriptionResult, WitSttError> {
+impl SttTranscriptionGuest for SttComponent {
+    fn transcribe(req: SttTranscriptionRequest) -> Result<WitTranscriptionResult, WitSttError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
         block_on(async {
@@ -91,7 +93,7 @@ impl TranscriptionGuest for SttComponent {
     }
 
     fn transcribe_many(
-        wit_requests: Vec<WitTranscriptionRequest>,
+        wit_requests: Vec<SttTranscriptionRequest>,
     ) -> Result<WitMultiTranscriptionResult, WitSttError> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
@@ -194,12 +196,10 @@ impl TryFrom<WitTranscribeOptions> for TranscriptionConfig {
     }
 }
 
-impl TryFrom<WitTranscriptionRequest> for TranscriptionRequest {
+impl TryFrom<SttTranscriptionRequest> for TranscriptionRequest {
     type Error = WitSttError;
 
-    fn try_from(request: WitTranscriptionRequest) -> Result<Self, Self::Error> {
-        let audio = request.audio;
-
+    fn try_from(request: SttTranscriptionRequest) -> Result<Self, Self::Error> {
         let transcription_config: Option<TranscriptionConfig> =
             if let Some(options) = request.options {
                 Some(options.try_into()?)
@@ -209,7 +209,7 @@ impl TryFrom<WitTranscriptionRequest> for TranscriptionRequest {
 
         Ok(TranscriptionRequest {
             request_id: request.request_id,
-            audio,
+            audio: request.audio,
             audio_config: AudioConfig {
                 format: request.config.format.try_into()?,
                 channels: request.config.channels,
@@ -292,4 +292,8 @@ impl From<TranscriptionResponse> for WitTranscriptionResult {
     }
 }
 
-golem_stt::export_stt!(SttComponent with_types_in golem_stt);
+impl ExtendedGuest for SttComponent {}
+
+type DurableDeepgramComponent = DurableStt<SttComponent>;
+
+golem_stt::export_stt!(DurableDeepgramComponent with_types_in golem_stt);

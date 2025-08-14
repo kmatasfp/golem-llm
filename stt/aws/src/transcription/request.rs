@@ -1,3 +1,5 @@
+use bytes::Bytes;
+
 #[allow(unused)]
 #[derive(Debug, Clone)]
 pub enum AudioFormat {
@@ -42,7 +44,7 @@ pub struct TranscriptionConfig {
 
 pub struct TranscriptionRequest {
     pub request_id: String,
-    pub audio: Vec<u8>,
+    pub audio: Bytes,
     pub audio_config: AudioConfig,
     pub transcription_config: Option<TranscriptionConfig>,
 }

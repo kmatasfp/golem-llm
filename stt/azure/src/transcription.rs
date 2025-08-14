@@ -119,7 +119,7 @@ pub struct TranscriptionConfig {
 #[derive(Clone)]
 pub struct TranscriptionRequest {
     pub request_id: String,
-    pub audio: Vec<u8>,
+    pub audio: Bytes,
     pub audio_config: AudioConfig,
     pub transcription_config: Option<TranscriptionConfig>,
 }
@@ -220,19 +220,17 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
         };
 
         let mut form = MultipartBuilder::new_with_capacity(request.audio.len() + 4096);
-        form.add_bytes("audio", &file_name, &mime_type, request.audio);
+        form.add_bytes("audio", &file_name, &mime_type, &request.audio);
         form.add_field("definition", &definition_json);
 
         let (content_type, body) = form.finish();
-
-        let body_bytes = Bytes::from(body);
 
         let http_request = Request::builder()
             .method(Method::POST)
             .uri(&url)
             .header("Content-Type", content_type)
             .header("Ocp-Apim-Subscription-Key", &self.subscription_key)
-            .body(body_bytes)
+            .body(body)
             .map_err(|e| SttError::Http(request_id.clone(), HttpError::from(e)))?;
 
         let response = self
@@ -498,7 +496,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-id".to_string(),
-            audio: b"test audio data".to_vec(),
+            audio: "test audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: Some(1),
@@ -569,7 +567,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-id".to_string(),
-            audio: b"test audio data".to_vec(),
+            audio: "test audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: None,
@@ -720,7 +718,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-id".to_string(),
-            audio: b"test audio data".to_vec(),
+            audio: "test audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: Some(2),
@@ -819,7 +817,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "test-id".to_string(),
-            audio: b"test audio data".to_vec(),
+            audio: "test audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: None,
@@ -916,7 +914,7 @@ mod tests {
             .body(success_response.as_bytes().to_vec())
             .unwrap()));
 
-        let audio_bytes = b"test audio data with special chars: \x00\x01\x02\xFF".to_vec();
+        let audio_bytes = Bytes::from("test audio data");
         let request = TranscriptionRequest {
             request_id: "test-id".to_string(),
             audio: audio_bytes.clone(),
@@ -965,7 +963,7 @@ mod tests {
         assert_eq!(
             audio_field,
             &MultipartField {
-                data: audio_bytes,
+                data: audio_bytes.to_vec(),
                 filename: Some("audio.flac".to_string()),
                 content_type: Some("audio/flac".to_string()),
             }
@@ -1213,7 +1211,7 @@ mod tests {
             .body(success_response.as_bytes().to_vec())
             .unwrap()));
 
-        let audio_bytes = b"test audio data".to_vec();
+        let audio_bytes = Bytes::from("test audio data");
         let request = TranscriptionRequest {
             request_id: "test-id".to_string(),
             audio: audio_bytes.clone(),
@@ -1380,7 +1378,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"test audio data".to_vec(),
+            audio: "test audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: None,
@@ -1435,7 +1433,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"test audio data".to_vec(),
+            audio: "test audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: None,
@@ -1490,7 +1488,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"test audio data".to_vec(),
+            audio: "test audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: None,
@@ -1545,7 +1543,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"test audio data".to_vec(),
+            audio: "test audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: None,
@@ -1600,7 +1598,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"test audio data".to_vec(),
+            audio: "test audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: None,
@@ -1655,7 +1653,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"test audio data".to_vec(),
+            audio: "test audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: None,
@@ -1710,7 +1708,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"test audio data".to_vec(),
+            audio: "test audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: None,
@@ -1756,7 +1754,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"test audio data".to_vec(),
+            audio: "test audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: None,

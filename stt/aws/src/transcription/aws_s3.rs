@@ -12,7 +12,7 @@ pub trait S3Service {
         request_id: &str,
         bucket: &str,
         object_name: &str,
-        content: Vec<u8>,
+        content: Bytes,
     ) -> Result<(), golem_stt::error::Error>;
 
     async fn delete_object(
@@ -43,21 +43,19 @@ impl<HC: HttpClient> S3Service for S3Client<HC> {
         request_id: &str,
         bucket: &str,
         object_name: &str,
-        content: Vec<u8>,
+        content: Bytes,
     ) -> Result<(), golem_stt::error::Error> {
         let timestamp = Utc::now();
         let uri = format!("https://{bucket}.s3.amazonaws.com/{object_name}");
 
         let content_length = content.len().to_string();
 
-        let content_bytes = Bytes::from(content);
-
         let request = Request::builder()
             .method("PUT")
             .uri(&uri)
             .header("Content-Type", "application/octet-stream")
             .header("Content-Length", &content_length)
-            .body(content_bytes)
+            .body(content)
             .map_err(|e| {
                 Error::Http(request_id.to_string(), golem_stt::http::Error::HttpError(e))
             })?;
@@ -258,7 +256,7 @@ mod tests {
 
         let bucket = "test-bucket";
         let object_name = "test-object.txt";
-        let content = b"Hello, World!".to_vec();
+        let content = Bytes::from("Hello, World!");
 
         s3_client
             .put_object("some-request-id", bucket, object_name, content.clone())

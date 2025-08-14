@@ -126,7 +126,7 @@ pub struct TranscriptionConfig {
 
 pub struct TranscriptionRequest {
     pub request_id: String,
-    pub audio: Vec<u8>,
+    pub audio: Bytes,
     pub audio_config: AudioConfig,
     pub transcription_config: Option<TranscriptionConfig>,
 }
@@ -178,7 +178,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
 
         let mut form = MultipartBuilder::new_with_capacity(audio_size_bytes + 2048);
 
-        form.add_bytes("file", &file_name, &mime_type, request.audio);
+        form.add_bytes("file", &file_name, &mime_type, &request.audio);
 
         form.add_field("model", "whisper-1");
         form.add_field("response_format", "verbose_json");
@@ -196,14 +196,12 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
 
         let (content_type, body) = form.finish();
 
-        let body_bytes = Bytes::from(body);
-
         let req = Request::builder()
             .method(Method::POST)
             .uri(BASE_URL)
             .header("Authorization", &self.openai_api_token)
             .header("Content-Type", content_type)
-            .body(body_bytes)
+            .body(body)
             .map_err(|e| Error::Http(request_id.clone(), golem_stt::http::Error::HttpError(e)))?;
 
         let response = self
@@ -464,7 +462,7 @@ mod tests {
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
-        let audio_bytes = b"fake audio data".to_vec();
+        let audio_bytes = "fake audio data".into();
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
@@ -530,7 +528,7 @@ mod tests {
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
-        let audio_bytes = b"fake audio data".to_vec();
+        let audio_bytes = Bytes::from("fake audio data");
 
         let language = "en".to_string();
         let prompt = "foo".to_string();
@@ -590,7 +588,7 @@ mod tests {
         assert_eq!(
             file_field,
             &MultipartField {
-                data: audio_bytes,
+                data: audio_bytes.to_vec(),
                 filename: Some("audio.mp3".to_string()),
                 content_type: Some("audio/mp3".to_string()),
             }
@@ -676,7 +674,7 @@ mod tests {
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
-        let audio_bytes = b"fake audio data for words test".to_vec();
+        let audio_bytes = Bytes::from("fake audio data for words test");
 
         let audio_byte_len = audio_bytes.len();
 
@@ -747,7 +745,7 @@ mod tests {
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
-        let audio_bytes = b"fake audio data".to_vec();
+        let audio_bytes = "fake audio data".into();
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
@@ -797,7 +795,7 @@ mod tests {
 
         let api = TranscriptionsApi::new("invalid_key".to_string(), mock_client);
 
-        let audio_bytes = b"fake audio data".to_vec();
+        let audio_bytes = "fake audio data".into();
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
@@ -846,7 +844,7 @@ mod tests {
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
-        let audio_bytes = b"fake audio data".to_vec();
+        let audio_bytes = "fake audio data".into();
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
@@ -895,7 +893,7 @@ mod tests {
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
-        let audio_bytes = b"fake audio data".to_vec();
+        let audio_bytes = "fake audio data".into();
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
@@ -944,7 +942,7 @@ mod tests {
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
-        let audio_bytes = b"fake large audio data".to_vec();
+        let audio_bytes = "fake large audio data".into();
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
@@ -993,7 +991,7 @@ mod tests {
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
-        let audio_bytes = b"fake audio data".to_vec();
+        let audio_bytes = "fake audio data".into();
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
@@ -1042,7 +1040,7 @@ mod tests {
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
-        let audio_bytes = b"fake audio data".to_vec();
+        let audio_bytes = "fake audio data".into();
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
@@ -1091,7 +1089,7 @@ mod tests {
 
         let api = TranscriptionsApi::new(TEST_API_KEY.to_string(), mock_client);
 
-        let audio_bytes = b"fake audio data".to_vec();
+        let audio_bytes = "fake audio data".into();
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
