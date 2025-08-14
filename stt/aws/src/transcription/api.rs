@@ -1,4 +1,4 @@
-use std::{rc::Rc, time::Duration};
+use std::time::Duration;
 
 use golem_stt::{error::Error, languages::Language, transcription::SttProviderClient};
 
@@ -294,7 +294,8 @@ impl<S3: S3Service, TC: TranscribeService>
     ) -> Result<TranscriptionResponse, Error> {
         trace!("Sending request to AWS Transcribe API: {request:?}");
 
-        let request_id: Rc<str> = Rc::from(request.request_id);
+        let request_id = request.request_id;
+
         let audio_size_bytes = request.audio.len();
         let req_language = request
             .transcription_config
@@ -310,10 +311,10 @@ impl<S3: S3Service, TC: TranscribeService>
             .as_ref()
             .map_or_else(|| 0, |config| config.vocabulary.len());
 
-        let object_key = format!("{}/audio.{}", request_id, &request.audio_config.format);
+        let object_key = format!("{request_id}/audio.{}", &request.audio_config.format);
 
         validate_request_id(&request_id).map_err(|validation_error| Error::APIBadRequest {
-            request_id: request_id.to_string(),
+            request_id: request_id.clone(),
             provider_error: format!("Invalid request ID: {validation_error}"),
         })?;
 

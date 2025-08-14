@@ -11,6 +11,10 @@ description = "WebAssembly component for working with Deepgram Speech to Text AP
 path = "src/lib.rs"
 crate-type = ["cdylib"]
 
+[features]
+default = ["durability"]
+durability = ["golem-rust/durability", "golem-stt/durability"]
+
 [dependencies]
 golem-stt = { workspace = true }
 

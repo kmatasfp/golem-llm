@@ -140,7 +140,7 @@ pub struct TranscriptionConfig {
 
 pub struct TranscriptionRequest {
     pub request_id: String,
-    pub audio: Vec<u8>,
+    pub audio: Bytes,
     pub audio_config: AudioConfig,
     pub transcription_config: Option<TranscriptionConfig>,
 }
@@ -265,14 +265,12 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
             url.query_pairs_mut().append_pair(key, &value);
         }
 
-        let audio_bytes = Bytes::from(request.audio);
-
         let req = Request::builder()
             .method(Method::POST)
             .uri(url.as_str())
             .header(CONTENT_TYPE, mime_type)
             .header("Authorization", &self.deepgram_api_token)
-            .body(audio_bytes)
+            .body(request.audio)
             .map_err(|e| Error::Http(request_id.clone(), golem_stt::http::Error::HttpError(e)))?;
 
         let response = self
@@ -567,7 +565,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec(),
+            audio: "fake audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: None,
@@ -598,7 +596,7 @@ mod tests {
             mock_client,
         );
 
-        let audio_data = b"fake audio data".to_vec();
+        let audio_data = Bytes::from("fake audio data");
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
             audio: audio_data.clone(),
@@ -644,7 +642,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec(),
+            audio: "fake audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: Some(2), // Should add multichannel=true
@@ -696,7 +694,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec(),
+            audio: "fake audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: Some(2),
@@ -748,7 +746,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec(),
+            audio: "fake audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: Some(2),
@@ -812,7 +810,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec(),
+            audio: "fake audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: Some(2),
@@ -920,7 +918,7 @@ mod tests {
             mock_client,
         );
 
-        let audio_data = b"fake audio data".to_vec();
+        let audio_data = Bytes::from("fake audio data");
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
             audio: audio_data.clone(),
@@ -1097,7 +1095,7 @@ mod tests {
             mock_client,
         );
 
-        let audio_data = b"fake audio data".to_vec();
+        let audio_data = Bytes::from("fake audio data");
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
             audio: audio_data.clone(),
@@ -1215,7 +1213,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec(),
+            audio: "fake audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: None,
@@ -1263,7 +1261,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec(),
+            audio: "fake audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: None,
@@ -1310,7 +1308,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec(),
+            audio: "fake audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: None,
@@ -1358,7 +1356,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec(),
+            audio: "fake audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: None,
@@ -1401,7 +1399,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec(),
+            audio: "fake audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: None,
@@ -1444,7 +1442,7 @@ mod tests {
 
         let request = TranscriptionRequest {
             request_id: "some-transcription-id".to_string(),
-            audio: b"fake audio data".to_vec(),
+            audio: "fake audio data".into(),
             audio_config: AudioConfig {
                 format: AudioFormat::Wav,
                 channels: None,

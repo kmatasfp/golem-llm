@@ -1,4 +1,6 @@
+pub mod durability;
 pub mod error;
+pub mod guest;
 pub mod http;
 pub mod languages;
 mod retry;
