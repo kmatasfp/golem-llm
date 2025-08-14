@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use chrono::Utc;
 use golem_stt::runtime::AsyncRuntime;
 
@@ -466,12 +467,14 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeClient<HC, RT>
             )
         })?;
 
+        let json_bytes = Bytes::from(json_body);
+
         let request = Request::builder()
             .method("POST")
             .uri(&uri)
             .header("Content-Type", "application/x-amz-json-1.1")
             .header("X-Amz-Target", target)
-            .body(json_body.into_bytes())
+            .body(json_bytes)
             .map_err(|e| (request_id.clone(), golem_stt::http::Error::HttpError(e)))?;
 
         let signed_request = self
@@ -833,7 +836,7 @@ impl<HC: golem_stt::http::HttpClient, RT: AsyncRuntime> TranscribeService
             .method("GET")
             .uri(transcript_uri)
             .header("Accept", "application/json")
-            .body(vec![])
+            .body(Bytes::new())
             .map_err(|e| {
                 (
                     transcription_job_name.to_string(),
@@ -908,7 +911,7 @@ mod tests {
 
     struct MockHttpClient {
         pub responses: RefCell<VecDeque<Result<Response<Vec<u8>>, golem_stt::http::Error>>>,
-        pub captured_requests: RefCell<Vec<Request<Vec<u8>>>>,
+        pub captured_requests: RefCell<Vec<Request<Bytes>>>,
     }
 
     #[allow(unused)]
@@ -924,7 +927,7 @@ mod tests {
             self.responses.borrow_mut().push_back(Ok(response));
         }
 
-        pub fn get_captured_requests(&self) -> Ref<'_, Vec<Request<Vec<u8>>>> {
+        pub fn get_captured_requests(&self) -> Ref<'_, Vec<Request<Bytes>>> {
             self.captured_requests.borrow()
         }
 
@@ -936,7 +939,7 @@ mod tests {
             self.captured_requests.borrow().len()
         }
 
-        pub fn last_captured_request(&self) -> Option<Ref<'_, Request<Vec<u8>>>> {
+        pub fn last_captured_request(&self) -> Option<Ref<'_, Request<Bytes>>> {
             let borrow = self.captured_requests.borrow();
             if borrow.is_empty() {
                 None
@@ -949,7 +952,7 @@ mod tests {
     impl HttpClient for MockHttpClient {
         async fn execute(
             &self,
-            request: Request<Vec<u8>>,
+            request: Request<Bytes>,
         ) -> Result<Response<Vec<u8>>, golem_stt::http::Error> {
             self.captured_requests.borrow_mut().push(request);
             self.responses

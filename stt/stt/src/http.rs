@@ -5,12 +5,11 @@ use derive_more::From;
 use http::{Request, Response};
 use wstd::{
     http::{
-        body::BoundedBody,
         error::WasiHttpErrorCode::{
             ConnectionLimitReached, ConnectionReadTimeout, ConnectionRefused, ConnectionTerminated,
             ConnectionTimeout, ConnectionWriteTimeout, TlsCertificateError,
         },
-        Body, Client, IntoBody,
+        Body, Client,
     },
     io::AsyncRead,
 };
@@ -40,10 +39,7 @@ impl std::error::Error for Error {}
 
 #[allow(async_fn_in_trait)]
 pub trait HttpClient {
-    async fn execute(&self, request: Request<Vec<u8>>) -> Result<Response<Vec<u8>>, Error>;
-    async fn execute_zero_copy(&self, request: Request<Bytes>) -> Result<Response<Vec<u8>>, Error> {
-        todo!()
-    }
+    async fn execute(&self, request: Request<Bytes>) -> Result<Response<Vec<u8>>, Error>;
 }
 
 pub struct WstdHttpClient {
@@ -53,10 +49,15 @@ pub struct WstdHttpClient {
 
 impl WstdHttpClient {
     pub fn new() -> Self {
+        let max_retries = std::env::var("STT_PROVIDER_MAX_RETRIES")
+            .ok()
+            .and_then(|n| n.parse::<usize>().ok())
+            .unwrap_or(10);
+
         let retry_config = RetryConfig::new()
-            .with_max_attempts(3)
+            .with_max_attempts(max_retries)
             .with_min_delay(Duration::from_millis(500))
-            .with_max_delay(Duration::from_secs(10));
+            .with_max_delay(Duration::from_secs(10)); // until https://github.com/golemcloud/golem/issues/1848 is fixed this should not be configurable
 
         Self {
             client: Client::new(),
@@ -69,10 +70,15 @@ impl WstdHttpClient {
         client.set_connect_timeout(connection_timeout);
         client.set_first_byte_timeout(first_byte_timeout);
 
+        let max_retries = std::env::var("STT_PROVIDER_MAX_RETRIES")
+            .ok()
+            .and_then(|n| n.parse::<usize>().ok())
+            .unwrap_or(10);
+
         let retry_config = RetryConfig::new()
-            .with_max_attempts(10)
+            .with_max_attempts(max_retries)
             .with_min_delay(Duration::from_millis(500))
-            .with_max_delay(Duration::from_secs(10));
+            .with_max_delay(Duration::from_secs(10)); // until https://github.com/golemcloud/golem/issues/1848 is fixed this should not be configurable
 
         Self {
             client,
@@ -106,11 +112,7 @@ impl WstdHttpClient {
     }
 
     fn is_retryable_status_code(status: http::StatusCode) -> bool {
-        match status.as_u16() {
-            429 => true,       // Too Many Requests
-            500..=599 => true, // Server errors
-            _ => false,
-        }
+        matches!(status.as_u16(), 429 | 500..=599)
     }
 }
 
@@ -121,23 +123,6 @@ impl Default for WstdHttpClient {
 }
 
 struct WasiRequest<T: Body>(wstd::http::Request<T>);
-
-impl From<Request<Vec<u8>>> for WasiRequest<BoundedBody<Vec<u8>>> {
-    fn from(request: Request<Vec<u8>>) -> Self {
-        let (parts, body) = request.into_parts();
-
-        let mut req = wstd::http::Request::builder()
-            .uri(parts.uri)
-            .method(parts.method)
-            .version(parts.version)
-            .body(body.into_body())
-            .expect("Known valid");
-
-        *req.headers_mut() = parts.headers;
-
-        WasiRequest(req)
-    }
-}
 
 #[derive(Debug)]
 struct BytesCursor {
@@ -194,26 +179,7 @@ impl From<Request<Bytes>> for WasiRequest<BytesCursor> {
 }
 
 impl HttpClient for WstdHttpClient {
-    async fn execute(
-        &self,
-        request: http::Request<Vec<u8>>,
-    ) -> Result<http::Response<Vec<u8>>, Error> {
-        let wasi_request = WasiRequest::from(request).0;
-
-        let mut wasi_response = self.client.send(wasi_request).await?;
-
-        let status = wasi_response.status();
-        let headers = wasi_response.headers().clone();
-        let body = wasi_response.body_mut().bytes().await?;
-
-        let mut response = Response::builder().status(status).body(body)?;
-
-        *response.headers_mut() = headers;
-
-        Ok(response)
-    }
-
-    async fn execute_zero_copy(&self, request: Request<Bytes>) -> Result<Response<Vec<u8>>, Error> {
+    async fn execute(&self, request: Request<Bytes>) -> Result<Response<Vec<u8>>, Error> {
         let wasi_request = WasiRequest::from(request).0;
 
         let wasi_response = self

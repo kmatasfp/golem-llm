@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use golem_stt::{
     error::Error as SttError,
     http::{Error as HttpError, HttpClient, MultipartBuilder},
@@ -224,12 +225,14 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
 
         let (content_type, body) = form.finish();
 
+        let body_bytes = Bytes::from(body);
+
         let http_request = Request::builder()
             .method(Method::POST)
             .uri(&url)
             .header("Content-Type", content_type)
             .header("Ocp-Apim-Subscription-Key", &self.subscription_key)
-            .body(body)
+            .body(body_bytes)
             .map_err(|e| SttError::Http(request_id.clone(), HttpError::from(e)))?;
 
         let response = self
@@ -400,7 +403,7 @@ mod tests {
     #[derive(Debug)]
     struct MockHttpClient {
         pub responses: RefCell<VecDeque<Result<Response<Vec<u8>>, HttpError>>>,
-        pub captured_requests: RefCell<Vec<Request<Vec<u8>>>>,
+        pub captured_requests: RefCell<Vec<Request<Bytes>>>,
     }
 
     #[allow(unused)]
@@ -416,7 +419,7 @@ mod tests {
             self.responses.borrow_mut().push_back(response);
         }
 
-        pub fn get_captured_requests(&self) -> Vec<Request<Vec<u8>>> {
+        pub fn get_captured_requests(&self) -> Vec<Request<Bytes>> {
             self.captured_requests.borrow().clone()
         }
 
@@ -428,13 +431,13 @@ mod tests {
             self.captured_requests.borrow().len()
         }
 
-        pub fn last_captured_request(&self) -> Option<Request<Vec<u8>>> {
+        pub fn last_captured_request(&self) -> Option<Request<Bytes>> {
             self.captured_requests.borrow().last().cloned()
         }
     }
 
     impl HttpClient for MockHttpClient {
-        async fn execute(&self, request: Request<Vec<u8>>) -> Result<Response<Vec<u8>>, HttpError> {
+        async fn execute(&self, request: Request<Bytes>) -> Result<Response<Vec<u8>>, HttpError> {
             self.captured_requests.borrow_mut().push(request);
             self.responses.borrow_mut().pop_front().unwrap()
         }

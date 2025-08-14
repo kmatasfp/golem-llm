@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use golem_stt::{
     http::{HttpClient, MultipartBuilder},
     transcription::SttProviderClient,
@@ -195,12 +196,14 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
 
         let (content_type, body) = form.finish();
 
+        let body_bytes = Bytes::from(body);
+
         let req = Request::builder()
             .method(Method::POST)
             .uri(BASE_URL)
             .header("Authorization", &self.openai_api_token)
             .header("Content-Type", content_type)
-            .body(body)
+            .body(body_bytes)
             .map_err(|e| Error::Http(request_id.clone(), golem_stt::http::Error::HttpError(e)))?;
 
         let response = self
@@ -364,7 +367,7 @@ mod tests {
 
     struct MockHttpClient {
         pub responses: RefCell<VecDeque<Result<Response<Vec<u8>>, golem_stt::http::Error>>>,
-        pub captured_requests: RefCell<Vec<Request<Vec<u8>>>>,
+        pub captured_requests: RefCell<Vec<Request<Bytes>>>,
     }
 
     #[allow(unused)]
@@ -380,7 +383,7 @@ mod tests {
             self.responses.borrow_mut().push_back(Ok(response));
         }
 
-        pub fn get_captured_requests(&self) -> Ref<'_, Vec<Request<Vec<u8>>>> {
+        pub fn get_captured_requests(&self) -> Ref<'_, Vec<Request<Bytes>>> {
             self.captured_requests.borrow()
         }
 
@@ -392,7 +395,7 @@ mod tests {
             self.captured_requests.borrow().len()
         }
 
-        pub fn last_captured_request(&self) -> Option<Ref<'_, Request<Vec<u8>>>> {
+        pub fn last_captured_request(&self) -> Option<Ref<'_, Request<Bytes>>> {
             let borrow = self.captured_requests.borrow();
             if borrow.is_empty() {
                 None
@@ -405,7 +408,7 @@ mod tests {
     impl HttpClient for MockHttpClient {
         async fn execute(
             &self,
-            request: Request<Vec<u8>>,
+            request: Request<Bytes>,
         ) -> Result<Response<Vec<u8>>, golem_stt::http::Error> {
             self.captured_requests.borrow_mut().push(request);
             self.responses

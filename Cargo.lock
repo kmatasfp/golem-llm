@@ -1892,6 +1892,7 @@ dependencies = [
  "aws-config",
  "aws-credential-types",
  "aws-sigv4",
+ "bytes",
  "chrono",
  "derive_more",
  "futures-concurrency",
@@ -1916,6 +1917,7 @@ dependencies = [
 name = "golem-stt-azure"
 version = "0.0.0"
 dependencies = [
+ "bytes",
  "derive_more",
  "futures-concurrency",
  "golem-rust",
@@ -1958,6 +1960,7 @@ version = "0.0.0"
 dependencies = [
  "async-lock",
  "base64 0.22.1",
+ "bytes",
  "chrono",
  "derive_more",
  "futures-concurrency",
@@ -1983,6 +1986,7 @@ dependencies = [
 name = "golem-stt-whisper"
 version = "0.0.0"
 dependencies = [
+ "bytes",
  "derive_more",
  "futures-concurrency",
  "golem-rust",

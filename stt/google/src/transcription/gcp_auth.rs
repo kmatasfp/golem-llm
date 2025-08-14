@@ -1,4 +1,5 @@
 use async_lock::Mutex;
+use bytes::Bytes;
 use std::sync::Arc;
 
 use base64::{engine::general_purpose, Engine as _};
@@ -217,12 +218,15 @@ impl<HC: HttpClient> GcpAuth<HC> {
             urlencoding::encode(&jwt)
         );
 
+        let content_length = form_data.len();
+        let body_bytes = Bytes::from(form_data);
+
         let request = Request::builder()
             .method("POST")
             .uri("https://oauth2.googleapis.com/token")
             .header("Content-Type", "application/x-www-form-urlencoded")
-            .header("Content-Length", form_data.len().to_string())
-            .body(form_data.into_bytes())
+            .header("Content-Length", content_length)
+            .body(body_bytes)
             .map_err(|e| Error::HttpError(format!("Failed to build token request: {e}")))?;
 
         let response = self
@@ -261,7 +265,7 @@ mod tests {
 
     struct MockHttpClient {
         pub responses: RefCell<VecDeque<Result<Response<Vec<u8>>, golem_stt::http::Error>>>,
-        pub captured_requests: RefCell<Vec<Request<Vec<u8>>>>,
+        pub captured_requests: RefCell<Vec<Request<Bytes>>>,
     }
 
     impl MockHttpClient {
@@ -276,7 +280,7 @@ mod tests {
             self.responses.borrow_mut().push_back(Ok(response));
         }
 
-        pub fn last_captured_request(&self) -> Option<Ref<'_, Request<Vec<u8>>>> {
+        pub fn last_captured_request(&self) -> Option<Ref<'_, Request<Bytes>>> {
             let borrow = self.captured_requests.borrow();
             if borrow.is_empty() {
                 None
@@ -289,7 +293,7 @@ mod tests {
     impl HttpClient for MockHttpClient {
         async fn execute(
             &self,
-            request: Request<Vec<u8>>,
+            request: Request<Bytes>,
         ) -> Result<Response<Vec<u8>>, golem_stt::http::Error> {
             self.captured_requests.borrow_mut().push(request);
             self.responses

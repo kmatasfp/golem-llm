@@ -1,6 +1,7 @@
 use std::time::Duration;
 use std::{collections::HashMap, sync::Arc};
 
+use bytes::Bytes;
 use golem_stt::error::Error as SttError;
 use golem_stt::http::HttpClient;
 use golem_stt::runtime::AsyncRuntime;
@@ -412,7 +413,7 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextClient<HC, RT> {
         uri: &str,
         request_id: &str,
         method: Method,
-        body: Option<Vec<u8>>,
+        body: Option<Bytes>,
     ) -> Result<T, SttError>
     where
         T: for<'de> serde::Deserialize<'de>,
@@ -440,7 +441,7 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextClient<HC, RT> {
 
         let response = self
             .http_client
-            .execute(http_request.clone())
+            .execute(http_request)
             .await
             .map_err(|e| SttError::Http(request_id.to_string(), e))?;
 
@@ -532,7 +533,7 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextService for SpeechToTextClien
             )
         })?;
 
-        self.make_authenticated_request(&uri, request_id, Method::POST, Some(body))
+        self.make_authenticated_request(&uri, request_id, Method::POST, Some(body.into()))
             .await
     }
 
@@ -578,7 +579,7 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextService for SpeechToTextClien
             )
         })?;
 
-        self.make_authenticated_request(&uri, request_id, Method::POST, Some(body))
+        self.make_authenticated_request(&uri, request_id, Method::POST, Some(body.into()))
             .await
     }
 
@@ -659,7 +660,7 @@ mod tests {
 
     struct MockHttpClient {
         pub responses: RefCell<VecDeque<Result<Response<Vec<u8>>, golem_stt::http::Error>>>,
-        pub captured_requests: RefCell<Vec<Request<Vec<u8>>>>,
+        pub captured_requests: RefCell<Vec<Request<Bytes>>>,
     }
 
     #[allow(unused)]
@@ -675,7 +676,7 @@ mod tests {
             self.responses.borrow_mut().push_back(Ok(response));
         }
 
-        pub fn get_captured_requests(&self) -> Ref<'_, Vec<Request<Vec<u8>>>> {
+        pub fn get_captured_requests(&self) -> Ref<'_, Vec<Request<Bytes>>> {
             self.captured_requests.borrow()
         }
 
@@ -687,7 +688,7 @@ mod tests {
             self.captured_requests.borrow().len()
         }
 
-        pub fn last_captured_request(&self) -> Option<Ref<'_, Request<Vec<u8>>>> {
+        pub fn last_captured_request(&self) -> Option<Ref<'_, Request<Bytes>>> {
             let borrow = self.captured_requests.borrow();
             if borrow.is_empty() {
                 None
@@ -700,7 +701,7 @@ mod tests {
     impl HttpClient for MockHttpClient {
         async fn execute(
             &self,
-            request: Request<Vec<u8>>,
+            request: Request<Bytes>,
         ) -> Result<Response<Vec<u8>>, golem_stt::http::Error> {
             self.captured_requests.borrow_mut().push(request);
             self.responses
