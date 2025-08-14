@@ -7,21 +7,21 @@ pub trait AsyncRuntime {
     async fn sleep(&self, duration: Duration);
 }
 
-pub struct WasiAyncRuntime {}
+pub struct WasiAsyncRuntime {}
 
-impl WasiAyncRuntime {
+impl WasiAsyncRuntime {
     pub fn new() -> Self {
         Self {}
     }
 }
 
-impl Default for WasiAyncRuntime {
+impl Default for WasiAsyncRuntime {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl AsyncRuntime for WasiAyncRuntime {
+impl AsyncRuntime for WasiAsyncRuntime {
     async fn sleep(&self, duration: Duration) {
         task::sleep(duration.into()).await;
     }

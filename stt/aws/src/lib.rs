@@ -18,7 +18,7 @@ use golem_stt::golem::stt::types::{
     WordSegment as WitWordSegment,
 };
 use golem_stt::http::WstdHttpClient;
-use golem_stt::runtime::WasiAyncRuntime;
+use golem_stt::runtime::WasiAsyncRuntime;
 use golem_stt::transcription::SttProviderClient;
 use golem_stt::LOGGING_STATE;
 use log::trace;
@@ -37,7 +37,7 @@ use crate::transcription::{S3Client, TranscribeClient};
 mod transcription;
 
 static API_CLIENT: OnceCell<
-    TranscribeApi<S3Client<WstdHttpClient>, TranscribeClient<WstdHttpClient, WasiAyncRuntime>>,
+    TranscribeApi<S3Client<WstdHttpClient>, TranscribeClient<WstdHttpClient, WasiAsyncRuntime>>,
 > = OnceCell::new();
 
 #[allow(unused)]
@@ -47,7 +47,7 @@ impl SttComponent {
     fn create_or_get_client() -> Result<
         &'static TranscribeApi<
             S3Client<WstdHttpClient>,
-            TranscribeClient<WstdHttpClient, WasiAyncRuntime>,
+            TranscribeClient<WstdHttpClient, WasiAsyncRuntime>,
         >,
         SttError,
     > {

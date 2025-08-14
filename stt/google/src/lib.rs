@@ -2,7 +2,7 @@ use once_cell::sync::OnceCell;
 
 use golem_stt::error::Error as SttError;
 use golem_stt::http::WstdHttpClient;
-use golem_stt::runtime::WasiAyncRuntime;
+use golem_stt::runtime::WasiAsyncRuntime;
 use golem_stt::transcription::SttProviderClient;
 use golem_stt::LOGGING_STATE;
 
@@ -41,7 +41,7 @@ mod transcription;
 static API_CLIENT: OnceCell<
     SpeechToTextApi<
         CloudStorageClient<WstdHttpClient>,
-        SpeechToTextClient<WstdHttpClient, WasiAyncRuntime>,
+        SpeechToTextClient<WstdHttpClient, WasiAsyncRuntime>,
     >,
 > = OnceCell::new();
 
@@ -52,7 +52,7 @@ impl SttComponent {
     fn create_or_get_client() -> Result<
         &'static SpeechToTextApi<
             CloudStorageClient<WstdHttpClient>,
-            SpeechToTextClient<WstdHttpClient, WasiAyncRuntime>,
+            SpeechToTextClient<WstdHttpClient, WasiAsyncRuntime>,
         >,
         SttError,
     > {

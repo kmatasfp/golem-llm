@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use golem_stt::error::Error as SttError;
-use golem_stt::{http::WstdHttpClient, runtime::WasiAyncRuntime};
+use golem_stt::{http::WstdHttpClient, runtime::WasiAsyncRuntime};
 
 use crate::transcription::{gcp_auth::GcpAuth, ServiceAccountKey};
 
@@ -13,7 +13,7 @@ use super::{
 impl
     SpeechToTextApi<
         CloudStorageClient<WstdHttpClient>,
-        SpeechToTextClient<WstdHttpClient, WasiAyncRuntime>,
+        SpeechToTextClient<WstdHttpClient, WasiAsyncRuntime>,
     >
 {
     pub fn live(
@@ -33,7 +33,7 @@ impl
             gcp_auth_arc.clone(),
             WstdHttpClient::default(),
             location,
-            WasiAyncRuntime::default(),
+            WasiAsyncRuntime::default(),
         );
 
         Ok(Self::new(

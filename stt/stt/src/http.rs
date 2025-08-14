@@ -16,7 +16,7 @@ use wstd::{
 
 use crate::{
     retry::{Retry, RetryConfig},
-    runtime::WasiAyncRuntime,
+    runtime::WasiAsyncRuntime,
 };
 
 #[allow(unused)]
@@ -44,7 +44,7 @@ pub trait HttpClient {
 
 pub struct WstdHttpClient {
     client: Client,
-    retry: Retry<WasiAyncRuntime>,
+    retry: Retry<WasiAsyncRuntime>,
 }
 
 impl WstdHttpClient {
@@ -61,7 +61,7 @@ impl WstdHttpClient {
 
         Self {
             client: Client::new(),
-            retry: Retry::new(retry_config, WasiAyncRuntime::new()),
+            retry: Retry::new(retry_config, WasiAsyncRuntime::new()),
         }
     }
 
@@ -82,7 +82,7 @@ impl WstdHttpClient {
 
         Self {
             client,
-            retry: Retry::new(retry_config, WasiAyncRuntime::new()),
+            retry: Retry::new(retry_config, WasiAsyncRuntime::new()),
         }
     }
 
