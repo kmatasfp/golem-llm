@@ -176,7 +176,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
 
         let audio_size_bytes = request.audio.len();
 
-        let mut form = MultipartBuilder::new();
+        let mut form = MultipartBuilder::new_with_capacity(audio_size_bytes + 2048);
 
         form.add_bytes("file", &file_name, &mime_type, request.audio);
 

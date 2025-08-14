@@ -204,50 +204,48 @@ impl HttpClient for WstdHttpClient {
 
 pub struct MultipartBuilder {
     boundary: String,
-    parts: Vec<Vec<u8>>,
+    buffer: Vec<u8>,
 }
 
 impl MultipartBuilder {
     pub fn new() -> Self {
         Self {
             boundary: format!("----formdata-{}", uuid::Uuid::new_v4()),
-            parts: Vec::new(),
+            buffer: Vec::new(),
+        }
+    }
+
+    pub fn new_with_capacity(estimated_size: usize) -> Self {
+        Self {
+            boundary: format!("----formdata-{}", uuid::Uuid::new_v4()),
+            buffer: Vec::with_capacity(estimated_size),
         }
     }
 
     pub fn add_bytes(&mut self, name: &str, filename: &str, content_type: &str, data: Vec<u8>) {
-        self.parts.push(format!(
-                   "--{}\r\nContent-Disposition: form-data; name=\"{}\"; filename=\"{}\"\r\nContent-Type: {}\r\n\r\n",
-                   self.boundary, name, filename, content_type
-               ).into_bytes());
-        self.parts.push(data);
-        self.parts.push(b"\r\n".to_vec());
+        let header = format!(
+            "--{}\r\nContent-Disposition: form-data; name=\"{}\"; filename=\"{}\"\r\nContent-Type: {}\r\n\r\n",
+            self.boundary, name, filename, content_type
+        );
+        self.buffer.extend_from_slice(header.as_bytes());
+        self.buffer.extend(data);
+        self.buffer.extend_from_slice(b"\r\n");
     }
 
     pub fn add_field(&mut self, name: &str, value: &str) {
-        self.parts.push(
-            format!(
-                "--{}\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\n{}\r\n",
-                self.boundary, name, value
-            )
-            .into_bytes(),
+        let field = format!(
+            "--{}\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\n{}\r\n",
+            self.boundary, name, value
         );
+        self.buffer.extend_from_slice(field.as_bytes());
     }
 
     pub fn finish(mut self) -> (String, Vec<u8>) {
-        // Add end boundary
-        self.parts
-            .push(format!("--{}--\r\n", self.boundary).into_bytes());
-        // Calculate total size and build final buffer
-        let total_size: usize = self.parts.iter().map(|b| b.len()).sum();
-        let mut final_buffer = Vec::with_capacity(total_size);
-
-        for part in self.parts {
-            final_buffer.extend(part);
-        }
+        let end_boundary = format!("--{}--\r\n", self.boundary);
+        self.buffer.extend_from_slice(end_boundary.as_bytes());
 
         let content_type = format!("multipart/form-data; boundary={}", self.boundary);
-        (content_type, final_buffer)
+        (content_type, self.buffer)
     }
 }
 

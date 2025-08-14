@@ -219,7 +219,7 @@ impl<HC: HttpClient> SttProviderClient<TranscriptionRequest, TranscriptionRespon
             "{}".to_string()
         };
 
-        let mut form = MultipartBuilder::new();
+        let mut form = MultipartBuilder::new_with_capacity(request.audio.len() + 4096);
         form.add_bytes("audio", &file_name, &mime_type, request.audio);
         form.add_field("definition", &definition_json);
 
