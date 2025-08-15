@@ -85,46 +85,48 @@ impl From<Error> for WitSttError {
     fn from(error: Error) -> Self {
         match error {
             Error::APIBadRequest {
-                request_id: _,
+                request_id,
                 provider_error,
-            } => WitSttError::TranscriptionFailed(provider_error),
+            } => WitSttError::TranscriptionFailed(format!("{request_id}: {provider_error}")),
             Error::APIUnauthorized {
-                request_id: _,
+                request_id,
                 provider_error,
-            } => WitSttError::AccessDenied(provider_error),
+            } => WitSttError::AccessDenied(format!("{request_id}: {provider_error}")),
             Error::APIForbidden {
-                request_id: _,
+                request_id,
                 provider_error,
-            } => WitSttError::Unauthorized(provider_error),
+            } => WitSttError::Unauthorized(format!("{request_id}: {provider_error}")),
             Error::APIAccessDenied {
-                request_id: _,
+                request_id,
                 provider_error,
-            } => WitSttError::AccessDenied(provider_error),
+            } => WitSttError::AccessDenied(format!("{request_id}: {provider_error}")),
             Error::APINotFound {
-                request_id: _,
+                request_id,
                 provider_error,
-            } => WitSttError::UnsupportedOperation(provider_error),
+            } => WitSttError::UnsupportedOperation(format!("{request_id}: {provider_error}")),
             Error::APIConflict {
-                request_id: _,
+                request_id,
                 provider_error,
-            } => WitSttError::ServiceUnavailable(provider_error),
+            } => WitSttError::ServiceUnavailable(format!("{request_id}: {provider_error}")),
             Error::APIUnprocessableEntity {
-                request_id: _,
+                request_id,
                 provider_error,
-            } => WitSttError::ServiceUnavailable(provider_error),
+            } => WitSttError::ServiceUnavailable(format!("{request_id}: {provider_error}")),
             Error::APIRateLimit {
-                request_id: _,
+                request_id,
                 provider_error,
-            } => WitSttError::RateLimited(provider_error),
+            } => WitSttError::RateLimited(format!("{request_id}: {provider_error}")),
             Error::APIInternalServerError {
-                request_id: _,
+                request_id,
                 provider_error,
-            } => WitSttError::ServiceUnavailable(provider_error),
+            } => WitSttError::ServiceUnavailable(format!("{request_id}: {provider_error}")),
             Error::APIUnknown {
-                request_id: _,
+                request_id,
                 provider_error,
-            } => WitSttError::InternalError(provider_error),
-            Error::Http(_, error) => WitSttError::InternalError(format!("Internal error: {error}")),
+            } => WitSttError::InternalError(format!("{request_id}: {provider_error}")),
+            Error::Http(request_id, error) => {
+                WitSttError::InternalError(format!("{request_id}: Internal error: {error}"))
+            }
             Error::EnvVariablesNotSet(reason) => {
                 WitSttError::InternalError(format!("Internal error: {reason}"))
             }
