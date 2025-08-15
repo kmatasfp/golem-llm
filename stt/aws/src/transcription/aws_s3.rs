@@ -2,6 +2,7 @@ use bytes::Bytes;
 use chrono::Utc;
 use golem_stt::{error::Error, http::HttpClient};
 use http::{Request, StatusCode};
+use log::trace;
 
 use super::aws_signer::AwsSignatureV4;
 
@@ -47,6 +48,8 @@ impl<HC: HttpClient> S3Service for S3Client<HC> {
     ) -> Result<(), golem_stt::error::Error> {
         let timestamp = Utc::now();
         let uri = format!("https://{bucket}.s3.amazonaws.com/{object_name}");
+
+        trace!("uploading file to {uri}");
 
         let content_length = content.len().to_string();
 

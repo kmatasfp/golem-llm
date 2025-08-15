@@ -7,14 +7,12 @@ use golem_stt::http::HttpClient;
 use golem_stt::runtime::AsyncRuntime;
 use http::{header::CONTENT_TYPE, Method, Request, StatusCode};
 use log::trace;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use super::{
     gcp_auth::GcpAuth,
     request::{AudioConfig, AudioFormat, TranscriptionConfig},
 };
-
-const BASE_URL: &str = "https://speech.googleapis.com/v2";
 
 // New structures for synchronous recognize endpoint
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -50,10 +48,8 @@ struct StartBatchRecognizeRequest {
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct RecognitionConfig {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    model: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    language_codes: Option<Vec<String>>,
+    model: String,
+    language_codes: Vec<String>,
     features: RecognitionFeatures,
     #[serde(skip_serializing_if = "Option::is_none")]
     adaptation: Option<SpeechAdaptation>,
@@ -87,7 +83,7 @@ struct RecognitionFeatures {
 pub struct BatchRecognizeOperationResponse {
     pub name: String,
     pub metadata: Option<OperationMetadata>,
-    pub done: bool,
+    pub done: Option<bool>,
     pub error: Option<OperationError>,
     pub response: Option<BatchRecognizeResponse>,
 }
@@ -117,7 +113,26 @@ pub struct RecognizeResults {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct InlineResult {
-    pub transcript: RecognizeResults,
+    #[serde(deserialize_with = "deserialize_transcript")]
+    pub transcript: Option<RecognizeResults>,
+}
+
+// When using short models the transcript field is sometimes an empty object if audio is too long
+fn deserialize_transcript<'de, D>(deserializer: D) -> Result<Option<RecognizeResults>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value: serde_json::Value = serde_json::Value::deserialize(deserializer)?;
+
+    if let Some(obj) = value.as_object() {
+        if obj.is_empty() {
+            return Ok(None);
+        }
+    }
+
+    RecognizeResults::deserialize(value)
+        .map(Some)
+        .map_err(serde::de::Error::custom)
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -263,7 +278,7 @@ pub trait SpeechToTextService {
 
     async fn start_batch_recognize(
         &self,
-        operation_name: &str,
+        request_id: &str,
         audio_gcs_uris: Vec<String>,
         audio_config: &AudioConfig,
         transcription_config: Option<&TranscriptionConfig>,
@@ -307,6 +322,10 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextClient<HC, RT> {
         }
     }
 
+    fn base_url(&self) -> String {
+        format!("https://{}-speech.googleapis.com/v2", self.location)
+    }
+
     fn create_recognition_config(
         audio_config: &AudioConfig,
         transcription_config: Option<&TranscriptionConfig>,
@@ -347,13 +366,13 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextClient<HC, RT> {
                 features.profanity_filter = Some(true);
             }
 
-            // Check if multi-channel mode is enabled and model is not "short"
+            // Check if multi-channel mode is enabled and model is not "short" or "latest_short"
             if audio_config.channels.as_ref().is_some_and(|c| *c > 1)
                 && config.enable_multi_channel
-                && config
-                    .model
-                    .as_ref()
-                    .is_some_and(|m| !m.eq_ignore_ascii_case("short"))
+                && !matches!(
+                    config.model.as_deref().map(|s| s.to_lowercase()).as_deref(),
+                    Some("short") | Some("latest_short")
+                )
             {
                 features.multi_channel_mode = Some("SEPARATE_RECOGNITION_PER_CHANNEL".to_string());
             }
@@ -395,8 +414,12 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextClient<HC, RT> {
             None
         };
 
-        let language_codes = transcription_config.and_then(|c| c.language_codes.clone());
-        let model = transcription_config.and_then(|c| c.model.clone());
+        let language_codes = transcription_config
+            .and_then(|c| c.language_codes.clone())
+            .unwrap_or_else(|| vec!["en-US".to_string()]);
+        let model = transcription_config
+            .and_then(|c| c.model.clone())
+            .unwrap_or_else(|| "latest_long".to_string());
 
         RecognitionConfig {
             auto_decoding_config,
@@ -446,6 +469,10 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextClient<HC, RT> {
             .map_err(|e| SttError::Http(request_id.to_string(), e))?;
 
         if response.status().is_success() {
+            trace!(
+                "Received response from GCP Speech-to-Text API: {}",
+                String::from_utf8_lossy(response.body())
+            );
             let json_response: T = serde_json::from_slice(response.body()).map_err(|e| {
                 (
                     request_id.to_string(),
@@ -524,7 +551,8 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextService for SpeechToTextClien
             uri: None,
         };
 
-        let uri = format!("{BASE_URL}/{recognizer_path}:recognize");
+        let base_url = self.base_url();
+        let uri = format!("{base_url}/{recognizer_path}:recognize");
 
         let body = serde_json::to_vec(&request_body).map_err(|e| {
             (
@@ -570,7 +598,8 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextService for SpeechToTextClien
             processing_strategy: None, // Use default processing, which is as soon as possible
         };
 
-        let uri = format!("{BASE_URL}/{recognizer_path}:batchRecognize");
+        let base_url = self.base_url();
+        let uri = format!("{base_url}/{recognizer_path}:batchRecognize");
 
         let body = serde_json::to_vec(&request_body).map_err(|e| {
             (
@@ -588,7 +617,8 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextService for SpeechToTextClien
         request_id: &str,
         operation_name: &str,
     ) -> Result<BatchRecognizeOperationResponse, SttError> {
-        let uri = format!("{BASE_URL}/{operation_name}");
+        let base_url = self.base_url();
+        let uri = format!("{base_url}/{operation_name}");
 
         self.make_authenticated_request(&uri, request_id, Method::GET, None)
             .await
@@ -606,7 +636,7 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextService for SpeechToTextClien
         while start_time.elapsed() < max_wait_time {
             let response = self.get_batch_recognize(request_id, operation_name).await?;
 
-            if response.done {
+            if response.done.unwrap_or(false) {
                 if response.error.is_some() {
                     return Err(SttError::APIInternalServerError {
                         request_id: request_id.to_string(),
@@ -633,7 +663,8 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextService for SpeechToTextClien
         request_id: &str,
         operation_name: &str,
     ) -> Result<(), SttError> {
-        let uri = format!("{BASE_URL}/{operation_name}");
+        let base_url = self.base_url();
+        let uri = format!("{base_url}/{operation_name}");
 
         let _: serde_json::Value = self
             .make_authenticated_request(&uri, request_id, Method::DELETE, None)
@@ -814,8 +845,8 @@ mod tests {
 
         let expected_request = StartBatchRecognizeRequest {
             config: RecognitionConfig {
-                model: None,
-                language_codes: None,
+                model: "latest_long".to_string(),
+                language_codes: vec!["en-US".to_string()],
                 features: RecognitionFeatures {
                     profanity_filter: None,
                     enable_word_time_offsets: Some(true),
@@ -848,7 +879,7 @@ mod tests {
         assert_eq!(request.method(), "POST");
         assert_eq!(
                request.uri().to_string(),
-               "https://speech.googleapis.com/v2/projects/test-project-id/locations/us-central1/recognizers/_:batchRecognize"
+               "https://us-central1-speech.googleapis.com/v2/projects/test-project-id/locations/us-central1/recognizers/_:batchRecognize"
            );
 
         let auth_header = request
@@ -929,8 +960,8 @@ mod tests {
 
         let expected_request = StartBatchRecognizeRequest {
             config: RecognitionConfig {
-                model: Some("latest_long".to_string()),
-                language_codes: Some(vec!["en-US".to_string()]),
+                model: "latest_long".to_string(),
+                language_codes: vec!["en-US".to_string()],
                 features: RecognitionFeatures {
                     profanity_filter: None,
                     enable_word_time_offsets: Some(true),
@@ -1034,8 +1065,8 @@ mod tests {
 
         let expected_request = StartBatchRecognizeRequest {
             config: RecognitionConfig {
-                model: Some("latest_long".to_string()),
-                language_codes: Some(vec!["en-US".to_string()]),
+                model: "latest_long".to_string(),
+                language_codes: vec!["en-US".to_string()],
                 features: RecognitionFeatures {
                     profanity_filter: None,
                     enable_word_time_offsets: Some(true),
@@ -1137,8 +1168,8 @@ mod tests {
 
         let expected_request = StartBatchRecognizeRequest {
             config: RecognitionConfig {
-                model: Some("latest_long".to_string()),
-                language_codes: Some(vec!["es-ES".to_string(), "en-US".to_string()]),
+                model: "latest_long".to_string(),
+                language_codes: vec!["es-ES".to_string(), "en-US".to_string()],
                 features: RecognitionFeatures {
                     profanity_filter: None,
                     enable_word_time_offsets: Some(true),
@@ -1241,8 +1272,8 @@ mod tests {
 
         let expected_request = StartBatchRecognizeRequest {
             config: RecognitionConfig {
-                model: Some("medical_conversation".to_string()),
-                language_codes: Some(vec!["en-US".to_string()]),
+                model: "medical_conversation".to_string(),
+                language_codes: vec!["en-US".to_string()],
                 features: RecognitionFeatures {
                     profanity_filter: None,
                     enable_word_time_offsets: Some(true),
@@ -1354,8 +1385,8 @@ mod tests {
 
         let expected_request = StartBatchRecognizeRequest {
             config: RecognitionConfig {
-                model: Some("latest_short".to_string()),
-                language_codes: Some(vec!["en-US".to_string()]),
+                model: "latest_short".to_string(),
+                language_codes: vec!["en-US".to_string()],
                 features: RecognitionFeatures {
                     profanity_filter: None,
                     enable_word_time_offsets: Some(true),
@@ -1473,8 +1504,8 @@ mod tests {
 
         let expected_request = StartBatchRecognizeRequest {
             config: RecognitionConfig {
-                model: Some("latest_long".to_string()),
-                language_codes: Some(vec!["en-US".to_string()]),
+                model: "latest_long".to_string(),
+                language_codes: vec!["en-US".to_string()],
                 features: RecognitionFeatures {
                     profanity_filter: Some(true),
                     enable_word_time_offsets: Some(true),
@@ -1548,7 +1579,7 @@ mod tests {
         assert_eq!(request.method(), "DELETE");
         assert_eq!(
             request.uri().to_string(),
-            format!("https://speech.googleapis.com/v2/{operation_name}")
+            format!("https://us-central1-speech.googleapis.com/v2/{operation_name}")
         );
 
         let auth_header = request
@@ -1652,7 +1683,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(response.done);
+        assert!(response.done.unwrap_or(false));
         assert!(response.response.is_some());
         assert!(response.error.is_none());
 
@@ -1672,7 +1703,7 @@ mod tests {
         assert_eq!(first_poll_request.method(), "GET");
         assert_eq!(
             first_poll_request.uri().to_string(),
-            format!("https://speech.googleapis.com/v2/{operation_name}")
+            format!("https://us-central1-speech.googleapis.com/v2/{operation_name}")
         );
 
         let auth_header = first_poll_request
@@ -1687,7 +1718,7 @@ mod tests {
         assert_eq!(second_poll_request.method(), "GET");
         assert_eq!(
             second_poll_request.uri().to_string(),
-            format!("https://speech.googleapis.com/v2/{operation_name}")
+            format!("https://us-central1-speech.googleapis.com/v2/{operation_name}")
         );
     }
 
@@ -1769,7 +1800,7 @@ mod tests {
         assert_eq!(poll_request.method(), "GET");
         assert_eq!(
             poll_request.uri().to_string(),
-            format!("https://speech.googleapis.com/v2/{operation_name}")
+            format!("https://us-central1-speech.googleapis.com/v2/{operation_name}")
         );
 
         let auth_header = poll_request

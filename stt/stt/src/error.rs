@@ -87,7 +87,7 @@ impl From<Error> for WitSttError {
             Error::APIBadRequest {
                 request_id: _,
                 provider_error,
-            } => WitSttError::InvalidAudio(provider_error),
+            } => WitSttError::TranscriptionFailed(provider_error),
             Error::APIUnauthorized {
                 request_id: _,
                 provider_error,

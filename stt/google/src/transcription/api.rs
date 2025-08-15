@@ -205,7 +205,7 @@ impl<GC: CloudStorageService, ST: SpeechToTextService> SpeechToTextApi<GC, ST> {
 
     async fn run_transcription_job(
         &self,
-        operation_name: &str,
+        request_id: &str,
         gcs_uri: &str,
         audio_config: &super::request::AudioConfig,
         transcription_config: Option<&super::request::TranscriptionConfig>,
@@ -213,7 +213,7 @@ impl<GC: CloudStorageService, ST: SpeechToTextService> SpeechToTextApi<GC, ST> {
         let operation_response = self
             .speech_to_text_service
             .start_batch_recognize(
-                operation_name,
+                request_id,
                 vec![gcs_uri.to_string()],
                 audio_config,
                 transcription_config,
@@ -224,8 +224,8 @@ impl<GC: CloudStorageService, ST: SpeechToTextService> SpeechToTextApi<GC, ST> {
         let completed_operation = self
             .speech_to_text_service
             .wait_for_batch_recognize_completion(
-                operation_response.name.split('/').next_back().unwrap_or(""),
-                operation_name,
+                request_id,
+                &operation_response.name,
                 max_wait_time,
             )
             .await?;
@@ -256,7 +256,11 @@ impl<GC: CloudStorageService, ST: SpeechToTextService>
                 .transcription_config
                 .as_ref()
                 .and_then(|config| config.model.as_ref())
-                .map(|model| model.eq_ignore_ascii_case("short"))
+                .map(|model| {
+                    model.eq_ignore_ascii_case("short")
+                        || model.eq_ignore_ascii_case("latest_short")
+                        || model.eq_ignore_ascii_case("command_and_search")
+                })
                 .unwrap_or(false);
         let gcp_transcription = if use_sync_recognition {
             self.run_synchronous_transcription(
@@ -317,13 +321,23 @@ impl<GC: CloudStorageService, ST: SpeechToTextService>
                     ),
                     })?;
 
-            transcription
-                .inline_result
+            let inline_result =
+                transcription
+                    .inline_result
+                    .ok_or_else(|| golem_stt::error::Error::APIUnknown {
+                        request_id: request_id.to_string(),
+                        provider_error: "Transcription completed but no InlineResult found"
+                            .to_string(),
+                    })?;
+
+            inline_result
+                .transcript
                 .ok_or_else(|| golem_stt::error::Error::APIUnknown {
                     request_id: request_id.to_string(),
-                    provider_error: "Transcription completed but no InlineResult found".to_string(),
+                    provider_error:
+                        "Transcription completed but transcript is empty (no recognition results)"
+                            .to_string(),
                 })?
-                .transcript
         };
 
         // Determine language from response or use the first provided language
@@ -338,7 +352,8 @@ impl<GC: CloudStorageService, ST: SpeechToTextService>
         // Determine model from configuration
         let model = request
             .transcription_config
-            .and_then(|config| config.model.clone());
+            .and_then(|config| config.model.clone())
+            .or(Some("latest_long".to_string()));
 
         Ok(TranscriptionResponse {
             request_id,
@@ -931,7 +946,7 @@ mod tests {
                 total_billed_duration: None,
             }),
             inline_result: Some(InlineResult {
-                transcript: RecognizeResults {
+                transcript: Some(RecognizeResults {
                     results: vec![SpeechRecognitionResult {
                         alternatives: vec![SpeechRecognitionAlternative {
                             transcript: "Hello world".to_string(),
@@ -943,7 +958,7 @@ mod tests {
                         language_code: Some("en-US".to_string()),
                     }],
                     metadata: None,
-                },
+                }),
             }),
         };
 
@@ -952,7 +967,7 @@ mod tests {
         BatchRecognizeOperationResponse {
             name: "operations/test-operation".to_string(),
             metadata: None,
-            done: true,
+            done: Some(true),
             error: None,
             response: Some(BatchRecognizeResponse {
                 results,
@@ -998,7 +1013,7 @@ mod tests {
             .expect_start_batch_recognize_response(Ok(BatchRecognizeOperationResponse {
                 name: "operations/test-operation".to_string(),
                 metadata: None,
-                done: false,
+                done: Some(false),
                 error: None,
                 response: None,
             }));
@@ -1047,7 +1062,7 @@ mod tests {
             .expect_start_batch_recognize_response(Ok(BatchRecognizeOperationResponse {
                 name: "operations/test-operation".to_string(),
                 metadata: None,
-                done: false,
+                done: None,
                 error: None,
                 response: None,
             }));
@@ -1195,7 +1210,7 @@ mod tests {
             .expect_start_batch_recognize_response(Ok(BatchRecognizeOperationResponse {
                 name: "operations/test-operation".to_string(),
                 metadata: None,
-                done: false,
+                done: Some(false),
                 error: None,
                 response: None,
             }));
@@ -1240,7 +1255,8 @@ mod tests {
             .1
             .inline_result
             .unwrap()
-            .transcript;
+            .transcript
+            .unwrap();
 
         let expected_response = TranscriptionResponse {
             request_id: "test-789".to_string(),
@@ -1261,7 +1277,7 @@ mod tests {
             .expect_start_batch_recognize_response(Ok(BatchRecognizeOperationResponse {
                 name: "operations/test-operation".to_string(),
                 metadata: None,
-                done: false,
+                done: Some(false),
                 error: None,
                 response: None,
             }));
@@ -1390,7 +1406,7 @@ mod tests {
             .expect_start_batch_recognize_response(Ok(BatchRecognizeOperationResponse {
                 name: "operations/test-operation".to_string(),
                 metadata: None,
-                done: false,
+                done: None,
                 error: None,
                 response: None,
             }));

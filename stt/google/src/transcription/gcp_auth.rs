@@ -124,7 +124,9 @@ impl<HC: HttpClient> GcpAuth<HC> {
     }
 
     fn parse_private_key(pem_key: &str) -> Result<RsaPrivateKey, Error> {
-        RsaPrivateKey::from_pkcs8_pem(pem_key)
+        let cleaned = pem_key.replace("\\n", "\n");
+
+        RsaPrivateKey::from_pkcs8_pem(&cleaned)
             .map_err(|e| Error::CryptoError(format!("Failed to parse private key: {e}")))
     }
 
