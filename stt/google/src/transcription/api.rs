@@ -234,6 +234,7 @@ impl<GC: CloudStorageService, ST: SpeechToTextService> SpeechToTextApi<GC, ST> {
     }
 }
 
+// implementation based on https://cloud.google.com/speech-to-text/v2/docs/reference/rest
 impl<GC: CloudStorageService, ST: SpeechToTextService>
     SttProviderClient<TranscriptionRequest, TranscriptionResponse, SttError>
     for SpeechToTextApi<GC, ST>
@@ -1017,12 +1018,13 @@ mod tests {
                 error: None,
                 response: None,
             }));
-        // Use the correct response for this specific test case
+
         let expected_response = create_successful_batch_response_for_request(
             "test-123",
             "test-bucket",
             &AudioFormat::Mp3,
         );
+
         api.speech_to_text_service
             .expect_wait_for_completion_response(Ok(expected_response));
         api.cloud_storage_service
@@ -1152,7 +1154,6 @@ mod tests {
 
         let result = api.transcribe_audio(request).await.unwrap();
 
-        // Verify that synchronous recognize was called
         let captured_recognize = api.speech_to_text_service.get_captured_recognize();
         assert_eq!(captured_recognize.len(), 1);
 
@@ -1175,13 +1176,11 @@ mod tests {
         };
         assert_eq!(captured_recognize[0], expected_recognize_op);
 
-        // Verify that no batch operations were called
         let captured_batch = api
             .speech_to_text_service
             .get_captured_start_batch_recognize();
         assert_eq!(captured_batch.len(), 0);
 
-        // Verify that no GCS operations were called
         let captured_puts = api.cloud_storage_service.get_captured_put_operations();
         let captured_deletes = api.cloud_storage_service.get_captured_delete_operations();
         assert_eq!(captured_puts.len(), 0);
@@ -1303,7 +1302,6 @@ mod tests {
 
         let _ = api.transcribe_audio(request).await.unwrap();
 
-        // Verify GCS object was deleted
         let captured_deletes = api.cloud_storage_service.get_captured_delete_operations();
         assert_eq!(captured_deletes.len(), 1);
 

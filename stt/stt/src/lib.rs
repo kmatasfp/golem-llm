@@ -34,7 +34,7 @@ impl LoggingState {
             let max_level: log::LevelFilter = log::LevelFilter::from_str(
                 &std::env::var("STT_PROVIDER_LOG_LEVEL").unwrap_or_default(),
             )
-            .unwrap_or(log::LevelFilter::Trace);
+            .unwrap_or(log::LevelFilter::Warn);
             eprintln!("Setting log level to {max_level}");
             log::set_max_level(max_level);
             self.logging_initialized = true;

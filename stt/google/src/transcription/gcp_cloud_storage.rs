@@ -293,7 +293,6 @@ mod tests {
     async fn test_cloud_storage_put_object_request() {
         let auth_mock_client = MockHttpClient::new();
 
-        // Mock the OAuth token exchange response
         auth_mock_client.expect_response(
                 Response::builder()
                     .status(StatusCode::OK)
@@ -301,7 +300,6 @@ mod tests {
                     .unwrap(),
             );
 
-        // Mock the actual Cloud Storage upload response
         let storage_mock_client = MockHttpClient::new();
         storage_mock_client.expect_response(
             Response::builder()
@@ -362,7 +360,6 @@ mod tests {
     async fn test_cloud_storage_delete_object_request() {
         let auth_mock_client = MockHttpClient::new();
 
-        // Mock the OAuth token exchange response
         auth_mock_client.expect_response(
                 Response::builder()
                     .status(StatusCode::OK)
@@ -371,7 +368,7 @@ mod tests {
             );
 
         let storage_mock_client = MockHttpClient::new();
-        // Mock the actual Cloud Storage delete response
+
         storage_mock_client.expect_response(
             Response::builder()
                 .status(StatusCode::NO_CONTENT)

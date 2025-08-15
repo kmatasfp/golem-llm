@@ -14,7 +14,6 @@ use super::{
     request::{AudioConfig, AudioFormat, TranscriptionConfig},
 };
 
-// New structures for synchronous recognize endpoint
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct RecognizeRequest {
@@ -366,12 +365,12 @@ impl<HC: HttpClient, RT: AsyncRuntime> SpeechToTextClient<HC, RT> {
                 features.profanity_filter = Some(true);
             }
 
-            // Check if multi-channel mode is enabled and model is not "short" or "latest_short"
+            // Check if multi-channel mode is enabled and model is not "short" or "latest_short" or "command_and_search"
             if audio_config.channels.as_ref().is_some_and(|c| *c > 1)
                 && config.enable_multi_channel
                 && !matches!(
                     config.model.as_deref().map(|s| s.to_lowercase()).as_deref(),
-                    Some("short") | Some("latest_short")
+                    Some("short") | Some("latest_short") | Some("command_and_search")
                 )
             {
                 features.multi_channel_mode = Some("SEPARATE_RECOGNITION_PER_CHANNEL".to_string());
@@ -1307,7 +1306,6 @@ mod tests {
     async fn test_start_batch_recognize_with_phrases() {
         let auth_mock_client = MockHttpClient::new();
 
-        // Mock the OAuth token exchange response
         auth_mock_client.expect_response(
                Response::builder()
                    .status(StatusCode::OK)
@@ -1439,7 +1437,6 @@ mod tests {
     async fn test_start_batch_recognize_with_profanity_filter() {
         let auth_mock_client = MockHttpClient::new();
 
-        // Mock the OAuth token exchange response
         auth_mock_client.expect_response(
                Response::builder()
                    .status(StatusCode::OK)
@@ -1539,7 +1536,6 @@ mod tests {
     async fn test_delete_batch_recognize() {
         let auth_mock_client = MockHttpClient::new();
 
-        // Mock the OAuth token exchange response
         auth_mock_client.expect_response(
                 Response::builder()
                     .status(StatusCode::OK)
@@ -1595,7 +1591,6 @@ mod tests {
     async fn test_wait_for_batch_recognize_completion() {
         let auth_mock_client = MockHttpClient::new();
 
-        // Mock the OAuth token exchange response (called multiple times for each polling request)
         auth_mock_client.expect_response(
                 Response::builder()
                     .status(StatusCode::OK)
@@ -1609,8 +1604,7 @@ mod tests {
                 "metadata": {
                     "createTime": "2023-01-01T00:00:00Z",
                     "progressPercent": 25
-                },
-                "done": false
+                }
             }"#;
 
         let speech_mock_client = MockHttpClient::new();
@@ -1696,7 +1690,6 @@ mod tests {
             "First sleep should be 10 seconds"
         );
 
-        // Verify the polling requests were get_batch_recognize calls
         let captured_requests = client.http_client.get_captured_requests();
 
         let first_poll_request = &captured_requests[0];
@@ -1726,7 +1719,6 @@ mod tests {
     async fn test_wait_for_batch_recognize_completion_failure() {
         let auth_mock_client = MockHttpClient::new();
 
-        // Mock the OAuth token exchange response
         auth_mock_client.expect_response(
                 Response::builder()
                     .status(StatusCode::OK)
@@ -1734,7 +1726,6 @@ mod tests {
                     .unwrap(),
             );
 
-        // Mock operation response with error
         let failed_response = r#"{
                 "name": "projects/test-project-id/locations/us-central1/operations/operation-123",
                 "metadata": {
@@ -1825,7 +1816,7 @@ mod tests {
 
         let speech_mock_client = MockHttpClient::new();
         for _ in 0..100 {
-            // Always return IN_PROGRESS to simulate timeout
+            // Always return in progress to simulate timeout
             let in_progress_response = r#"{
                     "name": "projects/test-project-id/locations/us-central1/operations/operation-123",
                     "metadata": {

@@ -383,7 +383,6 @@ impl TryFrom<TranscriptionResponse> for WitTranscriptionResult {
                         .filter(|result| result.channel_tag.unwrap_or(0) == channel_tag)
                         .collect();
 
-                    // Create channel transcript by concatenating all first alternatives' transcripts
                     let channel_transcript = channel_results
                         .iter()
                         .filter_map(|result| {
